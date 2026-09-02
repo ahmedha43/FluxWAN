@@ -274,6 +274,33 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
         strncpy(out_config->auth.session_token, "flux_sec_token_987", sizeof(out_config->auth.session_token) - 1);
     }
 
+    /* Parse NAT46 block */
+    const char *nat46_pos = strstr(json, "\"nat46\"");
+    if (nat46_pos) {
+        out_config->nat46.enabled = extract_json_bool(nat46_pos, "enabled", true);
+        char val[64];
+        if (extract_json_string(nat46_pos, "synthetic_prefix", val, sizeof(val))) {
+            strncpy(out_config->nat46.synthetic_prefix, val, sizeof(out_config->nat46.synthetic_prefix) - 1);
+        } else {
+            strncpy(out_config->nat46.synthetic_prefix, "198.18.0.0/15", sizeof(out_config->nat46.synthetic_prefix) - 1);
+        }
+        if (extract_json_string(nat46_pos, "upstream_dns", val, sizeof(val))) {
+            strncpy(out_config->nat46.upstream_dns, val, sizeof(out_config->nat46.upstream_dns) - 1);
+        } else {
+            strncpy(out_config->nat46.upstream_dns, "1.1.1.1", sizeof(out_config->nat46.upstream_dns) - 1);
+        }
+        if (extract_json_string(nat46_pos, "starlink_wan_name", val, sizeof(val))) {
+            strncpy(out_config->nat46.starlink_wan_name, val, sizeof(out_config->nat46.starlink_wan_name) - 1);
+        } else {
+            strncpy(out_config->nat46.starlink_wan_name, "veth_wan2", sizeof(out_config->nat46.starlink_wan_name) - 1);
+        }
+    } else {
+        out_config->nat46.enabled = true;
+        strncpy(out_config->nat46.synthetic_prefix, "198.18.0.0/15", sizeof(out_config->nat46.synthetic_prefix) - 1);
+        strncpy(out_config->nat46.upstream_dns, "1.1.1.1", sizeof(out_config->nat46.upstream_dns) - 1);
+        strncpy(out_config->nat46.starlink_wan_name, "veth_wan2", sizeof(out_config->nat46.starlink_wan_name) - 1);
+    }
+
     free(json);
     LOG_INFO("Configuration loaded successfully from %s (%u WANs configured)", config_path, out_config->wan_count);
     return 0;
@@ -352,6 +379,12 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
     fprintf(f, "    \"username\": \"%s\",\n", config->auth.username);
     fprintf(f, "    \"password\": \"%s\",\n", config->auth.password);
     fprintf(f, "    \"session_token\": \"%s\"\n", config->auth.session_token);
+    fprintf(f, "  },\n");
+    fprintf(f, "  \"nat46\": {\n");
+    fprintf(f, "    \"enabled\": %s,\n", config->nat46.enabled ? "true" : "false");
+    fprintf(f, "    \"synthetic_prefix\": \"%s\",\n", config->nat46.synthetic_prefix);
+    fprintf(f, "    \"upstream_dns\": \"%s\",\n", config->nat46.upstream_dns);
+    fprintf(f, "    \"starlink_wan_name\": \"%s\"\n", config->nat46.starlink_wan_name);
     fprintf(f, "  }\n");
     fprintf(f, "}\n");
 
@@ -377,6 +410,8 @@ void config_print(const fluxwan_config_t *config) {
     printf("Prober Interval : %ums | Timeout: %ums | Max RTT: %ums\n",
              config->prober.interval_ms, config->prober.timeout_ms, config->prober.max_acceptable_rtt_ms);
     printf("Sticky Sessions : %s (Timeout: %us)\n", config->sticky.enabled ? "ENABLED" : "DISABLED", config->sticky.timeout_seconds);
+    printf("DNS64 / NAT46   : %s (Prefix: %s -> Starlink: %s)\n",
+             config->nat46.enabled ? "ENABLED" : "DISABLED", config->nat46.synthetic_prefix, config->nat46.starlink_wan_name);
     printf("Web Management  : http://%s:%u (Auth: %s)\n", config->web.bind_ip, config->web.port, config->auth.enabled ? "ENABLED" : "DISABLED");
     printf("=======================================================\n");
 }

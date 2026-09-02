@@ -213,6 +213,14 @@ typedef struct {
     char message[256];
 } system_log_entry_t;
 
+/* DNS64 & Stateless NAT46 Configuration */
+typedef struct {
+    bool enabled;
+    char synthetic_prefix[32];
+    char upstream_dns[64];
+    char starlink_wan_name[MAX_IFNAME_LEN];
+} nat46_config_t;
+
 /* Global App Configuration Structure */
 typedef struct {
     lan_config_t lan;
@@ -222,6 +230,7 @@ typedef struct {
     sticky_config_t sticky;
     web_config_t web;
     auth_config_t auth;
+    nat46_config_t nat46;
 } fluxwan_config_t;
 
 /* Helper function prototypes */

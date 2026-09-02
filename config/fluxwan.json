@@ -66,5 +66,11 @@
     "username": "admin",
     "password": "admin",
     "session_token": "flux_token_abc123"
+  },
+  "nat46": {
+    "enabled": true,
+    "synthetic_prefix": "198.18.0.0/15",
+    "upstream_dns": "1.1.1.1",
+    "starlink_wan_name": "veth_wan2"
   }
 }
