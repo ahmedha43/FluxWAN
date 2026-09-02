@@ -88,9 +88,9 @@ jobs:
       - name: Build Full Hybrid Bootable ISO (UEFI + BIOS)
         run: |
           echo "[+] Building full bootable x86_64 ISO image..."
-          mkdir -p dist
-          curl -fSL -o dist/alpine-standard-base.iso https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/x86_64/alpine-standard-3.19.1-x86_64.iso
-          bash scripts/build_iso_embedded.sh
+          make clean
+          make all
+          bash targets/x86_64/build.sh
           cp -f dist/fluxwan-os-x86_64.iso FluxWAN-OS-x86_64-Bootable.iso
 
       - name: Build Standalone x86_64 Appliance Package
