@@ -1,0 +1,31 @@
+﻿[Unit]
+Description=FluxWAN High-Performance Multi-WAN Router & Port Manager Engine
+Documentation=https://github.com/fluxwan/fluxwan
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/fluxwan
+ExecStart=/opt/fluxwan/fluxwan /opt/fluxwan/config/fluxwan.json
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=3s
+
+# Kernel capabilities required for networking, policy routing and BPF
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_SYS_ADMIN CAP_BPF
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_SYS_ADMIN CAP_BPF
+
+# Process limits
+LimitNOFILE=65535
+LimitNPROC=4096
+LimitMEMLOCK=infinity
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fluxwan
+
+[Install]
+WantedBy=multi-user.target

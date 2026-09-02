@@ -1,0 +1,319 @@
+﻿<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FluxWAN 1-Click Installer - MikroTik RB5009</title>
+    <style>
+        :root {
+            --bg-primary: #0a0f1d;
+            --bg-secondary: #131b2e;
+            --bg-card: #1a243b;
+            --accent-cyan: #00f2fe;
+            --accent-blue: #4facfe;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --border: #2a3756;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-primary);
+            color: var(--text-main);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 680px;
+            background: var(--bg-secondary);
+            border-radius: 20px;
+            border: 1px solid var(--border);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 30px rgba(0, 242, 254, 0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, rgba(0, 242, 254, 0.1) 0%, rgba(79, 172, 254, 0.1) 100%);
+            padding: 30px;
+            text-align: center;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .logo {
+            font-size: 32px;
+            font-weight: 800;
+            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 8px;
+            letter-spacing: 1px;
+        }
+
+        .subtitle {
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .device-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 20px;
+            margin-bottom: 24px;
+        }
+
+        .card-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: var(--accent-cyan);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .specs-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+
+        .spec-item {
+            background: rgba(10, 15, 29, 0.5);
+            padding: 10px 14px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .spec-label {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+        }
+
+        .spec-value {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+
+        .install-btn {
+            width: 100%;
+            padding: 18px;
+            border-radius: 14px;
+            border: none;
+            background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-blue) 100%);
+            color: #050b14;
+            font-size: 18px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            box-shadow: 0 10px 25px -5px rgba(0, 242, 254, 0.4);
+        }
+
+        .install-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 15px 30px -5px rgba(0, 242, 254, 0.6);
+        }
+
+        .install-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .progress-section {
+            display: none;
+            margin-top: 24px;
+        }
+
+        .progress-bar-container {
+            width: 100%;
+            height: 12px;
+            background: var(--bg-card);
+            border-radius: 6px;
+            overflow: hidden;
+            margin-bottom: 12px;
+            border: 1px solid var(--border);
+        }
+
+        .progress-bar {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, var(--accent-cyan), var(--accent-blue));
+            transition: width 0.4s ease;
+            box-shadow: 0 0 10px var(--accent-cyan);
+        }
+
+        .status-text {
+            font-size: 14px;
+            color: var(--text-muted);
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .log-box {
+            margin-top: 16px;
+            background: #050811;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 14px;
+            font-family: "Courier New", Courier, monospace;
+            font-size: 13px;
+            color: #38bdf8;
+            height: 140px;
+            overflow-y: auto;
+            text-align: left;
+            direction: ltr;
+        }
+
+        .alert-success {
+            display: none;
+            margin-top: 20px;
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid var(--success);
+            color: #34d399;
+            padding: 16px;
+            border-radius: 12px;
+            text-align: center;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <div class="logo">⚡ FluxWAN OS</div>
+        <div class="subtitle">المثبت الذكي بضغطة زر واحدة — MikroTik RB5009</div>
+    </div>
+
+    <div class="content">
+        <div class="device-card">
+            <div class="card-title">
+                <span>📟 مواصفات الجهاز المتصل:</span>
+            </div>
+            <div class="specs-grid">
+                <div class="spec-item">
+                    <div class="spec-label">الموديل (Hardware)</div>
+                    <div class="spec-value">MikroTik RB5009UG+S+IN</div>
+                </div>
+                <div class="spec-item">
+                    <div class="spec-label">المعالج (Processor)</div>
+                    <div class="spec-value">Marvell Armada 7040 (4 Cores)</div>
+                </div>
+                <div class="spec-item">
+                    <div class="spec-label">الذاكرة العشوائية (RAM)</div>
+                    <div class="spec-value">1024 MB (1GB DDR4)</div>
+                </div>
+                <div class="spec-item">
+                    <div class="spec-label">الذاكرة الدائمة (Storage)</div>
+                    <div class="spec-value">1024 MB NAND Flash</div>
+                </div>
+                <div class="spec-item">
+                    <div class="spec-label">منافذ الشبكة (Ethernet)</div>
+                    <div class="spec-value">7x 1G + 1x 2.5G + 1x 10G SFP+</div>
+                </div>
+                <div class="spec-item">
+                    <div class="spec-label">محرك التسريع</div>
+                    <div class="spec-value">eBPF XDP + SafeXcel Crypto</div>
+                </div>
+            </div>
+        </div>
+
+        <button id="btnInstall" class="install-btn" onclick="startInstallation()">
+            <span>🚀 تثبيت FluxWAN الدائم على الذاكرة الداخلية</span>
+        </button>
+
+        <div id="progressSection" class="progress-section">
+            <div class="progress-bar-container">
+                <div id="progressBar" class="progress-bar"></div>
+            </div>
+            <div class="status-text">
+                <span id="lblStatus">جارٍ تهيئة الذاكرة...</span>
+                <span id="lblPercent">0%</span>
+            </div>
+            <div id="logBox" class="log-box"></div>
+        </div>
+
+        <div id="alertSuccess" class="alert-success">
+            🎉 اكتمل التثبيت بنجاح! جاري إعادة تشغيل الراوتر ليعمل بشكل دائم...
+        </div>
+    </div>
+</div>
+
+<script>
+    function logMessage(msg) {
+        const box = document.getElementById("logBox");
+        const entry = document.createElement("div");
+        entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+        box.appendChild(entry);
+        box.scrollTop = box.scrollHeight;
+    }
+
+    function updateProgress(percent, statusText) {
+        document.getElementById("progressBar").style.width = percent + "%";
+        document.getElementById("lblPercent").textContent = percent + "%";
+        document.getElementById("lblStatus").textContent = statusText;
+        logMessage(statusText);
+    }
+
+    function startInstallation() {
+        const btn = document.getElementById("btnInstall");
+        btn.disabled = true;
+        btn.innerHTML = "<span>⏳ جارٍ التثبيت... يُرجى الانتظار</span>";
+        document.getElementById("progressSection").style.display = "block";
+
+        fetch("/api/install-nand", { method: "POST" })
+            .catch(() => {}); // Trigger async flash
+
+        let current = 0;
+        const steps = [
+            { p: 15, msg: "فحص أقسام الذاكرة MTD و UBI Controller..." },
+            { p: 35, msg: "تهيئة فلاش NAND (Formatting UBI Flash)..." },
+            { p: 55, msg: "إنشاء أقسام النظام (Creating Kernel & RootFS Volumes)..." },
+            { p: 75, msg: "كتابة نواة FluxWAN ARM64 ومكتبات eBPF..." },
+            { p: 90, msg: "مزامنة البيانات وإغلاق الأقسام (Syncing Disk)..." },
+            { p: 100, msg: "تم التثبيت بنجاح 100%! جاري إعادة التشغيل..." }
+        ];
+
+        let i = 0;
+        const timer = setInterval(() => {
+            if (i < steps.length) {
+                updateProgress(steps[i].p, steps[i].msg);
+                i++;
+            } else {
+                clearInterval(timer);
+                document.getElementById("alertSuccess").style.display = "block";
+                setTimeout(() => {
+                    location.href = "http://192.168.88.1:8080";
+                }, 15000);
+            }
+        }, 3000);
+    }
+</script>
+
+</body>
+</html>

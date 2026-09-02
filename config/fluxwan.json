@@ -1,0 +1,70 @@
+{
+  "lan": {
+    "interface": "veth_lan",
+    "ip": "10.10.10.1",
+    "netmask": "255.255.255.0",
+    "dhcp_enabled": true,
+    "dhcp_start": "10.10.10.100",
+    "dhcp_end": "10.10.10.200",
+    "dhcp_lease_time": 43200
+  },
+  "wans": [
+    {
+      "id": 1,
+      "name": "veth_wan1",
+      "label": "WAN1_Fiber_ISP1",
+      "type": "dhcp",
+      "ip": "10.10.1.50",
+      "netmask": "255.255.255.0",
+      "gateway": "10.10.1.1",
+      "weight": 100,
+      "probe_target": "10.10.1.1",
+      "table_id": 101
+    },
+    {
+      "id": 2,
+      "name": "veth_wan2",
+      "label": "WAN2_Starlink_ISP2",
+      "type": "dhcp",
+      "ip": "10.10.2.50",
+      "netmask": "255.255.255.0",
+      "gateway": "10.10.2.1",
+      "weight": 50,
+      "probe_target": "10.10.2.1",
+      "table_id": 102
+    },
+    {
+      "id": 3,
+      "name": "veth_wan3",
+      "label": "WAN3_LTE_ISP3",
+      "type": "dhcp",
+      "ip": "10.10.3.50",
+      "netmask": "255.255.255.0",
+      "gateway": "10.10.3.1",
+      "weight": 75,
+      "probe_target": "10.10.3.1",
+      "table_id": 103
+    }
+  ],
+  "prober": {
+    "interval_ms": 500,
+    "timeout_ms": 1000,
+    "loss_window": 20,
+    "max_acceptable_rtt_ms": 250,
+    "max_acceptable_loss_pct": 20.0
+  },
+  "sticky": {
+    "enabled": true,
+    "timeout_seconds": 300
+  },
+  "web": {
+    "bind_ip": "0.0.0.0",
+    "port": 8080
+  },
+  "auth": {
+    "enabled": true,
+    "username": "admin",
+    "password": "admin",
+    "session_token": "flux_token_abc123"
+  }
+}

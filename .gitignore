@@ -1,0 +1,61 @@
+# ==============================================================================
+# FluxWAN Operating System - Git Ignore
+# ==============================================================================
+
+# Build & Object Files
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Compiled Root Binaries
+/fluxwan
+/fluxwan_lab
+/fluxwan_test
+
+# Cache & Temporary Directories
+.cache/
+build/
+bin/
+obj/
+*.tmp
+*.bak
+*.log
+
+# Kernel, OS & Distribution Binary Images (Large Files > 25MB)
+*.iso
+*.itb
+*.img
+*.dtb
+*.cpio
+*.cpio.gz
+*.apk
+dist/*.iso
+dist/*.itb
+dist/*.tar.gz
+dist/*/*.iso
+dist/*/*.itb
+dist/*/*.tar.gz
+
+# Keep documentation and scripts in dist/
+!dist/**/README.md
+!dist/**/INSTALL.md
+!dist/**/INSTALLATION_GUIDE.md
+!dist/**/*.bat
+!dist/**/*.sh
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE & Editor Files
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db

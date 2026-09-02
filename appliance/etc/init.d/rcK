@@ -1,0 +1,15 @@
+#!/bin/sh
+# ==============================================================================
+# FluxWAN Embedded Network Appliance - Graceful Shutdown Script (/etc/init.d/rcK)
+# ==============================================================================
+
+echo " [*] Stopping FluxWAN services..."
+killall fluxwan 2>/dev/null || true
+sleep 1
+killall -9 fluxwan 2>/dev/null || true
+
+echo " [*] Syncing storage..."
+sync
+
+echo " [*] Unmounting filesystems..."
+umount -a -r 2>/dev/null || true
