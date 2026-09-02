@@ -1,10 +1,17 @@
-name: FluxWAN Continuous Integration
+name: FluxWAN CI & Automated Release Pipeline
 
 on:
   push:
     branches: [ main ]
+    tags:
+      - 'v*'
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
 
 jobs:
   build-and-test:
@@ -44,3 +51,149 @@ jobs:
           cmake ..
           make
           ctest --output-on-failure
+
+  package-and-release:
+    name: Package & Publish Releases (MikroTik RB5009 & x86_64)
+    needs: build-and-test
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Install Cross-Compilers & Packaging Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            gcc \
+            gcc-multilib \
+            gcc-aarch64-linux-gnu \
+            clang \
+            llvm \
+            libbpf-dev \
+            linux-libc-dev \
+            python3 \
+            zip \
+            tar \
+            tree
+
+      # ========================================================================
+      # Build Package 1: x86_64 Bare-Metal Appliance & Standalone Daemon
+      # ========================================================================
+      - name: Build & Package x86_64 Appliance
+        run: |
+          echo "[+] Compiling x86_64 binaries & eBPF bytecode..."
+          make clean
+          make all
+          strip fluxwan fluxwan_lab
+
+          mkdir -p dist_pkg/fluxwan-x86_64/bin
+          mkdir -p dist_pkg/fluxwan-x86_64/bpf
+          mkdir -p dist_pkg/fluxwan-x86_64/config
+          mkdir -p dist_pkg/fluxwan-x86_64/systemd
+
+          cp -f fluxwan dist_pkg/fluxwan-x86_64/bin/
+          cp -f fluxwan_lab dist_pkg/fluxwan-x86_64/bin/
+          cp -f bpf/*.bpf.o dist_pkg/fluxwan-x86_64/bpf/ 2>/dev/null || true
+          cp -f config/fluxwan.json dist_pkg/fluxwan-x86_64/config/
+          cp -f systemd/fluxwan.service dist_pkg/fluxwan-x86_64/systemd/
+          cp -f install.sh dist_pkg/fluxwan-x86_64/
+          cp -f README.md dist_pkg/fluxwan-x86_64/
+          chmod +x dist_pkg/fluxwan-x86_64/install.sh dist_pkg/fluxwan-x86_64/bin/*
+
+          cd dist_pkg
+          zip -r ../FluxWAN-x86_64-Appliance.zip fluxwan-x86_64
+          tar -czvf ../FluxWAN-x86_64-Appliance.tar.gz fluxwan-x86_64
+          cd ..
+
+      # ========================================================================
+      # Build Package 2: MikroTik RB5009 (ARM64) Flash & Container Bundle
+      # ========================================================================
+      - name: Build & Package MikroTik RB5009 (ARM64) Bundle
+        run: |
+          echo "[+] Cross-compiling ARM64 binaries for MikroTik RB5009..."
+          make clean
+          make CC=aarch64-linux-gnu-gcc TARGET=fluxwan LAB_TARGET=fluxwan_lab all
+          aarch64-linux-gnu-strip fluxwan fluxwan_lab
+
+          mkdir -p dist_pkg/fluxwan-mikrotik-rb5009/bin
+          mkdir -p dist_pkg/fluxwan-mikrotik-rb5009/bpf
+          mkdir -p dist_pkg/fluxwan-mikrotik-rb5009/config
+
+          cp -f fluxwan dist_pkg/fluxwan-mikrotik-rb5009/bin/
+          cp -f fluxwan_lab dist_pkg/fluxwan-mikrotik-rb5009/bin/
+          cp -f bpf/*.bpf.o dist_pkg/fluxwan-mikrotik-rb5009/bpf/ 2>/dev/null || true
+          cp -f config/fluxwan.json dist_pkg/fluxwan-mikrotik-rb5009/config/
+
+          # Include RB5009 1-Click Flasher & Documentation
+          if [ -d dist/rb5009 ]; then
+            cp -rf dist/rb5009/* dist_pkg/fluxwan-mikrotik-rb5009/ 2>/dev/null || true
+          fi
+          cp -f README.md dist_pkg/fluxwan-mikrotik-rb5009/
+
+          cd dist_pkg
+          zip -r ../FluxWAN-MikroTik-RB5009-ARM64.zip fluxwan-mikrotik-rb5009
+          tar -czvf ../FluxWAN-MikroTik-RB5009-ARM64.tar.gz fluxwan-mikrotik-rb5009
+          cd ..
+
+      # ========================================================================
+      # Generate Checksums (SHA256)
+      # ========================================================================
+      - name: Generate Checksums
+        run: |
+          sha256sum FluxWAN-*.zip FluxWAN-*.tar.gz > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      # ========================================================================
+      # Determine Release Tag & Details
+      # ========================================================================
+      - name: Set Release Tag
+        id: vars
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            echo "IS_PRERELEASE=false" >> $GITHUB_OUTPUT
+          else
+            echo "TAG_NAME=latest" >> $GITHUB_OUTPUT
+            echo "IS_PRERELEASE=true" >> $GITHUB_OUTPUT
+          fi
+
+      # ========================================================================
+      # Publish to GitHub Releases
+      # ========================================================================
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.TAG_NAME }}
+          name: FluxWAN Production Release (${{ steps.vars.outputs.TAG_NAME }})
+          prerelease: ${{ steps.vars.outputs.IS_PRERELEASE == 'true' }}
+          draft: false
+          files: |
+            FluxWAN-MikroTik-RB5009-ARM64.zip
+            FluxWAN-MikroTik-RB5009-ARM64.tar.gz
+            FluxWAN-x86_64-Appliance.zip
+            FluxWAN-x86_64-Appliance.tar.gz
+            SHA256SUMS.txt
+          body: |
+            ## 🚀 FluxWAN Carrier-Grade Multi-WAN Aggregator & Load Balancer
+
+            ### 📦 الإصدارات وحزم التثبيت المتاحة (Release Packages):
+
+            #### 1️⃣ راوترات مايكروتك MikroTik RB5009 (معمارية ARM64):
+            - **`FluxWAN-MikroTik-RB5009-ARM64.zip`**: حزمة التثبيت الشاملة لراوتر RB5009.
+              - تتضمن أداة الفلاش لويندوز بضغطة زر واحدة `FluxWAN-Windows-Flasher.bat`.
+              - تتضمن الثنائيات المترجمة لمعمارية ARM64 (`fluxwan`, `fluxwan_lab`).
+              - كود النواة `eBPF XDP` المسرع لتوجيه الرزم بسرعة السلك.
+              - دعم كامل لخطوط Starlink IPv6 والـ PPPoE المتعدد.
+
+            #### 2️⃣ أجهزة x86_64 (Bare-Metal & Virtual Appliance):
+            - **`FluxWAN-x86_64-Appliance.zip`**: حزمة التشغيل والتثبيت لسيرفرات وأجهزة x86_64.
+              - سكريبت التثبيت التلقائي `install.sh` وخدمة `systemd/fluxwan.service`.
+              - لوحة التحكم عبر الويب Web UI مع دعم WebSocket اللحظي.
+
+            ---
+
+            ### 🔐 التحقق من سلامة الملفات (Checksums):
+            تجدون تجزئات `SHA-256` لجميع الملفات داخل مرفق `SHA256SUMS.txt`.
