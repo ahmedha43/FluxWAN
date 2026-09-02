@@ -6,7 +6,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DIST_DIR="$PROJECT_ROOT/dist"
 BUILD_DIR="/tmp/fluxwan_iso_build"
 ROOTFS_DIR="$BUILD_DIR/rootfs"
@@ -36,6 +36,12 @@ strip --strip-all "$PROJECT_ROOT/fluxwan" 2>/dev/null || true
 # 2. Extract Kernel & Minimal Hardware Modules
 # ------------------------------------------------------------------------------
 echo "[2/4] Extracting Linux LTS Kernel & Essential Hardware Modules..."
+if [ ! -f "$ALPINE_STD_ISO" ]; then
+    echo "    * Fetching Alpine Linux 3.19 Base ISO..."
+    mkdir -p "$DIST_DIR"
+    curl -sSL "https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/x86_64/alpine-standard-3.19.1-x86_64.iso" -o "$ALPINE_STD_ISO"
+fi
+
 mkdir -p "$BUILD_DIR/iso_extract"
 xorriso -osirrox on -indev "$ALPINE_STD_ISO" -extract / "$BUILD_DIR/iso_extract" >/dev/null 2>&1
 

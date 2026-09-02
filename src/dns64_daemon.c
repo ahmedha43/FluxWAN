@@ -2,9 +2,21 @@
 #include <pthread.h>
 #include <fcntl.h>
 
-#if !defined(_WIN32) && !defined(_WIN64)
+#if defined(__linux__)
 #include <sys/select.h>
-#include <bpf/bpf.h>
+#include <sys/syscall.h>
+#include <linux/bpf.h>
+
+static inline int sys_bpf_map_update_elem(int fd, const void *key, const void *value, uint64_t flags) {
+    union bpf_attr attr;
+    memset(&attr, 0, sizeof(attr));
+    attr.map_fd = fd;
+    attr.key = (uint64_t)(uintptr_t)key;
+    attr.value = (uint64_t)(uintptr_t)value;
+    attr.flags = flags;
+    return syscall(__NR_bpf, BPF_MAP_UPDATE_ELEM, &attr, sizeof(attr));
+}
+#define bpf_map_update_elem sys_bpf_map_update_elem
 #endif
 
 #define SYNTH_START_IP_HOST 0xC6120001 /* 198.18.0.1 */
