@@ -95,6 +95,19 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
     char ip_cmd[512];
     snprintf(ip_cmd, sizeof(ip_cmd), "ip addr replace %s/24 dev %s 2>/dev/null || ip addr add %s/24 dev %s 2>/dev/null; ip link set %s up 2>/dev/null", lan_ip, config->lan.name, lan_ip, config->lan.name, config->lan.name);
     safe_system(ip_cmd);
+
+    /* Apply Secondary LAN Subnet Gateways for Policy Routes */
+    for (uint32_t p = 0; p < config->lan.policy_route_count; p++) {
+        const policy_route_t *pr = &config->lan.policy_routes[p];
+        if (pr->enabled && pr->gateway_ip_str[0]) {
+            char gw_cmd[512];
+            snprintf(gw_cmd, sizeof(gw_cmd), "ip addr add %s/%u dev %s 2>/dev/null || true",
+                     pr->gateway_ip_str, pr->prefix_len > 0 ? pr->prefix_len : 24, config->lan.name);
+            safe_system(gw_cmd);
+            LOG_INFO("[Kernel Netlink] Added Policy Gateway Alias %s/%u on %s (Target Group: %s)",
+                     pr->gateway_ip_str, pr->prefix_len > 0 ? pr->prefix_len : 24, config->lan.name, pr->target_group);
+        }
+    }
 #endif
 
     /* 3. Configure Multi-WAN Interfaces & Policy Tables */

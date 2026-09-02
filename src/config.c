@@ -101,6 +101,33 @@ static const char *find_matching_bracket(const char *start) {
     return NULL;
 }
 
+static inline void parse_cidr_subnet(const char *cidr, uint32_t *out_ip, uint32_t *out_netmask, uint32_t *out_prefix) {
+    if (!cidr || !out_ip || !out_netmask || !out_prefix) return;
+    char ip_buf[32];
+    uint32_t prefix = 24;
+    const char *slash = strchr(cidr, '/');
+    if (slash) {
+        size_t len = slash - cidr;
+        if (len >= sizeof(ip_buf)) len = sizeof(ip_buf) - 1;
+        strncpy(ip_buf, cidr, len);
+        ip_buf[len] = '\0';
+        prefix = (uint32_t)atoi(slash + 1);
+        if (prefix > 32) prefix = 32;
+    } else {
+        safe_str_copy(ip_buf, cidr, sizeof(ip_buf));
+    }
+    *out_ip = str_to_ip(ip_buf);
+    *out_prefix = prefix;
+    if (prefix == 0) {
+        *out_netmask = 0;
+    } else if (prefix == 32) {
+        *out_netmask = 0xFFFFFFFFU;
+    } else {
+        uint32_t mask = (0xFFFFFFFFU << (32 - prefix));
+        *out_netmask = htonl(mask);
+    }
+}
+
 int config_load(const char *config_path, fluxwan_config_t *out_config) {
     if (!config_path || !out_config) return -1;
     memset(out_config, 0, sizeof(fluxwan_config_t));
@@ -135,6 +162,54 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
             out_config->lan.dhcp_end = str_to_ip(val);
         }
         out_config->lan.dhcp_lease_time = extract_json_int(lan_pos, "dhcp_lease_time", 43200);
+
+        /* Parse LAN Policy Routes */
+        const char *policy_pos = strstr(lan_pos, "\"policy_routes\"");
+        if (policy_pos) {
+            const char *array_start = strchr(policy_pos, '[');
+            const char *array_end = find_matching_bracket(array_start);
+            if (array_start && array_end) {
+                const char *p = array_start;
+                uint32_t pr_idx = 0;
+                while (p < array_end && pr_idx < MAX_POLICY_ROUTES) {
+                    const char *obj_start = strchr(p, '{');
+                    if (!obj_start || obj_start > array_end) break;
+                    const char *obj_end = strchr(obj_start, '}');
+                    if (!obj_end || obj_end > array_end) break;
+
+                    size_t obj_len = obj_end - obj_start + 1;
+                    char *obj_str = malloc(obj_len + 1);
+                    if (obj_str) {
+                        strncpy(obj_str, obj_start, obj_len);
+                        obj_str[obj_len] = '\0';
+
+                        policy_route_t *pr = &out_config->lan.policy_routes[pr_idx];
+                        pr->enabled = extract_json_bool(obj_str, "enabled", true);
+
+                        char pval[64];
+                        if (extract_json_string(obj_str, "subnet", pval, sizeof(pval))) {
+                            safe_str_copy(pr->subnet_str, pval, sizeof(pr->subnet_str));
+                            parse_cidr_subnet(pval, &pr->subnet_ip, &pr->netmask, &pr->prefix_len);
+                        }
+                        if (extract_json_string(obj_str, "gateway_ip", pval, sizeof(pval))) {
+                            safe_str_copy(pr->gateway_ip_str, pval, sizeof(pr->gateway_ip_str));
+                            pr->gateway_ip = str_to_ip(pval);
+                        }
+                        if (extract_json_string(obj_str, "target_group", pval, sizeof(pval))) {
+                            safe_str_copy(pr->target_group, pval, sizeof(pr->target_group));
+                        }
+                        if (extract_json_string(obj_str, "description", pval, sizeof(pval))) {
+                            safe_str_copy(pr->description, pval, sizeof(pr->description));
+                        }
+
+                        free(obj_str);
+                        pr_idx++;
+                    }
+                    p = obj_end + 1;
+                }
+                out_config->lan.policy_route_count = pr_idx;
+            }
+        }
     }
 
     /* Parse WANS array */
@@ -310,8 +385,104 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
         safe_str_copy(out_config->nat46.starlink_wan_name, "veth_wan2", sizeof(out_config->nat46.starlink_wan_name));
     }
 
+    /* Parse Groups array */
+    const char *groups_pos = strstr(json, "\"groups\"");
+    if (groups_pos) {
+        const char *array_start = strchr(groups_pos, '[');
+        const char *array_end = find_matching_bracket(array_start);
+        if (array_start && array_end) {
+            const char *p = array_start;
+            uint32_t grp_idx = 0;
+            while (p < array_end && grp_idx < MAX_WAN_GROUPS) {
+                const char *obj_start = strchr(p, '{');
+                if (!obj_start || obj_start > array_end) break;
+                const char *obj_end = strchr(obj_start, '}');
+                if (!obj_end || obj_end > array_end) break;
+
+                size_t obj_len = obj_end - obj_start + 1;
+                char *obj_str = malloc(obj_len + 1);
+                if (obj_str) {
+                    strncpy(obj_str, obj_start, obj_len);
+                    obj_str[obj_len] = '\0';
+
+                    wan_group_t *g = &out_config->groups[grp_idx];
+                    g->id = (uint32_t)extract_json_int(obj_str, "id", grp_idx + 1);
+                    g->enabled = extract_json_bool(obj_str, "enabled", true);
+
+                    char gval[64];
+                    if (extract_json_string(obj_str, "name", gval, sizeof(gval))) {
+                        safe_str_copy(g->name, gval, sizeof(g->name));
+                    } else {
+                        snprintf(g->name, sizeof(g->name), "Group_%u", g->id);
+                    }
+                    if (extract_json_string(obj_str, "description", gval, sizeof(gval))) {
+                        safe_str_copy(g->description, gval, sizeof(g->description));
+                    }
+
+                    /* Parse WANs list in group: "wans": ["WAN1_Earthlink", "WAN2_Zain"] */
+                    const char *gwans_pos = strstr(obj_str, "\"wans\"");
+                    if (gwans_pos) {
+                        const char *gw_start = strchr(gwans_pos, '[');
+                        const char *gw_end = strchr(gwans_pos, ']');
+                        if (gw_start && gw_end && gw_end > gw_start) {
+                            const char *gp = gw_start;
+                            uint32_t w_idx = 0;
+                            while (gp < gw_end && w_idx < MAX_GROUP_MEMBERS) {
+                                const char *q1 = strchr(gp, '"');
+                                if (!q1 || q1 >= gw_end) break;
+                                const char *q2 = strchr(q1 + 1, '"');
+                                if (!q2 || q2 > gw_end) break;
+                                size_t wlen = q2 - (q1 + 1);
+                                if (wlen >= sizeof(g->wan_names[w_idx])) wlen = sizeof(g->wan_names[w_idx]) - 1;
+                                strncpy(g->wan_names[w_idx], q1 + 1, wlen);
+                                g->wan_names[w_idx][wlen] = '\0';
+                                w_idx++;
+                                gp = q2 + 1;
+                            }
+                            g->wan_count = w_idx;
+                        }
+                    }
+
+                    free(obj_str);
+                    grp_idx++;
+                }
+                p = obj_end + 1;
+            }
+            out_config->group_count = grp_idx;
+        }
+    }
+
+    /* Resolve Group IDs and WAN Member Indices */
+    for (uint32_t i = 0; i < out_config->group_count; i++) {
+        wan_group_t *g = &out_config->groups[i];
+        uint32_t active_members = 0;
+        for (uint32_t m = 0; m < g->wan_count; m++) {
+            for (uint32_t w = 0; w < out_config->wan_count; w++) {
+                if (strcmp(g->wan_names[m], out_config->wans[w].label) == 0 ||
+                    strcmp(g->wan_names[m], out_config->wans[w].name) == 0) {
+                    g->wan_member_indices[active_members++] = w;
+                    break;
+                }
+            }
+        }
+        g->active_wan_count = active_members;
+    }
+
+    /* Resolve Policy Route Target Group IDs */
+    for (uint32_t p = 0; p < out_config->lan.policy_route_count; p++) {
+        policy_route_t *pr = &out_config->lan.policy_routes[p];
+        pr->target_group_id = 0; /* Default: Group 0 (All WANs) */
+        for (uint32_t g = 0; g < out_config->group_count; g++) {
+            if (strcmp(pr->target_group, out_config->groups[g].name) == 0) {
+                pr->target_group_id = out_config->groups[g].id;
+                break;
+            }
+        }
+    }
+
     free(json);
-    LOG_INFO("Configuration loaded successfully from %s (%u WANs configured)", config_path, out_config->wan_count);
+    LOG_INFO("Configuration loaded successfully from %s (%u WANs, %u Groups, %u Policy Routes)",
+             config_path, out_config->wan_count, out_config->group_count, out_config->lan.policy_route_count);
     return 0;
 }
 
@@ -334,8 +505,44 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
     fprintf(f, "    \"dhcp_enabled\": %s,\n", config->lan.dhcp_enabled ? "true" : "false");
     fprintf(f, "    \"dhcp_start\": \"%s\",\n", dhcp_start);
     fprintf(f, "    \"dhcp_end\": \"%s\",\n", dhcp_end);
-    fprintf(f, "    \"dhcp_lease_time\": %u\n", config->lan.dhcp_lease_time);
+    fprintf(f, "    \"dhcp_lease_time\": %u", config->lan.dhcp_lease_time);
+
+    if (config->lan.policy_route_count > 0) {
+        fprintf(f, ",\n    \"policy_routes\": [\n");
+        for (uint32_t p = 0; p < config->lan.policy_route_count; p++) {
+            const policy_route_t *pr = &config->lan.policy_routes[p];
+            fprintf(f, "      {\n");
+            fprintf(f, "        \"subnet\": \"%s\",\n", pr->subnet_str);
+            fprintf(f, "        \"gateway_ip\": \"%s\",\n", pr->gateway_ip_str);
+            fprintf(f, "        \"target_group\": \"%s\",\n", pr->target_group);
+            fprintf(f, "        \"description\": \"%s\",\n", pr->description);
+            fprintf(f, "        \"enabled\": %s\n", pr->enabled ? "true" : "false");
+            fprintf(f, "      }%s\n", (p == config->lan.policy_route_count - 1) ? "" : ",");
+        }
+        fprintf(f, "    ]\n");
+    } else {
+        fprintf(f, "\n");
+    }
     fprintf(f, "  },\n");
+
+    if (config->group_count > 0) {
+        fprintf(f, "  \"groups\": [\n");
+        for (uint32_t g = 0; g < config->group_count; g++) {
+            const wan_group_t *grp = &config->groups[g];
+            fprintf(f, "    {\n");
+            fprintf(f, "      \"id\": %u,\n", grp->id);
+            fprintf(f, "      \"name\": \"%s\",\n", grp->name);
+            fprintf(f, "      \"description\": \"%s\",\n", grp->description);
+            fprintf(f, "      \"wans\": [");
+            for (uint32_t w = 0; w < grp->wan_count; w++) {
+                fprintf(f, "\"%s\"%s", grp->wan_names[w], (w == grp->wan_count - 1) ? "" : ", ");
+            }
+            fprintf(f, "],\n");
+            fprintf(f, "      \"enabled\": %s\n", grp->enabled ? "true" : "false");
+            fprintf(f, "    }%s\n", (g == config->group_count - 1) ? "" : ",");
+        }
+        fprintf(f, "  ],\n");
+    }
 
     fprintf(f, "  \"wans\": [\n");
     for (uint32_t i = 0; i < config->wan_count; i++) {

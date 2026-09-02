@@ -58,6 +58,8 @@ struct bpf_loader_ctx {
     int fd_percpu_stats;   /* wan_percpu_stats  PERCPU_ARRAY */
     int fd_ctrl_map;       /* ctrl_map          ARRAY[1]     */
     int fd_global_stats;   /* global_stats_map  PERCPU_ARRAY */
+    int fd_policy_route;   /* policy_route_map  ARRAY[16]    */
+    int fd_maglev_group;   /* maglev_group_map  ARRAY[8*65537] */
 
     /* State */
     bool    is_attached;
@@ -101,6 +103,8 @@ bpf_loader_ctx_t *bpf_loader_init(const char *bpf_obj_path) {
     ctx->fd_percpu_stats = -1;
     ctx->fd_ctrl_map     = -1;
     ctx->fd_global_stats = -1;
+    ctx->fd_policy_route = -1;
+    ctx->fd_maglev_group = -1;
     ctx->num_cpus = get_num_cpus();
 
     const char *path = bpf_obj_path ? bpf_obj_path : BPF_OBJ_DEFAULT;
@@ -123,9 +127,11 @@ bpf_loader_ctx_t *bpf_loader_init(const char *bpf_obj_path) {
         goto simulation_mode;
     }
 
-    if (bpf_object__load(ctx->obj) != 0) {
-        LOG_WARN("[BPF Loader] bpf_object__load failed (%s) — simulation mode",
-                 strerror(errno));
+    /* Set map max entries dynamically before load if needed */
+    int err = bpf_object__load(ctx->obj);
+    if (err) {
+        LOG_WARN("[BPF Loader] bpf_object__load failed: %d (%s) — simulation mode",
+                 err, strerror(-err));
         bpf_object__close(ctx->obj);
         ctx->obj = NULL;
         goto simulation_mode;
@@ -157,10 +163,18 @@ bpf_loader_ctx_t *bpf_loader_init(const char *bpf_obj_path) {
     ctx->fd_ctrl_map = m ? bpf_map__fd(m) : -1;
 
     m = bpf_object__find_map_by_name(ctx->obj, "global_stats_map");
-    LOG_INFO("[BPF Loader] XDP object loaded. Maps: maglev(%d) wan(%d) sticky(%d) stats(%d) ctrl(%d) gstats(%d)",
+    ctx->fd_global_stats = m ? bpf_map__fd(m) : -1;
+
+    m = bpf_object__find_map_by_name(ctx->obj, "policy_route_map");
+    ctx->fd_policy_route = m ? bpf_map__fd(m) : -1;
+
+    m = bpf_object__find_map_by_name(ctx->obj, "maglev_group_map");
+    ctx->fd_maglev_group = m ? bpf_map__fd(m) : -1;
+
+    LOG_INFO("[BPF Loader] XDP object loaded. Maps: maglev(%d) wan(%d) sticky(%d) stats(%d) ctrl(%d) policy(%d) grp(%d)",
              ctx->fd_maglev_lut, ctx->fd_wan_table,
              ctx->fd_sticky_flow, ctx->fd_percpu_stats,
-             ctx->fd_ctrl_map, ctx->fd_global_stats);
+             ctx->fd_ctrl_map, ctx->fd_policy_route, ctx->fd_maglev_group);
 
     LOG_INFO("[BPF Loader] Initialized. CPUs=%d, Object=%s",
              ctx->num_cpus, ctx->bpf_obj_path);
@@ -433,13 +447,56 @@ int bpf_loader_get_global_stats(bpf_loader_ctx_t *ctx, void *out_stats) {
     }
 #endif
 
-    /* Simulation fallback */
     struct router_global_stats *out = (struct router_global_stats *)out_stats;
     memset(out, 0, sizeof(struct router_global_stats));
     out->total_rx_packets = 10240;
     out->total_rx_bytes   = 10240 * 128;
     out->total_sticky_hits = 8000;
     out->total_maglev_dispatches = 2240;
+    return 0;
+}
+
+int bpf_loader_update_policy_routes(bpf_loader_ctx_t *ctx, const policy_route_t *routes, uint32_t count) {
+    if (!ctx) return -1;
+#ifdef HAVE_LIBBPF
+    if (ctx->fd_policy_route >= 0) {
+        for (uint32_t i = 0; i < 16; i++) {
+            struct {
+                uint32_t subnet_ip;
+                uint32_t netmask;
+                uint32_t target_group;
+                uint32_t is_active;
+            } entry;
+            memset(&entry, 0, sizeof(entry));
+            if (routes && i < count && routes[i].enabled) {
+                entry.subnet_ip = routes[i].subnet_ip;
+                entry.netmask = routes[i].netmask;
+                entry.target_group = routes[i].target_group_id;
+                entry.is_active = 1;
+            }
+            uint32_t key = i;
+            bpf_map_update_elem(ctx->fd_policy_route, &key, &entry, BPF_ANY);
+        }
+    }
+#endif
+    (void)routes;
+    (void)count;
+    return 0;
+}
+
+int bpf_loader_update_group_maglev_lut(bpf_loader_ctx_t *ctx, uint32_t group_id, const uint32_t *lut, uint32_t ring_size) {
+    if (!ctx || !lut || group_id >= 8) return -1;
+#ifdef HAVE_LIBBPF
+    if (ctx->fd_maglev_group >= 0) {
+        uint32_t base = group_id * MAGLEV_RING_SIZE;
+        for (uint32_t i = 0; i < ring_size && i < MAGLEV_RING_SIZE; i++) {
+            uint32_t key = base + i;
+            uint32_t val = lut[i];
+            bpf_map_update_elem(ctx->fd_maglev_group, &key, &val, BPF_ANY);
+        }
+    }
+#endif
+    (void)ring_size;
     return 0;
 }
 

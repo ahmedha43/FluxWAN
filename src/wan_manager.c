@@ -114,24 +114,32 @@ static uint64_t murmurhash3_x64_64(uint64_t A, uint64_t B, uint32_t seed) {
 #define KHASH_SEED2 42
 #define KHASH_SEED3 2718281828U
 
-static int wan_manager_generate_maglev_lut(wan_manager_ctx_t *ctx) {
-    if (!ctx) return -1;
+static void build_single_maglev_ring(const fluxwan_config_t *config,
+                                     const uint32_t *member_indices,
+                                     uint32_t member_count,
+                                     uint32_t *out_lut) {
+    if (!config || !out_lut || member_count == 0) {
+        if (out_lut) {
+            for (uint32_t i = 0; i < MAGLEV_RING_SIZE; i++) out_lut[i] = 0;
+        }
+        return;
+    }
 
-    uint32_t count = ctx->config->wan_count;
-    if (count == 0) return 0;
-
-    uint32_t *lut = ctx->maglev_lut;
     for (uint32_t i = 0; i < MAGLEV_RING_SIZE; i++) {
-        lut[i] = 0xFFFFFFFF;
+        out_lut[i] = 0xFFFFFFFF;
     }
 
     uint32_t permutation[MAX_WANS * 2];
     uint32_t next[MAX_WANS];
     uint32_t weights[MAX_WANS];
-    uint32_t active_wans = 0;
+    uint32_t active_members = 0;
+    uint32_t first_active_idx = member_indices[0];
 
-    for (uint32_t i = 0; i < count; i++) {
-        const wan_config_t *w = &ctx->config->wans[i];
+    for (uint32_t m = 0; m < member_count; m++) {
+        uint32_t w_idx = member_indices[m];
+        if (w_idx >= config->wan_count) continue;
+        const wan_config_t *w = &config->wans[w_idx];
+
         uint64_t wan_hash = 0x811c9dc5ULL;
         for (const char *p = w->name; *p; p++) {
             wan_hash = (wan_hash * 33) ^ (uint8_t)*p;
@@ -140,42 +148,42 @@ static int wan_manager_generate_maglev_lut(wan_manager_ctx_t *ctx) {
         uint64_t offset_hash = murmurhash3_x64_64(wan_hash, KHASH_SEED2, KHASH_SEED0);
         uint64_t skip_hash = murmurhash3_x64_64(wan_hash, KHASH_SEED3, KHASH_SEED1);
 
-        permutation[2 * i] = (uint32_t)(offset_hash % MAGLEV_RING_SIZE);
-        permutation[2 * i + 1] = (uint32_t)((skip_hash % (MAGLEV_RING_SIZE - 1)) + 1);
-        next[i] = 0;
+        permutation[2 * m] = (uint32_t)(offset_hash % MAGLEV_RING_SIZE);
+        permutation[2 * m + 1] = (uint32_t)((skip_hash % (MAGLEV_RING_SIZE - 1)) + 1);
+        next[m] = 0;
 
         if (w->enabled && w->state != WAN_STATE_DOWN && w->dynamic_weight > 0) {
-            weights[i] = w->dynamic_weight;
-            active_wans++;
+            weights[m] = w->dynamic_weight;
+            if (active_members == 0) first_active_idx = w_idx;
+            active_members++;
         } else {
-            weights[i] = 0;
+            weights[m] = 0;
         }
     }
 
-    if (active_wans == 0) {
-        for (uint32_t i = 0; i < MAGLEV_RING_SIZE; i++) lut[i] = 0;
-        if (ctx->bpf) bpf_loader_update_maglev_lut(ctx->bpf, lut, MAGLEV_RING_SIZE);
-        return 0;
+    if (active_members == 0) {
+        for (uint32_t i = 0; i < MAGLEV_RING_SIZE; i++) out_lut[i] = member_indices[0];
+        return;
     }
 
     uint32_t runs = 0;
     while (runs < MAGLEV_RING_SIZE) {
         bool progress = false;
-        for (uint32_t i = 0; i < count; i++) {
-            if (weights[i] == 0) continue;
-            uint32_t offset = permutation[2 * i];
-            uint32_t skip = permutation[2 * i + 1];
+        for (uint32_t m = 0; m < member_count; m++) {
+            if (weights[m] == 0) continue;
+            uint32_t offset = permutation[2 * m];
+            uint32_t skip = permutation[2 * m + 1];
+            uint32_t w_idx = member_indices[m];
 
-            /* Katran weighted allocation loop */
-            uint32_t step_weight = (weights[i] + 9) / 10;
+            uint32_t step_weight = (weights[m] + 9) / 10;
             if (step_weight == 0) step_weight = 1;
 
             for (uint32_t j = 0; j < step_weight && runs < MAGLEV_RING_SIZE; j++) {
-                while (next[i] < MAGLEV_RING_SIZE) {
-                    uint32_t cur = (offset + next[i] * skip) % MAGLEV_RING_SIZE;
-                    next[i]++;
-                    if (lut[cur] == 0xFFFFFFFF) {
-                        lut[cur] = i;
+                while (next[m] < MAGLEV_RING_SIZE) {
+                    uint32_t cur = (offset + next[m] * skip) % MAGLEV_RING_SIZE;
+                    next[m]++;
+                    if (out_lut[cur] == 0xFFFFFFFF) {
+                        out_lut[cur] = w_idx;
                         runs++;
                         progress = true;
                         break;
@@ -185,21 +193,50 @@ static int wan_manager_generate_maglev_lut(wan_manager_ctx_t *ctx) {
         }
         if (!progress && runs < MAGLEV_RING_SIZE) {
             for (uint32_t i = 0; i < MAGLEV_RING_SIZE; i++) {
-                if (lut[i] == 0xFFFFFFFF) {
-                    lut[i] = 0;
+                if (out_lut[i] == 0xFFFFFFFF) {
+                    out_lut[i] = first_active_idx;
                     runs++;
                 }
             }
             break;
         }
     }
+}
 
-    LOG_INFO("[Katran Maglev Engine] Generated %u-slot lookup ring for %u active WANs",
-             MAGLEV_RING_SIZE, active_wans);
+static int wan_manager_generate_maglev_lut(wan_manager_ctx_t *ctx) {
+    if (!ctx) return -1;
+
+    uint32_t count = ctx->config->wan_count;
+    if (count == 0) return 0;
+
+    /* 1. Build Default Maglev Ring (All WANs) */
+    uint32_t all_indices[MAX_WANS];
+    for (uint32_t i = 0; i < count; i++) all_indices[i] = i;
+    build_single_maglev_ring(ctx->config, all_indices, count, ctx->maglev_lut);
 
     if (ctx->bpf) {
-        bpf_loader_update_maglev_lut(ctx->bpf, lut, MAGLEV_RING_SIZE);
+        bpf_loader_update_maglev_lut(ctx->bpf, ctx->maglev_lut, MAGLEV_RING_SIZE);
     }
+
+    /* 2. Build Independent Maglev Rings for each WAN Group */
+    for (uint32_t g = 0; g < ctx->config->group_count; g++) {
+        wan_group_t *grp = &ctx->config->groups[g];
+        if (grp->wan_count > 0) {
+            build_single_maglev_ring(ctx->config, grp->wan_member_indices, grp->wan_count, grp->maglev_ring);
+            if (ctx->bpf) {
+                bpf_loader_update_group_maglev_lut(ctx->bpf, grp->id, grp->maglev_ring, MAGLEV_RING_SIZE);
+            }
+        }
+    }
+
+    /* 3. Sync LAN Policy Routes to BPF */
+    if (ctx->bpf) {
+        bpf_loader_update_policy_routes(ctx->bpf,
+                                       ctx->config->lan.policy_routes,
+                                       ctx->config->lan.policy_route_count);
+    }
+
+    LOG_INFO("[Katran Maglev Engine] Generated default ring and %u WAN group rings", ctx->config->group_count);
     return 0;
 }
 

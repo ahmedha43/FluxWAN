@@ -173,6 +173,37 @@ typedef struct {
     char dns_servers[64];         /* e.g. "1.1.1.1, 8.8.8.8" */
 } wan_config_t;
 
+#define MAX_WAN_GROUPS 8
+#define MAX_POLICY_ROUTES 16
+#define MAX_GROUP_MEMBERS 8
+
+/* Policy Route Definition (Multi-Subnet LAN to WAN Group Binding) */
+typedef struct {
+    char subnet_str[32];           /* e.g. "10.10.20.0/24" */
+    uint32_t subnet_ip;            /* Network byte order: e.g. 10.10.20.0 */
+    uint32_t netmask;              /* Network byte order: e.g. 255.255.255.0 */
+    uint32_t prefix_len;          /* e.g. 24 */
+    char gateway_ip_str[32];       /* e.g. "10.10.20.1" */
+    uint32_t gateway_ip;          /* Network byte order */
+    char target_group[32];         /* e.g. "Starlink_Fleet", "Iraq_Local" */
+    uint32_t target_group_id;      /* 0=Default/All, 1, 2... */
+    char description[64];
+    bool enabled;
+} policy_route_t;
+
+/* WAN Group Definition (Independent Maglev Ring & Health Domain) */
+typedef struct {
+    uint32_t id;                                /* Group ID (0=Default/All_WANs, 1, 2...) */
+    char name[32];                              /* Group Name: e.g. "Starlink_Fleet", "Iraq_Local" */
+    char description[64];
+    char wan_names[MAX_GROUP_MEMBERS][MAX_LABEL_LEN]; /* Names of WAN interfaces assigned */
+    uint32_t wan_member_indices[MAX_GROUP_MEMBERS];   /* Indices in wans[] array */
+    uint32_t wan_count;                         /* Total WANs configured in this group */
+    uint32_t active_wan_count;                  /* Currently active WANs in this group */
+    uint32_t maglev_ring[MAGLEV_RING_SIZE];     /* Dedicated Maglev Consistent Hash ring */
+    bool enabled;
+} wan_group_t;
+
 /* LAN Interface Definition */
 typedef struct {
     char name[MAX_IFNAME_LEN];
@@ -183,6 +214,8 @@ typedef struct {
     uint32_t dhcp_end;
     uint32_t dhcp_lease_time;
     int ifindex;
+    policy_route_t policy_routes[MAX_POLICY_ROUTES];
+    uint32_t policy_route_count;
 } lan_config_t;
 
 /* Prober Configuration */
@@ -236,6 +269,8 @@ typedef struct {
     lan_config_t lan;
     wan_config_t wans[MAX_WANS];
     uint32_t wan_count;
+    wan_group_t groups[MAX_WAN_GROUPS];
+    uint32_t group_count;
     prober_config_t prober;
     sticky_config_t sticky;
     web_config_t web;

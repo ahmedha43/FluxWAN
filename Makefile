@@ -45,6 +45,8 @@ TEST_WAN = test_wan_validator
 TEST_PPPOE = test_pppoe_manager
 TEST_NAT46 = test_live_nat46_translation
 TEST_XDP = test_xdp_packet
+TEST_GROUPS = test_wan_groups
+TEST_POLICY = test_policy_routing
 
 all: ui bpf $(TARGET) $(LAB_TARGET)
 
@@ -80,7 +82,13 @@ $(TEST_NAT46): tests/test_live_nat46_translation.c
 $(TEST_XDP): tests/xdp_packet_test.c src/config.c src/wan_manager.c src/netlink_manager.c src/bpf_loader.c src/prober.c src/sticky.c src/net_discovery.c src/pppoe_manager.c src/dhcp_server.c src/net_apply.c src/dns64_daemon.c
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
 
-test: $(TEST_WAN) $(TEST_PPPOE) $(TEST_NAT46) $(TEST_XDP) $(LAB_TARGET)
+$(TEST_GROUPS): tests/test_wan_groups.c src/config.c src/wan_manager.c src/netlink_manager.c src/bpf_loader.c src/prober.c src/sticky.c src/net_discovery.c src/pppoe_manager.c src/dhcp_server.c src/net_apply.c src/dns64_daemon.c
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
+
+$(TEST_POLICY): tests/test_policy_routing.c src/config.c src/wan_manager.c src/netlink_manager.c src/bpf_loader.c src/prober.c src/sticky.c src/net_discovery.c src/pppoe_manager.c src/dhcp_server.c src/net_apply.c src/dns64_daemon.c
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
+
+test: $(TEST_WAN) $(TEST_PPPOE) $(TEST_NAT46) $(TEST_XDP) $(TEST_GROUPS) $(TEST_POLICY) $(LAB_TARGET)
 	@echo "================================================================"
 	@echo "   Running FluxWAN Automated Test Suites                        "
 	@echo "================================================================"
@@ -92,6 +100,10 @@ test: $(TEST_WAN) $(TEST_PPPOE) $(TEST_NAT46) $(TEST_XDP) $(LAB_TARGET)
 	@echo ""
 	./$(TEST_XDP)
 	@echo ""
+	./$(TEST_GROUPS)
+	@echo ""
+	./$(TEST_POLICY)
+	@echo ""
 	./$(LAB_TARGET)
 	@echo ""
 	@echo "================================================================"
@@ -99,7 +111,7 @@ test: $(TEST_WAN) $(TEST_PPPOE) $(TEST_NAT46) $(TEST_XDP) $(LAB_TARGET)
 	@echo "================================================================"
 
 clean:
-	rm -f $(OBJS) $(LAB_OBJS) $(TARGET) $(LAB_TARGET) $(TEST_WAN) $(TEST_PPPOE) $(TEST_NAT46) $(TEST_XDP) bpf/*.o include/ui_assets.h
+	rm -f $(OBJS) $(LAB_OBJS) $(TARGET) $(LAB_TARGET) $(TEST_WAN) $(TEST_PPPOE) $(TEST_NAT46) $(TEST_XDP) $(TEST_GROUPS) $(TEST_POLICY) bpf/*.o include/ui_assets.h
 
 real-lab: $(TARGET)
 	@echo "Running Real Linux Network Lab (requires root)..."

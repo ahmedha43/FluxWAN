@@ -196,6 +196,31 @@ struct {
     __type(value, struct bpf_wan_stats);
 } wan_percpu_stats_map SEC(".maps");
 
+/* 5. Policy Subnet Route Map */
+#define MAX_BPF_POLICIES 16
+struct bpf_policy_entry {
+    uint32_t subnet_ip;    /* Network byte order */
+    uint32_t netmask;      /* Network byte order */
+    uint32_t target_group; /* Group ID */
+    uint32_t is_active;
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, MAX_BPF_POLICIES);
+    __type(key, uint32_t);
+    __type(value, struct bpf_policy_entry);
+} policy_route_map SEC(".maps");
+
+/* 6. WAN Group Maglev Rings (Group ID * MAGLEV_RING_SIZE + slot) */
+#define MAX_BPF_GROUPS 8
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, MAX_BPF_GROUPS * MAGLEV_RING_SIZE);
+    __type(key, uint32_t);
+    __type(value, uint32_t);
+} maglev_group_map SEC(".maps");
+
 /* =========================================================================
  * HASH FUNCTION
  * Katran uses murmurhash3 in userspace for Maglev ring generation.
@@ -472,9 +497,31 @@ int xdp_router_func(struct xdp_md *ctx) {
 
     /* ── 5. Maglev Consistent Hash Dispatch ────────────────────────────── */
     if (need_dispatch) {
-        uint32_t ring_slot = flow_hash % MAGLEV_RING_SIZE;
+        /* Policy Route Subnet Lookup (Match client src_ip) */
+        uint32_t target_group_id = 0;
+        #pragma unroll
+        for (int p = 0; p < MAX_BPF_POLICIES; p++) {
+            uint32_t pkey = p;
+            struct bpf_policy_entry *pe = bpf_map_lookup_elem(&policy_route_map, &pkey);
+            if (pe && pe->is_active && pe->netmask != 0) {
+                if ((key.src_ip & pe->netmask) == pe->subnet_ip) {
+                    target_group_id = pe->target_group;
+                    break;
+                }
+            }
+        }
 
-        uint32_t *picked = bpf_map_lookup_elem(&maglev_lut_map, &ring_slot);
+        uint32_t ring_slot = flow_hash % MAGLEV_RING_SIZE;
+        uint32_t *picked = NULL;
+
+        if (target_group_id > 0 && target_group_id < MAX_BPF_GROUPS) {
+            uint32_t gslot = (target_group_id * MAGLEV_RING_SIZE) + ring_slot;
+            picked = bpf_map_lookup_elem(&maglev_group_map, &gslot);
+        }
+        if (!picked) {
+            picked = bpf_map_lookup_elem(&maglev_lut_map, &ring_slot);
+        }
+
         if (picked && *picked < MAX_EBPF_WANS) {
             target_wan_idx = *picked;
         } else {

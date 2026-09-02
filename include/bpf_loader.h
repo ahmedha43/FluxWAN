@@ -53,6 +53,16 @@ int bpf_loader_update_ctrl_map(bpf_loader_ctx_t *ctx, uint32_t lan_ip,
                               uint32_t debug_enabled);
 
 /**
+ * Update Policy Routing Subnet Map in BPF
+ */
+int bpf_loader_update_policy_routes(bpf_loader_ctx_t *ctx, const policy_route_t *routes, uint32_t count);
+
+/**
+ * Update WAN Group Maglev Ring in BPF
+ */
+int bpf_loader_update_group_maglev_lut(bpf_loader_ctx_t *ctx, uint32_t group_id, const uint32_t *lut, uint32_t ring_size);
+
+/**
  * Fetch aggregated global router statistics across all CPU cores
  */
 int bpf_loader_get_global_stats(bpf_loader_ctx_t *ctx, void *out_stats);
