@@ -43,6 +43,7 @@ if [ ! -f "$ALPINE_STD_ISO" ]; then
 fi
 mkdir -p "$BUILD_DIR/iso_extract"
 xorriso -osirrox on -indev "$ALPINE_STD_ISO" -extract / "$BUILD_DIR/iso_extract" >/dev/null 2>&1
+chmod -R u+w "$BUILD_DIR" 2>/dev/null || true
 
 mkdir -p "$BUILD_DIR/modloop_unpacked"
 unsquashfs -d "$BUILD_DIR/modloop_unpacked" "$BUILD_DIR/iso_extract/boot/modloop-lts" >/dev/null 2>&1 || true
@@ -200,8 +201,10 @@ echo "[4/4] Generating Hybrid Bootable ISO (UEFI + BIOS)..."
 
 # Copy entire original Alpine ISO structure (includes apks/, .boot_repository, efi/, boot/)
 cp -a "$BUILD_DIR/iso_extract/." "$ISO_DIR/"
+chmod -R u+w "$ISO_DIR" 2>/dev/null || true
 
 # Replace modloop with our optimized/filtered modloop
+rm -f "$ISO_DIR/boot/modloop-lts" 2>/dev/null || true
 cp -f "$BUILD_DIR/modloop-lts" "$ISO_DIR/boot/modloop-lts"
 
 # Place FluxWAN overlay into ISO root and /opt
