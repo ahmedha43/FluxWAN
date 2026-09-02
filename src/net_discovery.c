@@ -38,6 +38,15 @@ static void read_sysfs_string(const char *ifname, const char *attr_name, char *o
     fclose(f);
 }
 
+static inline void safe_str_copy(char *dst, const char *src, size_t max_len) {
+    if (!dst || max_len == 0) return;
+    if (!src) { dst[0] = '\0'; return; }
+    size_t slen = strlen(src);
+    if (slen >= max_len) slen = max_len - 1;
+    memcpy(dst, src, slen);
+    dst[slen] = '\0';
+}
+
 static void read_ipv6_addr(const char *ifname, char *out_v6, size_t max_len) {
     out_v6[0] = '\0';
     FILE *f = fopen("/proc/net/if_inet6", "r");
@@ -60,12 +69,14 @@ static void read_ipv6_addr(const char *ifname, char *out_v6, size_t max_len) {
 
                 struct in6_addr a6;
                 char compressed[64];
+                char tmp[64];
                 if (inet_pton(AF_INET6, formatted, &a6) > 0 &&
                     inet_ntop(AF_INET6, &a6, compressed, sizeof(compressed))) {
-                    snprintf(out_v6, max_len, "%s/%u", compressed, plen);
+                    snprintf(tmp, sizeof(tmp), "%s/%u", compressed, plen);
                 } else {
-                    snprintf(out_v6, max_len, "%s/%u", formatted, plen);
+                    snprintf(tmp, sizeof(tmp), "%s/%u", formatted, plen);
                 }
+                safe_str_copy(out_v6, tmp, max_len);
                 break;
             }
         }
@@ -132,7 +143,7 @@ int net_discovery_scan(const fluxwan_config_t *config, iface_discovery_result_t 
         if (strcmp(entry->d_name, "lo") == 0) continue; /* Ignore loopback */
 
         physical_interface_t *p = &out_result->interfaces[out_result->count];
-        strncpy(p->name, entry->d_name, sizeof(p->name) - 1);
+        safe_str_copy(p->name, entry->d_name, sizeof(p->name));
 
         /* Read MAC address */
         read_sysfs_string(p->name, "address", p->mac_addr, sizeof(p->mac_addr));

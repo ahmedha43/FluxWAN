@@ -29,7 +29,10 @@ static char *read_file_to_string(const char *filepath) {
 static inline void safe_str_copy(char *dst, const char *src, size_t max_len) {
     if (!dst || max_len == 0) return;
     if (!src) { dst[0] = '\0'; return; }
-    snprintf(dst, max_len, "%s", src);
+    size_t slen = strlen(src);
+    if (slen >= max_len) slen = max_len - 1;
+    memcpy(dst, src, slen);
+    dst[slen] = '\0';
 }
 
 static const char *extract_json_string(const char *json, const char *key, char *out_val, size_t max_len) {

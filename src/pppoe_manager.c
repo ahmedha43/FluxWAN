@@ -24,6 +24,24 @@
 #define PPPOE_INITIAL_BACKOFF_S 15
 #define PPPOE_MAX_BACKOFF_S     120
 
+static inline void safe_str_copy(char *dst, const char *src, size_t max_len) {
+    if (!dst || max_len == 0) return;
+    if (!src) { dst[0] = '\0'; return; }
+    size_t slen = strlen(src);
+    if (slen >= max_len) slen = max_len - 1;
+    memcpy(dst, src, slen);
+    dst[slen] = '\0';
+}
+
+#if defined(__linux__)
+static inline int safe_system(const char *cmd) {
+    if (!cmd || cmd[0] == '\0') return -1;
+    int rc = system(cmd);
+    (void)rc;
+    return rc;
+}
+#endif
+
 static uint64_t get_now_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -97,7 +115,7 @@ static bool get_ppp_interface_ip(const char *ifname, uint32_t *out_ip, uint32_t 
 
     if (strlen(gw_buf) == 0) {
         /* Fallback peer gateway detection */
-        snprintf(gw_buf, sizeof(gw_buf), "%s", ip_buf);
+        safe_str_copy(gw_buf, ip_buf, sizeof(gw_buf));
         char *last_dot = strrchr(gw_buf, '.');
         if (last_dot) {
             *(last_dot + 1) = '1';
@@ -108,17 +126,17 @@ static bool get_ppp_interface_ip(const char *ifname, uint32_t *out_ip, uint32_t 
     struct in_addr addr;
     if (inet_pton(AF_INET, ip_buf, &addr) == 1) {
         *out_ip = ntohl(addr.s_addr);
-        if (out_ip_str) snprintf(out_ip_str, 20, "%s", ip_buf);
+        if (out_ip_str) safe_str_copy(out_ip_str, ip_buf, 20);
     } else {
         return false;
     }
 
     if (inet_pton(AF_INET, gw_buf, &addr) == 1) {
         *out_gw = ntohl(addr.s_addr);
-        if (out_gw_str) snprintf(out_gw_str, 20, "%s", gw_buf);
+        if (out_gw_str) safe_str_copy(out_gw_str, gw_buf, 20);
     } else {
         *out_gw = *out_ip;
-        if (out_gw_str) snprintf(out_gw_str, 20, "%s", ip_buf);
+        if (out_gw_str) safe_str_copy(out_gw_str, ip_buf, 20);
     }
 
     return true;
@@ -173,14 +191,14 @@ int pppoe_session_start(pppoe_manager_ctx_t *pctx, int wan_index, const wan_conf
 
     char cmd[256];
     snprintf(cmd, sizeof(cmd), "ip link delete %s 2>/dev/null || true", sess->macvlan_ifname);
-    system(cmd);
+    safe_system(cmd);
 
     snprintf(cmd, sizeof(cmd), "ip link add link %s name %s address %s type macvlan mode private 2>/dev/null",
              wan->name, sess->macvlan_ifname, sess->virtual_mac);
-    system(cmd);
+    safe_system(cmd);
 
     snprintf(cmd, sizeof(cmd), "ip link set %s up 2>/dev/null", sess->macvlan_ifname);
-    system(cmd);
+    safe_system(cmd);
 
     LOG_INFO("[PPPoE WAN%d] Preparing PPPoE Dialing on Virtual MACVLAN: %s (Parent: %s | Unique MAC: %s | User: %s)...",
              wan_index + 1, sess->macvlan_ifname, wan->name, sess->virtual_mac, wan->ppp_username);
@@ -371,10 +389,7 @@ void pppoe_manager_tick(pppoe_manager_ctx_t *pctx,
         /* State Machine Transitions */
         switch (sess->state) {
             case PPPOE_STATE_IDLE:
-                /* Start dialing immediately if enabled */
-                if (w->enabled) {
-                    pppoe_session_start(pctx, (int)i, w);
-                }
+                pppoe_session_start(pctx, (int)i, w);
                 break;
 
             case PPPOE_STATE_DIALING:
@@ -385,8 +400,8 @@ void pppoe_manager_tick(pppoe_manager_ctx_t *pctx,
                 if (get_ppp_interface_ip(sess->ppp_ifname, &ip, &gw, ip_str, gw_str)) {
                     sess->assigned_ip = ip;
                     sess->remote_ip = gw;
-                    snprintf(sess->assigned_ip_str, sizeof(sess->assigned_ip_str), "%s", ip_str);
-                    snprintf(sess->remote_ip_str, sizeof(sess->remote_ip_str), "%s", gw_str);
+                    safe_str_copy(sess->assigned_ip_str, ip_str, sizeof(sess->assigned_ip_str));
+                    safe_str_copy(sess->remote_ip_str, gw_str, sizeof(sess->remote_ip_str));
                     sess->state = PPPOE_STATE_CONNECTED;
                     sess->connected_since_ms = now_ms;
                     sess->backoff_s = PPPOE_INITIAL_BACKOFF_S;
@@ -399,7 +414,7 @@ void pppoe_manager_tick(pppoe_manager_ctx_t *pctx,
                     w->ip_addr = htonl(ip);
                     w->gateway = htonl(gw);
                     w->netmask = htonl(0xFFFFFFFF); /* /32 Point-to-point */
-                    snprintf(w->probe_target, sizeof(w->probe_target), "%s", gw_str);
+                    safe_str_copy(w->probe_target, gw_str, sizeof(w->probe_target));
                     w->probe_target_ip = htonl(gw);
 
                     if (on_connected) {
