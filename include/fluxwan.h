@@ -136,11 +136,12 @@ typedef struct {
     char label[MAX_LABEL_LEN];
     wan_type_t type;
     
-    /* IPv4 Configuration */
+    /* IPv4 & IPv6 Configuration */
     uint32_t ip_addr;       /* Network byte order */
     uint32_t netmask;       /* Network byte order */
     uint32_t gateway;       /* Network byte order */
     uint32_t dns[2];        /* Network byte order */
+    char ip6_addr[48];      /* e.g. "2a02:cb40:1000::1/64" */
     
     /* PPPoE specific */
     char ppp_username[64];

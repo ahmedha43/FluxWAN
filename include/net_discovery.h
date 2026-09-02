@@ -34,6 +34,7 @@ typedef struct {
     /* Current Assigned IP */
     uint32_t current_ip;
     uint32_t current_netmask;
+    char ip6_addr[48];        /* e.g. "2a02:cb40:1000::1/64" */
 } physical_interface_t;
 
 typedef struct {

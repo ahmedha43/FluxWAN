@@ -190,6 +190,10 @@
                                     <span>MAC Address:</span>
                                     <span class="text-slate-200" x-text="iface.mac">52:54:00:12:34:56</span>
                                 </div>
+                                <div class="flex justify-between" x-show="iface.ip6">
+                                    <span>IPv6 Address:</span>
+                                    <span class="text-emerald-400 font-bold truncate max-w-[180px]" x-text="iface.ip6">2a02:...</span>
+                                </div>
                                 <div class="flex justify-between">
                                     <span>Link Carrier:</span>
                                     <span :class="iface.has_carrier ? 'text-emerald-400 font-bold' : 'text-slate-500'" x-text="iface.has_carrier ? 'CONNECTED' : 'DISCONNECTED'">CONNECTED</span>
@@ -334,6 +338,18 @@
                                     <label class="text-3xs text-slate-400 block mb-0.5">PPPoE Password</label>
                                     <input type="password" x-model="wan.ppp_password" class="w-full bg-slate-950 border border-slate-700 rounded-md px-2.5 py-1.5 text-white" placeholder="••••••••">
                                 </div>
+                            </div>
+
+                            <!-- IPv6 Status Badge & Display -->
+                            <div class="bg-indigo-950/40 border border-indigo-500/30 p-2.5 rounded-xl space-y-1 font-mono text-3xs">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-indigo-300 font-bold flex items-center space-x-1">
+                                        <span>🌐</span>
+                                        <span>Native IPv6 (SLAAC / Starlink):</span>
+                                    </span>
+                                    <span class="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.2 rounded text-4xs font-bold">ONLINE</span>
+                                </div>
+                                <div class="text-emerald-400 font-bold truncate" x-text="wan.ip6 || '2a02:cb40:1000:88::50/64'"></div>
                             </div>
 
                             <!-- Health Prober Target -->

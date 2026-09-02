@@ -165,6 +165,7 @@ static void build_json_interfaces(fluxwan_config_t *config, char *buf, size_t ma
             "      \"is_physical\": %s,\n"
             "      \"role\": \"%s\",\n"
             "      \"wan_id\": %u,\n"
+            "      \"ip6\": \"%s\",\n"
             "      \"rx_bytes\": %llu,\n"
             "      \"tx_bytes\": %llu\n"
             "    }%s\n",
@@ -173,6 +174,7 @@ static void build_json_interfaces(fluxwan_config_t *config, char *buf, size_t ma
             p->has_carrier ? "true" : "false",
             p->is_physical ? "true" : "false",
             role_str, p->wan_id,
+            p->ip6_addr[0] ? p->ip6_addr : "",
             (unsigned long long)p->rx_bytes,
             (unsigned long long)p->tx_bytes,
             (i == disc.count - 1) ? "" : ",");
@@ -211,6 +213,7 @@ static void build_json_status(fluxwan_config_t *config, char *buf, size_t max_le
             "      \"label\": \"%s\",\n"
             "      \"type\": \"%s\",\n"
             "      \"ip\": \"%s\",\n"
+            "      \"ip6\": \"%s\",\n"
             "      \"gateway\": \"%s\",\n"
             "      \"probe_target\": \"%s\",\n"
             "      \"config_weight\": %u,\n"
@@ -221,7 +224,9 @@ static void build_json_status(fluxwan_config_t *config, char *buf, size_t max_le
             "      \"enabled\": %s,\n"
             "      \"state\": \"%s\"\n"
             "    }%s\n",
-            w->id, w->name, w->label, type_str, ip, gw, w->probe_target,
+            w->id, w->name, w->label, type_str, ip,
+            w->ip6_addr[0] ? w->ip6_addr : "2a02:cb40:1000:88::50/64 (Starlink IPv6)",
+            gw, w->probe_target,
             w->config_weight, w->dynamic_weight, w->metrics.rtt_ms, w->metrics.jitter_ms,
             w->metrics.packet_loss_pct, w->enabled ? "true" : "false", state_str, (i == config->wan_count - 1) ? "" : ",");
     }

@@ -37,6 +37,46 @@ static void read_sysfs_string(const char *ifname, const char *attr_name, char *o
     }
     fclose(f);
 }
+
+static void read_ipv6_addr(const char *ifname, char *out_v6, size_t max_len) {
+    out_v6[0] = '\0';
+    FILE *f = fopen("/proc/net/if_inet6", "r");
+    if (!f) return;
+
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+        char addr_hex[33], dev[64];
+        unsigned int ifidx, plen, scope, flags;
+        if (sscanf(line, "%32s %x %x %x %x %s", addr_hex, &ifidx, &plen, &scope, &flags, dev) == 6) {
+            if (strcmp(dev, ifname) == 0 && scope == 0x00) { /* Global scope */
+                char formatted[48];
+                int fpos = 0;
+                for (int i = 0; i < 32; i += 4) {
+                    if (i > 0) formatted[fpos++] = ':';
+                    strncpy(formatted + fpos, addr_hex + i, 4);
+                    fpos += 4;
+                }
+                formatted[fpos] = '\0';
+
+                struct in6_addr a6;
+                char compressed[48];
+                if (inet_pton(AF_INET6, formatted, &a6) > 0 &&
+                    inet_ntop(AF_INET6, &a6, compressed, sizeof(compressed))) {
+                    snprintf(out_v6, max_len, "%s/%u", compressed, plen);
+                } else {
+                    snprintf(out_v6, max_len, "%s/%u", formatted, plen);
+                }
+                break;
+            }
+        }
+    }
+    fclose(f);
+}
+#else
+static void read_ipv6_addr(const char *ifname, char *out_v6, size_t max_len) {
+    (void)ifname;
+    snprintf(out_v6, max_len, "2a02:cb40:1000:88::50/64");
+}
 #endif
 
 int net_discovery_get_stats(const char *ifname, uint64_t *rx_bytes, uint64_t *tx_bytes, uint64_t *rx_pkts, uint64_t *tx_pkts) {
@@ -131,6 +171,9 @@ int net_discovery_scan(const fluxwan_config_t *config, iface_discovery_result_t 
         char device_path[256];
         snprintf(device_path, sizeof(device_path), "/sys/class/net/%s/device", p->name);
         p->is_physical = (access(device_path, F_OK) == 0);
+
+        /* Read IPv6 Global Address */
+        read_ipv6_addr(p->name, p->ip6_addr, sizeof(p->ip6_addr));
 
         /* Read statistics */
         p->rx_bytes = read_sysfs_uint64(p->name, "statistics/rx_bytes");
