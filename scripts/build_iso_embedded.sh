@@ -230,17 +230,23 @@ chmod +x "$BUILD_DIR/initramfs_unpacked/usr/local/bin/"* "$BUILD_DIR/initramfs_u
 find "$BUILD_DIR/initramfs_unpacked" -type f \( -name "*.sh" -o -name "fluxwan-*" -o -name "inittab" -o -name "*.cfg" \) -exec sed -i 's/\r$//' {} + 2>/dev/null || true
 (cd "$BUILD_DIR/initramfs_unpacked" && find . | cpio -H newc -o | gzip -9 > "$ISO_DIR/boot/initramfs-lts")
 
-# Configure Syslinux / ISOLINUX boot (Legacy BIOS)
+# Copy Syslinux / ISOLINUX boot (Legacy BIOS)
 cat <<'EOF' > "$ISO_DIR/boot/syslinux/syslinux.cfg"
-TIMEOUT 10
+TIMEOUT 30
 PROMPT 0
 DEFAULT fluxwan
 
 LABEL fluxwan
-  MENU LABEL FluxWAN Embedded Network Appliance
+  MENU LABEL FluxWAN Multi-WAN Router (Live System & Setup)
   KERNEL /boot/vmlinuz-lts
   INITRD /boot/initramfs-lts
   APPEND modules=loop,squashfs,sd-mod,usb-storage,sr-mod,cdrom,isofs console=tty0 console=ttyS0,115200
+
+LABEL safe
+  MENU LABEL FluxWAN Multi-WAN Router (Safe Mode / VESA)
+  KERNEL /boot/vmlinuz-lts
+  INITRD /boot/initramfs-lts
+  APPEND modules=loop,squashfs,sd-mod,usb-storage,sr-mod,cdrom,isofs nomodeset console=tty0 console=ttyS0,115200
 EOF
 
 # Ensure isolinux.cfg also points to the same configuration
@@ -248,11 +254,16 @@ cp -f "$ISO_DIR/boot/syslinux/syslinux.cfg" "$ISO_DIR/boot/syslinux/isolinux.cfg
 
 # Configure GRUB boot (UEFI)
 cat <<'EOF' > "$ISO_DIR/boot/grub/grub.cfg"
-set timeout=2
+set timeout=3
 set default=0
 
-menuentry "FluxWAN Embedded Network Appliance" {
+menuentry "FluxWAN Multi-WAN Router (Live System & Setup)" {
     linux /boot/vmlinuz-lts modules=loop,squashfs,sd-mod,usb-storage,sr-mod,cdrom,isofs console=tty0 console=ttyS0,115200
+    initrd /boot/initramfs-lts
+}
+
+menuentry "FluxWAN Multi-WAN Router (Safe Mode / VESA)" {
+    linux /boot/vmlinuz-lts modules=loop,squashfs,sd-mod,usb-storage,sr-mod,cdrom,isofs nomodeset console=tty0 console=ttyS0,115200
     initrd /boot/initramfs-lts
 }
 EOF

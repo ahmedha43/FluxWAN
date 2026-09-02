@@ -1,0 +1,382 @@
+#!/bin/sh
+# ==============================================================================
+# FluxWAN Embedded Network Appliance - Universal Hard Disk / NVMe / VM Installer
+# Supports:
+#   - Physical Bare-Metal SATA SSD/HDD (/dev/sdX)
+#   - High-Speed NVMe PCIe Storage (/dev/nvmeXnX)
+#   - Virtual Machines: VMware SCSI, VirtualBox, Proxmox/KVM VirtIO (/dev/vdX)
+#   - Dual Boot Architecture: UEFI (GPT + ESP) & Legacy BIOS (MBR + GRUB)
+# ==============================================================================
+set -e
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+clear
+echo -e "${CYAN}======================================================================${NC}"
+echo -e "${CYAN}      ⚡ FluxWAN Multi-WAN Appliance - Production Disk Installer     ${NC}"
+echo -e "${CYAN}======================================================================${NC}"
+echo ""
+
+# 1. Root Permission Check
+if [ "$(id -u)" -ne 0 ]; then
+    echo -e "${RED}[!] ERROR: This installer must be run as root.${NC}" >&2
+    exit 1
+fi
+
+# Parse CLI arguments
+AUTO_DISK=""
+AUTO_CONFIRM=0
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --disk|-d)
+            AUTO_DISK="$2"
+            shift 2
+            ;;
+        --yes|-y)
+            AUTO_CONFIRM=1
+            shift
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+# 2. Check and Install Required Tools
+echo -e "${BLUE}[1/6] Checking required storage and partition tools...${NC}"
+MISSING_TOOLS=""
+for tool in sfdisk mkfs.ext4 partx blkid; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        MISSING_TOOLS="$MISSING_TOOLS $tool"
+    fi
+done
+
+if [ -n "$MISSING_TOOLS" ]; then
+    echo -e "${YELLOW}[*] Installing missing utilities: $MISSING_TOOLS...${NC}"
+    apk add --quiet sfdisk e2fsprogs dosfstools partx blkid util-linux grub-bios 2>/dev/null || true
+fi
+
+# 3. Detect Firmware Boot Mode (UEFI vs Legacy BIOS)
+IS_UEFI=0
+if [ -d "/sys/firmware/efi" ]; then
+    IS_UEFI=1
+    echo -e "    * Firmware Mode : ${GREEN}${BOLD}UEFI 64-bit (GPT + ESP Partition Table)${NC}"
+else
+    echo -e "    * Firmware Mode : ${YELLOW}${BOLD}Legacy BIOS / CSM (MBR Partition Table)${NC}"
+fi
+
+# 4. Storage Device Discovery
+echo -e "${BLUE}[2/6] Scanning available storage drives...${NC}"
+DISKS_LIST=""
+DISK_COUNT=0
+
+for block_dev in $(ls /sys/block/ 2>/dev/null); do
+    case "$block_dev" in
+        sd*|nvme*|vd*|hd*|xvd*)
+            RO=$(cat "/sys/block/$block_dev/ro" 2>/dev/null || echo 1)
+            if [ "$RO" = "0" ]; then
+                SIZE_SECTORS=$(cat "/sys/block/$block_dev/size" 2>/dev/null || echo 0)
+                SIZE_MB=$((SIZE_SECTORS * 512 / 1024 / 1024))
+                MODEL=$(cat "/sys/block/$block_dev/device/model" 2>/dev/null || echo "Generic Storage")
+                MODEL=$(echo "$MODEL" | sed 's/^[ \t]*//;s/[ \t]*$//')
+                [ -z "$MODEL" ] && MODEL="Internal Storage Device"
+                
+                # Filter out tiny loopback/RAM drives < 500MB
+                if [ "$SIZE_MB" -gt 500 ]; then
+                    DISK_COUNT=$((DISK_COUNT + 1))
+                    DISKS_LIST="$DISKS_LIST /dev/$block_dev"
+                    echo -e "    [$DISK_COUNT] ${BOLD}/dev/$block_dev${NC} - $MODEL (${SIZE_MB} MB / $(awk "BEGIN {printf \"%.1f\", $SIZE_MB/1024}") GB)"
+                fi
+            fi
+            ;;
+    esac
+done
+
+if [ "$DISK_COUNT" -eq 0 ]; then
+    echo -e "${RED}[!] FATAL: No writable hard disk or NVMe drive found on this system!${NC}" >&2
+    exit 1
+fi
+
+TARGET_DEV=""
+if [ -n "$AUTO_DISK" ]; then
+    TARGET_DEV="$AUTO_DISK"
+elif [ "$DISK_COUNT" -eq 1 ]; then
+    TARGET_DEV=$(echo "$DISKS_LIST" | awk '{print $1}')
+    echo -e "    * Automatically selected single available drive: ${GREEN}${BOLD}$TARGET_DEV${NC}"
+else
+    echo ""
+    printf "Enter target drive path (e.g. /dev/sda, /dev/nvme0n1, /dev/vda): "
+    read -r TARGET_DEV
+fi
+
+if [ ! -b "$TARGET_DEV" ]; then
+    echo -e "${RED}[!] ERROR: Invalid block device $TARGET_DEV${NC}" >&2
+    exit 1
+fi
+
+if [ "$AUTO_CONFIRM" -ne 1 ]; then
+    echo ""
+    echo -e "${RED}${BOLD}======================================================================${NC}"
+    echo -e "${RED}${BOLD}  WARNING: ALL DATA ON $TARGET_DEV WILL BE PERMANENTLY ERASED!        ${NC}"
+    echo -e "${RED}${BOLD}======================================================================${NC}"
+    printf "Type 'YES' to format and install FluxWAN to $TARGET_DEV: "
+    read -r CONFIRM
+    if [ "$CONFIRM" != "YES" ] && [ "$CONFIRM" != "yes" ]; then
+        echo -e "${YELLOW}[*] Installation aborted by user.${NC}"
+        exit 0
+    fi
+fi
+
+# 5. Partitioning and Formatting
+echo -e "${BLUE}[3/6] Partitioning target drive $TARGET_DEV...${NC}"
+
+# Unmount any existing partitions on target
+for p in $(ls /dev/$(basename "$TARGET_DEV")* 2>/dev/null); do
+    umount -f "$p" 2>/dev/null || true
+    swapoff "$p" 2>/dev/null || true
+done
+
+# Wipe existing partition signatures
+dd if=/dev/zero of="$TARGET_DEV" bs=1M count=16 conv=notrunc status=none 2>/dev/null || true
+
+if [ "$IS_UEFI" -eq 1 ]; then
+    echo "    * Creating GPT Partition Table (512MB EFI ESP + Ext4 Root)..."
+    cat << 'EOF' | sfdisk --quiet "$TARGET_DEV" >/dev/null 2>&1
+label: gpt
+size=512MiB, type=U, name="EFI System Partition"
+size=+, type=L, name="FluxWAN Root"
+EOF
+else
+    echo "    * Creating MBR Partition Table (Bootable Ext4 Root)..."
+    cat << 'EOF' | sfdisk --quiet "$TARGET_DEV" >/dev/null 2>&1
+label: dos
+size=+, type=83, bootable
+EOF
+fi
+
+# Inform kernel of partition table changes
+partx -u "$TARGET_DEV" 2>/dev/null || true
+blockdev --rereadpt "$TARGET_DEV" 2>/dev/null || true
+sleep 1
+
+# Detect partition naming (e.g. sda1 vs nvme0n1p1)
+if [ -b "${TARGET_DEV}p1" ]; then
+    PART_PREFIX="${TARGET_DEV}p"
+else
+    PART_PREFIX="${TARGET_DEV}"
+fi
+
+EFI_PART=""
+if [ "$IS_UEFI" -eq 1 ]; then
+    EFI_PART="${PART_PREFIX}1"
+    ROOT_PART="${PART_PREFIX}2"
+    echo -e "    * Formatting EFI Partition ($EFI_PART as FAT32)..."
+    mkfs.vfat -F 32 -n "FLUX_EFI" "$EFI_PART" >/dev/null 2>&1 || mkfs.fat -F 32 "$EFI_PART" >/dev/null 2>&1
+else
+    ROOT_PART="${PART_PREFIX}1"
+fi
+
+echo -e "    * Formatting Root Partition ($ROOT_PART as Ext4)..."
+mkfs.ext4 -F -q -L "FLUXWAN_ROOT" "$ROOT_PART"
+
+# 6. Deploying Filesystem & Kernel
+echo -e "${BLUE}[4/6] Deploying FluxWAN Embedded Operating System...${NC}"
+MOUNT_DIR="/tmp/fluxwan_install_target"
+umount -f "$MOUNT_DIR" 2>/dev/null || true
+rm -rf "$MOUNT_DIR"
+mkdir -p "$MOUNT_DIR"
+
+mount "$ROOT_PART" "$MOUNT_DIR"
+
+# Create standard Linux root directory structure
+mkdir -p "$MOUNT_DIR/bin" "$MOUNT_DIR/sbin" "$MOUNT_DIR/lib" "$MOUNT_DIR/etc" \
+         "$MOUNT_DIR/usr/bin" "$MOUNT_DIR/usr/sbin" "$MOUNT_DIR/usr/lib" \
+         "$MOUNT_DIR/usr/local/bin" "$MOUNT_DIR/opt/fluxwan/config" "$MOUNT_DIR/opt/fluxwan/bpf" \
+         "$MOUNT_DIR/boot" "$MOUNT_DIR/root" "$MOUNT_DIR/dev" "$MOUNT_DIR/proc" \
+         "$MOUNT_DIR/sys" "$MOUNT_DIR/tmp" "$MOUNT_DIR/run" "$MOUNT_DIR/var/log" "$MOUNT_DIR/var/run"
+
+echo -e "    * Copying core system binaries and libraries..."
+cp -a /bin/* "$MOUNT_DIR/bin/" 2>/dev/null || true
+cp -a /sbin/* "$MOUNT_DIR/sbin/" 2>/dev/null || true
+cp -a /lib/* "$MOUNT_DIR/lib/" 2>/dev/null || true
+cp -a /etc/* "$MOUNT_DIR/etc/" 2>/dev/null || true
+cp -a /usr/bin/* "$MOUNT_DIR/usr/bin/" 2>/dev/null || true
+cp -a /usr/sbin/* "$MOUNT_DIR/usr/sbin/" 2>/dev/null || true
+cp -a /usr/lib/* "$MOUNT_DIR/usr/lib/" 2>/dev/null || true
+cp -a /usr/local/bin/* "$MOUNT_DIR/usr/local/bin/" 2>/dev/null || true
+chmod +x "$MOUNT_DIR/usr/local/bin/"* 2>/dev/null || true
+
+# Copy FluxWAN engine and BPF objects
+echo -e "    * Copying FluxWAN Reactor Daemon & Web Control Plane..."
+if [ -d /opt/fluxwan ]; then
+    cp -a /opt/fluxwan/* "$MOUNT_DIR/opt/fluxwan/" 2>/dev/null || true
+fi
+chmod +x "$MOUNT_DIR/opt/fluxwan/fluxwan" 2>/dev/null || true
+
+# Locate live media boot files
+LIVE_BOOT_DIR=""
+for candidate in /media/*/boot /media/sr0/boot /media/cdrom/boot /boot; do
+    if [ -f "$candidate/vmlinuz-lts" ]; then
+        LIVE_BOOT_DIR="$candidate"
+        break
+    fi
+done
+
+echo -e "    * Copying Linux LTS Kernel & Driver Modloop..."
+if [ -n "$LIVE_BOOT_DIR" ]; then
+    cp -f "$LIVE_BOOT_DIR/vmlinuz-lts" "$MOUNT_DIR/boot/"
+    cp -f "$LIVE_BOOT_DIR/initramfs-lts" "$MOUNT_DIR/boot/"
+    [ -f "$LIVE_BOOT_DIR/modloop-lts" ] && cp -f "$LIVE_BOOT_DIR/modloop-lts" "$MOUNT_DIR/boot/"
+fi
+
+# Ensure kernel modules are unpacked in /lib/modules
+if [ -d /lib/modules ]; then
+    cp -a /lib/modules/* "$MOUNT_DIR/lib/modules/" 2>/dev/null || true
+fi
+
+# Generate /etc/fstab with UUIDs
+ROOT_UUID=$(blkid -s UUID -o value "$ROOT_PART" 2>/dev/null || echo "")
+if [ -n "$ROOT_UUID" ]; then
+    ROOT_SPEC="UUID=$ROOT_UUID"
+else
+    ROOT_SPEC="$ROOT_PART"
+fi
+
+if [ "$IS_UEFI" -eq 1 ] && [ -n "$EFI_PART" ]; then
+    EFI_UUID=$(blkid -s UUID -o value "$EFI_PART" 2>/dev/null || echo "")
+    if [ -n "$EFI_UUID" ]; then
+        EFI_SPEC="UUID=$EFI_UUID"
+    else
+        EFI_SPEC="$EFI_PART"
+    fi
+else
+    EFI_SPEC="# no-efi"
+fi
+
+cat << EOF > "$MOUNT_DIR/etc/fstab"
+# /etc/fstab: Static file system table for FluxWAN Appliance
+$ROOT_SPEC               /               ext4        defaults,noatime,rw         0       1
+EOF
+
+if [ "$IS_UEFI" -eq 1 ]; then
+    echo "$EFI_SPEC               /boot/efi       vfat        defaults,noatime            0       2" >> "$MOUNT_DIR/etc/fstab"
+fi
+
+cat << 'EOF' >> "$MOUNT_DIR/etc/fstab"
+tmpfs                       /tmp            tmpfs       defaults,nosuid,nodev       0       0
+tmpfs                       /run            tmpfs       mode=0755,nosuid,nodev      0       0
+devpts                      /dev/pts        devpts      gid=5,mode=620              0       0
+proc                        /proc           proc        defaults                    0       0
+sysfs                       /sys            sysfs       defaults                    0       0
+EOF
+
+# 7. Installing GRUB Bootloader
+echo -e "${BLUE}[5/6] Installing GRUB Bootloader to $TARGET_DEV...${NC}"
+
+if [ "$IS_UEFI" -eq 1 ]; then
+    echo "    * Setting up GRUB EFI Bootloader..."
+    mkdir -p "$MOUNT_DIR/boot/efi/EFI/BOOT"
+    mount "$EFI_PART" "$MOUNT_DIR/boot/efi" 2>/dev/null || true
+
+    for efi_binary in /boot/efi/EFI/BOOT/BOOTX64.EFI /media/*/efi/boot/bootx64.efi /usr/lib/grub/x86_64-efi/monolithic/grubx64.efi; do
+        if [ -f "$efi_binary" ]; then
+            cp -f "$efi_binary" "$MOUNT_DIR/boot/efi/EFI/BOOT/BOOTX64.EFI" 2>/dev/null || true
+            break
+        fi
+    done
+
+    cat << EOF > "$MOUNT_DIR/boot/efi/EFI/BOOT/grub.cfg"
+set default=0
+set timeout=3
+set timeout_style=menu
+menuentry "FluxWAN Multi-WAN Router Appliance" {
+    linux /boot/vmlinuz-lts root=$ROOT_SPEC rw quiet loglevel=3 console=tty0 console=ttyS0,115200
+    initrd /boot/initramfs-lts
+}
+menuentry "FluxWAN (Safe Mode / Verbose)" {
+    linux /boot/vmlinuz-lts root=$ROOT_SPEC rw debug verbose console=tty0 console=ttyS0,115200
+    initrd /boot/initramfs-lts
+}
+EOF
+    cp -f "$MOUNT_DIR/boot/efi/EFI/BOOT/grub.cfg" "$MOUNT_DIR/boot/grub/grub.cfg" 2>/dev/null || true
+    umount "$MOUNT_DIR/boot/efi" 2>/dev/null || true
+else
+    echo "    * Installing GRUB2 to MBR on $TARGET_DEV..."
+    mkdir -p "$MOUNT_DIR/boot/grub"
+
+    cat << EOF > "$MOUNT_DIR/boot/grub/grub.cfg"
+set default=0
+set timeout=3
+set timeout_style=menu
+menuentry "FluxWAN Multi-WAN Router Appliance" {
+    linux /boot/vmlinuz-lts root=$ROOT_SPEC rootfstype=ext4 rw quiet loglevel=3 console=tty0 console=ttyS0,115200
+    initrd /boot/initramfs-lts
+}
+menuentry "FluxWAN (Safe Mode / Verbose)" {
+    linux /boot/vmlinuz-lts root=$ROOT_SPEC rootfstype=ext4 rw debug verbose console=tty0 console=ttyS0,115200
+    initrd /boot/initramfs-lts
+}
+EOF
+
+    GRUB_OK=0
+    if command -v grub-install >/dev/null 2>&1; then
+        grub-install --target=i386-pc --recheck --boot-directory="$MOUNT_DIR/boot" "$TARGET_DEV" 2>/dev/null && GRUB_OK=1 || true
+    fi
+
+    if [ "$GRUB_OK" -eq 1 ]; then
+        echo -e "    * ${GREEN}GRUB2 MBR installed successfully.${NC}"
+    else
+        # Extlinux fallback
+        echo -e "    * Fallback to Syslinux/Extlinux MBR..."
+        mkdir -p "$MOUNT_DIR/boot/syslinux" "$MOUNT_DIR/boot/extlinux"
+        cat << EOF > "$MOUNT_DIR/boot/syslinux/syslinux.cfg"
+DEFAULT fluxwan
+TIMEOUT 20
+PROMPT 0
+LABEL fluxwan
+  MENU LABEL FluxWAN Multi-WAN Router Appliance
+  LINUX /boot/vmlinuz-lts
+  INITRD /boot/initramfs-lts
+  APPEND root=$ROOT_SPEC rootfstype=ext4 rw quiet console=tty0 console=ttyS0,115200
+EOF
+        cp -f "$MOUNT_DIR/boot/syslinux/syslinux.cfg" "$MOUNT_DIR/boot/extlinux/extlinux.conf" 2>/dev/null || true
+        command -v extlinux >/dev/null 2>&1 && extlinux --install "$MOUNT_DIR/boot/syslinux" 2>/dev/null || true
+        for mbr in /usr/lib/syslinux/mbr/mbr.bin /usr/share/syslinux/mbr.bin; do
+            if [ -f "$mbr" ]; then
+                dd bs=440 count=1 conv=notrunc if="$mbr" of="$TARGET_DEV" status=none 2>/dev/null || true
+                break
+            fi
+        done
+    fi
+fi
+
+# 8. Enable OpenRC Services
+echo -e "${BLUE}[6/6] Finalizing installation and enabling system services...${NC}"
+mkdir -p "$MOUNT_DIR/etc/runlevels/default" "$MOUNT_DIR/etc/runlevels/boot"
+ln -sf /etc/init.d/fluxwan "$MOUNT_DIR/etc/runlevels/default/fluxwan" 2>/dev/null || true
+
+sync
+umount "$MOUNT_DIR" 2>/dev/null || true
+
+echo ""
+echo -e "${GREEN}======================================================================${NC}"
+echo -e "${GREEN}${BOLD} [✓] SUCCESS: FluxWAN Installed to $TARGET_DEV Successfully!         ${NC}"
+echo -e "${GREEN}======================================================================${NC}"
+echo -e "${CYAN}You can now remove the ISO/USB media and reboot into your new router.${NC}"
+echo ""
+
+if [ "$AUTO_CONFIRM" -ne 1 ]; then
+    printf "Press Enter to reboot now, or 'q' to return to shell: "
+    read -r REB
+    if [ "$REB" != "q" ] && [ "$REB" != "Q" ]; then
+        echo "[*] Rebooting..."
+        reboot 2>/dev/null || true
+    fi
+fi
