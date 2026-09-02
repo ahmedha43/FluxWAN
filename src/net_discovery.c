@@ -58,7 +58,7 @@ static void read_ipv6_addr(const char *ifname, char *out_v6, size_t max_len) {
         unsigned int ifidx, plen, scope, flags;
         if (sscanf(line, "%32s %x %x %x %x %s", addr_hex, &ifidx, &plen, &scope, &flags, dev) == 6) {
             if (strcmp(dev, ifname) == 0 && scope == 0x00) { /* Global scope */
-                char formatted[64];
+                char formatted[128];
                 int fpos = 0;
                 for (int i = 0; i < 32; i += 4) {
                     if (i > 0) formatted[fpos++] = ':';
@@ -68,8 +68,8 @@ static void read_ipv6_addr(const char *ifname, char *out_v6, size_t max_len) {
                 formatted[fpos] = '\0';
 
                 struct in6_addr a6;
-                char compressed[64];
-                char tmp[64];
+                char compressed[128];
+                char tmp[128];
                 if (inet_pton(AF_INET6, formatted, &a6) > 0 &&
                     inet_ntop(AF_INET6, &a6, compressed, sizeof(compressed))) {
                     snprintf(tmp, sizeof(tmp), "%s/%u", compressed, plen);
@@ -86,7 +86,7 @@ static void read_ipv6_addr(const char *ifname, char *out_v6, size_t max_len) {
 #else
 static void read_ipv6_addr(const char *ifname, char *out_v6, size_t max_len) {
     (void)ifname;
-    snprintf(out_v6, max_len, "2a02:cb40:1000:88::50/64");
+    safe_str_copy(out_v6, "2a02:cb40:1000:88::50/64", max_len);
 }
 #endif
 

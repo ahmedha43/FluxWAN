@@ -5,7 +5,7 @@ CFLAGS ?= -O2 -Wall -Wextra -std=c11 -Iinclude -D_GNU_SOURCE -D_DEFAULT_SOURCE
 LDFLAGS ?= -pthread
 
 BPF_CLANG ?= clang
-BPF_CFLAGS ?= -O2 -target bpf -D__TARGET_ARCH_x86 -Iinclude
+BPF_CFLAGS ?= -O2 -target bpf -D__TARGET_ARCH_x86 -Iinclude -I/usr/include/x86_64-linux-gnu -I/usr/include/aarch64-linux-gnu
 
 SRCS = src/main.c \
        src/config.c \

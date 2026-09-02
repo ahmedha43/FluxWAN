@@ -311,7 +311,7 @@ int pppoe_session_stop(pppoe_manager_ctx_t *pctx, int wan_index) {
     if (sess->macvlan_ifname[0] != '\0') {
         char cmd[256];
         snprintf(cmd, sizeof(cmd), "ip link delete %s 2>/dev/null || true", sess->macvlan_ifname);
-        system(cmd);
+        safe_system(cmd);
     }
 #endif
 
