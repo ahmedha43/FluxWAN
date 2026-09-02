@@ -207,12 +207,28 @@ chmod -R u+w "$ISO_DIR" 2>/dev/null || true
 rm -f "$ISO_DIR/boot/modloop-lts" 2>/dev/null || true
 cp -f "$BUILD_DIR/modloop-lts" "$ISO_DIR/boot/modloop-lts"
 
-# Place FluxWAN overlay into ISO root and /opt
+# Place FluxWAN overlay into ISO root with all possible hostnames
 cp -f "$DIST_DIR/localhost.apkovl.tar.gz" "$ISO_DIR/localhost.apkovl.tar.gz"
+cp -f "$DIST_DIR/localhost.apkovl.tar.gz" "$ISO_DIR/alpine.apkovl.tar.gz"
+cp -f "$DIST_DIR/localhost.apkovl.tar.gz" "$ISO_DIR/fluxwan.apkovl.tar.gz"
+cp -f "$DIST_DIR/localhost.apkovl.tar.gz" "$ISO_DIR/apkovl.tar.gz"
 mkdir -p "$ISO_DIR/opt/fluxwan"
 cp -f "$PROJECT_ROOT/fluxwan" "$ISO_DIR/opt/fluxwan/"
 cp -f "$PROJECT_ROOT/config/fluxwan.json" "$ISO_DIR/opt/fluxwan/config.json"
 cp -f "$DIST_DIR/fluxwan-rootfs.tar.gz" "$ISO_DIR/opt/fluxwan/"
+
+# Direct injection into initramfs-lts (guarantees /usr/local/bin/fluxwan-menu exists immediately on boot)
+echo "[+] Embedding FluxWAN control console into initramfs-lts..."
+mkdir -p "$BUILD_DIR/initramfs_unpacked"
+(cd "$BUILD_DIR/initramfs_unpacked" && zcat "$ISO_DIR/boot/initramfs-lts" | cpio -idmu >/dev/null 2>&1 || true)
+cp -a "$APKOVL_DIR/." "$BUILD_DIR/initramfs_unpacked/"
+mkdir -p "$BUILD_DIR/initramfs_unpacked/usr/bin" "$BUILD_DIR/initramfs_unpacked/bin" "$BUILD_DIR/initramfs_unpacked/usr/local/bin"
+cp -f "$APKOVL_DIR/usr/local/bin/"* "$BUILD_DIR/initramfs_unpacked/usr/local/bin/" 2>/dev/null || true
+cp -f "$APKOVL_DIR/usr/local/bin/"* "$BUILD_DIR/initramfs_unpacked/usr/bin/" 2>/dev/null || true
+cp -f "$APKOVL_DIR/usr/local/bin/"* "$BUILD_DIR/initramfs_unpacked/bin/" 2>/dev/null || true
+chmod +x "$BUILD_DIR/initramfs_unpacked/usr/local/bin/"* "$BUILD_DIR/initramfs_unpacked/usr/bin/"* "$BUILD_DIR/initramfs_unpacked/bin/"* 2>/dev/null || true
+find "$BUILD_DIR/initramfs_unpacked" -type f \( -name "*.sh" -o -name "fluxwan-*" -o -name "inittab" -o -name "*.cfg" \) -exec sed -i 's/\r$//' {} + 2>/dev/null || true
+(cd "$BUILD_DIR/initramfs_unpacked" && find . | cpio -H newc -o | gzip -9 > "$ISO_DIR/boot/initramfs-lts")
 
 # Configure Syslinux / ISOLINUX boot (Legacy BIOS)
 cat <<'EOF' > "$ISO_DIR/boot/syslinux/syslinux.cfg"
