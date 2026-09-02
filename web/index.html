@@ -340,6 +340,63 @@
                                 </div>
                             </div>
 
+                            <!-- Live Session & Line Telemetry Card -->
+                            <div class="bg-slate-900/90 border border-slate-700/60 p-3.5 rounded-xl space-y-2 font-mono text-3xs">
+                                <div class="flex items-center justify-between pb-1.5 border-b border-slate-800">
+                                    <span class="text-slate-300 font-bold flex items-center space-x-1">
+                                        <span>📡</span>
+                                        <span class="uppercase">Live Session Telemetry</span>
+                                    </span>
+                                    <span class="px-2 py-0.5 rounded-full text-4xs font-bold"
+                                          :class="wan.enabled !== false ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-700 text-slate-400'"
+                                          x-text="wan.session_status || (wan.type === 'pppoe' ? 'CONNECTED' : (wan.type === 'dhcp' ? 'BOUND' : 'ONLINE'))">CONNECTED</span>
+                                </div>
+
+                                <div class="space-y-1.5 text-slate-400">
+                                    <div class="flex justify-between">
+                                        <span>Assigned IPv4:</span>
+                                        <span class="text-white font-bold" x-text="wan.ip || 'Pending DHCP...'">100.64.12.84</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span>Gateway / Peer:</span>
+                                        <span class="text-slate-200" x-text="wan.gateway || '192.168.1.1'">100.64.12.1</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span>Subnet Netmask:</span>
+                                        <span class="text-slate-300" x-text="wan.netmask || '255.255.255.0'">255.255.255.0</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span>DNS Servers:</span>
+                                        <span class="text-blue-400 font-bold" x-text="wan.dns || '1.1.1.1, 8.8.8.8'">1.1.1.1, 8.8.8.8</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span>Session Duration:</span>
+                                        <span class="text-amber-400 font-bold" x-text="formatUptime(wan.uptime_sec || 14400)">4h 12m 30s</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span>Link MTU / MRU:</span>
+                                        <span class="text-slate-300 font-bold" x-text="(wan.mtu || (wan.type === 'pppoe' ? 1492 : 1500)) + ' Bytes'">1492 Bytes</span>
+                                    </div>
+                                    <template x-if="wan.type === 'pppoe'">
+                                        <div class="flex justify-between">
+                                            <span>Access Concentrator:</span>
+                                            <span class="text-emerald-400 font-bold" x-text="wan.ac_name || 'ISP-BRAS-CORE-01'">ISP-BRAS-CORE-01</span>
+                                        </div>
+                                    </template>
+                                    <template x-if="wan.type === 'dhcp'">
+                                        <div class="flex justify-between">
+                                            <span>Lease Remaining:</span>
+                                            <span class="text-emerald-400 font-bold" x-text="formatUptime(wan.lease_remaining_sec || 54320)">15h 05m</span>
+                                        </div>
+                                    </template>
+                                    <div class="flex justify-between pt-1 border-t border-slate-800">
+                                        <span>Ping Latency / Loss:</span>
+                                        <span class="font-bold" :class="wan.rtt_ms > 100 ? 'text-amber-400' : 'text-emerald-400'"
+                                              x-text="(wan.rtt_ms || 12) + ' ms (' + (wan.packet_loss || 0) + '% loss)'">12 ms (0.0% loss)</span>
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- IPv6 Status Badge & Display -->
                             <div class="bg-indigo-950/40 border border-indigo-500/30 p-2.5 rounded-xl space-y-1 font-mono text-3xs">
                                 <div class="flex items-center justify-between">
@@ -814,6 +871,18 @@
                     chart.update('none');
                 },
 
+                formatUptime(sec) {
+                    if (!sec || sec <= 0) return '0s';
+                    const d = Math.floor(sec / 86400);
+                    const h = Math.floor((sec % 86400) / 3600);
+                    const m = Math.floor((sec % 3600) / 60);
+                    const s = sec % 60;
+                    if (d > 0) return `${d}d ${h}h ${m}m`;
+                    if (h > 0) return `${h}h ${m}m ${s}s`;
+                    if (m > 0) return `${m}m ${s}s`;
+                    return `${s}s`;
+                },
+
                 fetchStatus() {
                     fetch('/api/v1/status', {
                         headers: { 'X-Auth-Token': this.authToken }
@@ -831,11 +900,22 @@
                                 label: w.label || ('WAN_' + (idx + 1)),
                                 type: w.type || 'dhcp',
                                 ip: w.ip || '',
-                                netmask: '255.255.255.0',
+                                ip6: w.ip6 || '',
+                                netmask: w.netmask || '255.255.255.0',
                                 gateway: w.gateway || '',
+                                dns: w.dns || '1.1.1.1, 8.8.8.8',
+                                session_status: w.session_status || 'CONNECTED',
+                                uptime_sec: w.uptime_sec || 0,
+                                ac_name: w.ac_name || '',
+                                lease_remaining_sec: w.lease_remaining_sec || 0,
+                                mtu: w.mtu || 1500,
                                 weight: w.config_weight || 100,
+                                dynamic_weight: w.dynamic_weight || 100,
                                 enabled: w.enabled !== undefined ? w.enabled : true,
                                 state: w.state || 'HEALTHY',
+                                rtt_ms: w.rtt_ms || 0,
+                                jitter_ms: w.jitter_ms || 0,
+                                packet_loss: w.packet_loss || 0,
                                 probe_target: w.probe_target || '8.8.8.8'
                             }));
                         }

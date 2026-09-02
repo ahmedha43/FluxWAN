@@ -162,6 +162,15 @@ typedef struct {
     
     /* Internal OS state */
     int ifindex;
+    
+    /* Session Live Telemetry & Details */
+    uint64_t session_start_sec;   /* Uptime tracking */
+    uint32_t lease_time_total;    /* Total DHCP lease duration (seconds) */
+    uint32_t lease_time_remaining;/* Remaining DHCP lease (seconds) */
+    char ac_name[64];             /* PPPoE Access Concentrator Name */
+    char session_status[32];      /* e.g. "CONNECTED", "BOUND", "ONLINE" */
+    uint16_t link_mtu;            /* e.g. 1500, 1492 */
+    char dns_servers[64];         /* e.g. "1.1.1.1, 8.8.8.8" */
 } wan_config_t;
 
 /* LAN Interface Definition */
