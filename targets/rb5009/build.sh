@@ -30,23 +30,27 @@ ALPINE_MIRROR="https://dl-cdn.alpinelinux.org/alpine/v3.19/main/aarch64"
 
 if [ ! -f "$CACHE_DIR/busybox-static.apk" ]; then
     echo "    * Downloading busybox-static (aarch64)..."
-    curl -sSL "$ALPINE_MIRROR/busybox-static-1.36.1-r21.apk" -o "$CACHE_DIR/busybox-static.apk" || \
-    curl -sSL "$ALPINE_MIRROR/busybox-static-1.36.1-r19.apk" -o "$CACHE_DIR/busybox-static.apk"
+    curl -fL --retry 3 -sS "$ALPINE_MIRROR/busybox-static-1.36.1-r21.apk" -o "$CACHE_DIR/busybox-static.apk" || \
+    curl -fL --retry 3 -sS "$ALPINE_MIRROR/busybox-static-1.36.1-r19.apk" -o "$CACHE_DIR/busybox-static.apk"
+test -s "$CACHE_DIR/busybox-static.apk"
 fi
 
 if [ ! -f "$CACHE_DIR/linux-lts.apk" ]; then
     echo "    * Downloading Linux LTS Kernel (aarch64)..."
-    curl -sSL "$ALPINE_MIRROR/linux-lts-6.6.142-r0.apk" -o "$CACHE_DIR/linux-lts.apk" || \
-    curl -sSL "$ALPINE_MIRROR/linux-lts-6.6.14-r0.apk" -o "$CACHE_DIR/linux-lts.apk"
+    curl -fL --retry 3 -sS "$ALPINE_MIRROR/linux-lts-6.6.142-r0.apk" -o "$CACHE_DIR/linux-lts.apk" || \
+    curl -fL --retry 3 -sS "$ALPINE_MIRROR/linux-lts-6.6.14-r0.apk" -o "$CACHE_DIR/linux-lts.apk"
+test -s "$CACHE_DIR/linux-lts.apk"
 fi
 
 # Extract Kernel vmlinuz-lts (Image.gz)
 mkdir -p "$BUILD_DIR/kernel_extract"
 tar -xzf "$CACHE_DIR/linux-lts.apk" -C "$BUILD_DIR/kernel_extract" 2>/dev/null || true
-if [ -f "$BUILD_DIR/kernel_extract/boot/vmlinuz-lts" ]; then
-    cp -f "$BUILD_DIR/kernel_extract/boot/vmlinuz-lts" "$BUILD_DIR/Image.gz"
-    echo "    * Extracted Linux ARM64 Kernel: $(ls -lh "$BUILD_DIR/Image.gz" | awk '{print $5}')"
+if [ ! -f "$BUILD_DIR/kernel_extract/boot/vmlinuz-lts" ]; then
+    echo "ERROR: Alpine kernel package did not contain boot/vmlinuz-lts" >&2
+    exit 1
 fi
+cp -f "$BUILD_DIR/kernel_extract/boot/vmlinuz-lts" "$BUILD_DIR/Image.gz"
+echo "    * Extracted Linux ARM64 Kernel: $(ls -lh "$BUILD_DIR/Image.gz" | awk '{print $5}')"
 
 # 2. Compile FluxWAN Core for ARM64 (aarch64)
 echo "[2/6] Compiling FluxWAN Core Engine for aarch64 (ARMv8-A)..."
@@ -67,9 +71,11 @@ mkdir -p "$BUILD_DIR/bpf"
 if command -v clang >/dev/null 2>&1 && [ -f "$PROJECT_ROOT/bpf/xdp_router.bpf.c" ]; then
     clang -O2 -target bpf -D__TARGET_ARCH_arm64 \
         -I"$PROJECT_ROOT/include" \
+        -I/usr/aarch64-linux-gnu/include \
         -c "$PROJECT_ROOT/bpf/xdp_router.bpf.c" \
-        -o "$BUILD_DIR/bpf/xdp_router.bpf.o" 2>/dev/null || true
-    echo "    * eBPF XDP ARM64 Object compiled: $(ls -lh "$BUILD_DIR/bpf/xdp_router.bpf.o" 2>/dev/null | awk '{print $5}')"
+        -o "$BUILD_DIR/bpf/xdp_router.bpf.o"
+    test -s "$BUILD_DIR/bpf/xdp_router.bpf.o"
+    echo "    * eBPF XDP ARM64 Object compiled: $(ls -lh "$BUILD_DIR/bpf/xdp_router.bpf.o" | awk '{print $5}')"
 fi
 
 # 4. Assemble Streamlined Embedded ARM64 RootFS
@@ -88,7 +94,7 @@ if [ -f "$BUILD_DIR/bb_extract/bin/busybox.static" ]; then
     chmod +x "$ROOTFS_DIR/bin/busybox"
     for cmd in sh ash ls cp mv rm mkdir rmdir cat echo grep sed awk mount umount \
                ps kill pgrep pkill top ifconfig ip route ping dmesg sync sleep \
-               tar gzip find date chmod chown vi clear reboot poweroff; do
+               tar gzip find date chmod chown vi clear reboot poweroff uname; do
         ln -sf /bin/busybox "$ROOTFS_DIR/bin/$cmd" 2>/dev/null || true
         ln -sf /bin/busybox "$ROOTFS_DIR/sbin/$cmd" 2>/dev/null || true
         ln -sf /bin/busybox "$ROOTFS_DIR/usr/bin/$cmd" 2>/dev/null || true
@@ -175,20 +181,17 @@ echo "    * Production Initramfs size: $(ls -lh "$BUILD_DIR/initramfs-fluxwan-ar
 echo "[5/6] Compiling Device Tree (armada-7040-rb5009.dtb)..."
 if [ -f "$TARGET_DIR/kernel/armada-7040-rb5009.dts" ]; then
     gcc -E -nostdinc -I"$TARGET_DIR/kernel" -undef -D__DTS__ -x assembler-with-cpp \
-        "$TARGET_DIR/kernel/armada-7040-rb5009.dts" -o "$BUILD_DIR/armada-7040-rb5009.dts.tmp" 2>/dev/null || \
-        cp -f "$TARGET_DIR/kernel/armada-7040-rb5009.dts" "$BUILD_DIR/armada-7040-rb5009.dts.tmp"
-    dtc -I dts -O dtb -o "$BUILD_DIR/armada-7040-rb5009.dtb" "$BUILD_DIR/armada-7040-rb5009.dts.tmp" 2>/dev/null || true
+        "$TARGET_DIR/kernel/armada-7040-rb5009.dts" -o "$BUILD_DIR/armada-7040-rb5009.dts.tmp"
+    dtc -I dts -O dtb -o "$BUILD_DIR/armada-7040-rb5009.dtb" \
+        -i "$TARGET_DIR/kernel" "$BUILD_DIR/armada-7040-rb5009.dts.tmp"
+    test -s "$BUILD_DIR/armada-7040-rb5009.dtb"
+    file "$BUILD_DIR/armada-7040-rb5009.dtb" | grep -q 'Device Tree Blob'
 fi
 
 # 6. Build Flattened Image Tree (FIT .itb image)
 echo "[6/6] Generating Production FIT Image (fluxwan-rb5009.itb)..."
-if [ ! -f "$BUILD_DIR/Image.gz" ]; then
-    echo "FluxWAN ARM64 Kernel Payload" | gzip -9 > "$BUILD_DIR/Image.gz"
-fi
-
-if [ ! -f "$BUILD_DIR/armada-7040-rb5009.dtb" ]; then
-    echo "DTS Stub" > "$BUILD_DIR/armada-7040-rb5009.dtb"
-fi
+test -s "$BUILD_DIR/Image.gz"
+test -s "$BUILD_DIR/armada-7040-rb5009.dtb"
 
 cp -f "$TARGET_DIR/fluxwan-rb5009.its" "$BUILD_DIR/"
 # Build in local /tmp (fast ext4)

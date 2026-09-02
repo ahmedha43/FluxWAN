@@ -1,0 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+#ifndef _DT_BINDINGS_GPIO_GPIO_H
+#define _DT_BINDINGS_GPIO_GPIO_H
+#define GPIO_ACTIVE_HIGH 0
+#define GPIO_ACTIVE_LOW 1
+#define GPIO_PUSH_PULL 0
+#define GPIO_SINGLE_ENDED 1
+#define GPIO_LINE_OPEN_SOURCE 0
+#define GPIO_LINE_OPEN_DRAIN 2
+#endif

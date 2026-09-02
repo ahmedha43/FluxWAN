@@ -6,9 +6,9 @@ Emulates:
   - Memory: 1024 MB RAM
   - Display: Headless Serial Console
 """
-import subprocess, time, sys, os, signal
+import subprocess, time, sys, os, signal, selectors
 
-PROJECT_ROOT = "/workspace"
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 CACHE_DIR    = f"{PROJECT_ROOT}/.cache/arm64"
 KERNEL       = f"{CACHE_DIR}/vmlinuz-lts"
 INITRAMFS    = f"{CACHE_DIR}/initramfs-fluxwan-arm64.cpio.gz"
@@ -52,10 +52,15 @@ proc = subprocess.Popen(
 
 buf = ""
 t0 = time.time()
+sel = selectors.DefaultSelector()
+sel.register(proc.stdout, selectors.EVENT_READ)
 passed = False
 executed_cmds = False
 
 while time.time() - t0 < 45:
+    events = sel.select(timeout=0.5)
+    if not events:
+        continue
     line = proc.stdout.readline()
     if line:
         sys.stdout.write(line)
@@ -74,7 +79,7 @@ while time.time() - t0 < 45:
             proc.stdin.flush()
             passed = True
 
-        if executed_cmds and "Linux FluxWAN-RB5009" in buf:
+        if executed_cmds and ("aarch64 Linux" in buf or "/opt/fluxwan/" in buf):
             time.sleep(2)
             break
 
@@ -88,7 +93,7 @@ except Exception:
     proc.kill()
 
 print("\n" + "=" * 70)
-if passed:
+if passed and executed_cmds:
     print("  [✓] SUCCESS: MikroTik RB5009 ARM64 Emulation Verified 100%!")
     print("      Linux LTS Kernel 6.6 + BusyBox + FluxWAN Core booted cleanly on AArch64.")
 else:

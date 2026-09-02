@@ -55,7 +55,8 @@ bpf: $(BPF_OBJS)
 
 bpf/%.bpf.o: bpf/%.bpf.c
 	@mkdir -p bpf
-	$(BPF_CLANG) $(BPF_CFLAGS) -c $< -o $@ || echo "BPF compilation skipped (requires clang bpf target & kernel headers)"
+	$(BPF_CLANG) $(BPF_CFLAGS) -c $< -o $@
+	test -s $@
 
 $(TARGET): $(OBJS)
 	$(CC) $(OBJS) -o $@ $(LDFLAGS)
@@ -79,7 +80,7 @@ $(TEST_NAT46): tests/test_live_nat46_translation.c
 $(TEST_XDP): tests/xdp_packet_test.c src/config.c src/wan_manager.c src/netlink_manager.c src/bpf_loader.c src/prober.c src/sticky.c src/net_discovery.c src/pppoe_manager.c src/dhcp_server.c src/net_apply.c src/dns64_daemon.c
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
 
-test: $(TEST_WAN) $(TEST_PPPOE) $(TEST_NAT46) $(LAB_TARGET)
+test: $(TEST_WAN) $(TEST_PPPOE) $(TEST_NAT46) $(TEST_XDP) $(LAB_TARGET)
 	@echo "================================================================"
 	@echo "   Running FluxWAN Automated Test Suites                        "
 	@echo "================================================================"
@@ -88,6 +89,8 @@ test: $(TEST_WAN) $(TEST_PPPOE) $(TEST_NAT46) $(LAB_TARGET)
 	./$(TEST_PPPOE)
 	@echo ""
 	./$(TEST_NAT46)
+	@echo ""
+	./$(TEST_XDP)
 	@echo ""
 	./$(LAB_TARGET)
 	@echo ""
@@ -112,4 +115,7 @@ valgrind: $(TARGET)
 appliance:
 	./build.sh all
 
-.PHONY: all ui bpf clean lab real-lab asan valgrind test appliance
+rb5009:
+	bash targets/rb5009/build.sh
+
+.PHONY: all ui bpf clean lab real-lab asan valgrind test appliance rb5009
