@@ -51,6 +51,11 @@ done
 
 # 2. Check and Install Required Tools
 echo -e "${BLUE}[1/6] Checking required storage and partition tools...${NC}"
+modprobe ext4 2>/dev/null || true
+modprobe vfat 2>/dev/null || true
+modprobe fat 2>/dev/null || true
+modprobe loop 2>/dev/null || true
+
 MISSING_TOOLS=""
 for tool in sfdisk mkfs.ext4 partx blkid; do
     if ! command -v "$tool" >/dev/null 2>&1; then
@@ -162,9 +167,13 @@ EOF
 fi
 
 # Inform kernel of partition table changes
+sync
+sfdisk -R "$TARGET_DEV" 2>/dev/null || true
 partx -u "$TARGET_DEV" 2>/dev/null || true
+partprobe "$TARGET_DEV" 2>/dev/null || true
 blockdev --rereadpt "$TARGET_DEV" 2>/dev/null || true
-sleep 1
+mdev -s 2>/dev/null || true
+sleep 2
 
 # Detect partition naming (e.g. sda1 vs nvme0n1p1)
 if [ -b "${TARGET_DEV}p1" ]; then
@@ -183,8 +192,20 @@ else
     ROOT_PART="${PART_PREFIX}1"
 fi
 
+mdev -s 2>/dev/null || true
+sleep 1
+
 echo -e "    * Formatting Root Partition ($ROOT_PART as Ext4)..."
-mkfs.ext4 -F -q -L "FLUXWAN_ROOT" "$ROOT_PART"
+modprobe ext4 2>/dev/null || true
+mkfs.ext4 -F -L "FLUXWAN_ROOT" "$ROOT_PART" || {
+    echo -e "${YELLOW}[*] Retrying ext4 format on $ROOT_PART...${NC}"
+    sync
+    sleep 2
+    mkfs.ext4 -F -L "FLUXWAN_ROOT" "$ROOT_PART"
+}
+
+sync
+sleep 1
 
 # 6. Deploying Filesystem & Kernel
 echo -e "${BLUE}[4/6] Deploying FluxWAN Embedded Operating System...${NC}"
@@ -193,7 +214,9 @@ umount -f "$MOUNT_DIR" 2>/dev/null || true
 rm -rf "$MOUNT_DIR"
 mkdir -p "$MOUNT_DIR"
 
-mount "$ROOT_PART" "$MOUNT_DIR"
+modprobe ext4 2>/dev/null || true
+mdev -s 2>/dev/null || true
+mount -t ext4 "$ROOT_PART" "$MOUNT_DIR" || mount "$ROOT_PART" "$MOUNT_DIR"
 
 # Create standard Linux root directory structure
 mkdir -p "$MOUNT_DIR/bin" "$MOUNT_DIR/sbin" "$MOUNT_DIR/lib" "$MOUNT_DIR/etc" \
