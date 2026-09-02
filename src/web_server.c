@@ -193,6 +193,7 @@ static void build_json_status(fluxwan_config_t *config, char *buf, size_t max_le
         "  \"wans\": [\n", config->lan.name, lan_ip, lan_mask, config->lan.dhcp_enabled ? "true" : "false");
 
     for (uint32_t i = 0; i < config->wan_count; i++) {
+        const wan_config_t *w = &config->wans[i];
         char ip[32], gw[32], mask[32];
         ip_to_str(w->ip_addr, ip, sizeof(ip));
         ip_to_str(w->gateway, gw, sizeof(gw));
