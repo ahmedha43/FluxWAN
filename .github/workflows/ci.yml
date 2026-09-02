@@ -14,6 +14,9 @@ permissions:
   packages: write
 
 jobs:
+  # ============================================================================
+  # 1. Automated Testing & Verification
+  # ============================================================================
   build-and-test:
     name: Build & Test (Ubuntu 22.04)
     runs-on: ubuntu-22.04
@@ -22,13 +25,12 @@ jobs:
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
-      - name: Install Build Dependencies & Toolchains
+      - name: Install Build Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential \
             gcc \
-            gcc-multilib \
             clang \
             llvm \
             libbpf-dev \
@@ -52,8 +54,11 @@ jobs:
           make
           ctest --output-on-failure
 
-  package-and-release:
-    name: Package & Publish Releases (MikroTik RB5009 & x86_64)
+  # ============================================================================
+  # 2. Build x86_64 Release Package
+  # ============================================================================
+  build-x86_64:
+    name: Build x86_64 Appliance Package
     needs: build-and-test
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-22.04
@@ -62,27 +67,21 @@ jobs:
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
-      - name: Install Cross-Compilers & Packaging Tools
+      - name: Install Build Tools
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential \
             gcc \
-            gcc-multilib \
-            gcc-aarch64-linux-gnu \
             clang \
             llvm \
             libbpf-dev \
             linux-libc-dev \
             python3 \
             zip \
-            tar \
-            tree
+            tar
 
-      # ========================================================================
-      # Build Package 1: x86_64 Bare-Metal Appliance & Standalone Daemon
-      # ========================================================================
-      - name: Build & Package x86_64 Appliance
+      - name: Build & Package x86_64
         run: |
           echo "[+] Compiling x86_64 binaries & eBPF bytecode..."
           make clean
@@ -108,10 +107,42 @@ jobs:
           tar -czvf ../FluxWAN-x86_64-Appliance.tar.gz fluxwan-x86_64
           cd ..
 
-      # ========================================================================
-      # Build Package 2: MikroTik RB5009 (ARM64) Flash & Container Bundle
-      # ========================================================================
-      - name: Build & Package MikroTik RB5009 (ARM64) Bundle
+      - name: Upload x86_64 Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-x86_64
+          path: |
+            FluxWAN-x86_64-Appliance.zip
+            FluxWAN-x86_64-Appliance.tar.gz
+
+  # ============================================================================
+  # 3. Build MikroTik RB5009 (ARM64) Release Package
+  # ============================================================================
+  build-arm64:
+    name: Build MikroTik RB5009 (ARM64) Package
+    needs: build-and-test
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Install ARM64 Cross-Compiler & Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            gcc-aarch64-linux-gnu \
+            clang \
+            llvm \
+            libbpf-dev \
+            linux-libc-dev \
+            python3 \
+            zip \
+            tar
+
+      - name: Build & Package MikroTik RB5009 (ARM64)
         run: |
           echo "[+] Cross-compiling ARM64 binaries for MikroTik RB5009..."
           make clean
@@ -127,7 +158,6 @@ jobs:
           cp -f bpf/*.bpf.o dist_pkg/fluxwan-mikrotik-rb5009/bpf/ 2>/dev/null || true
           cp -f config/fluxwan.json dist_pkg/fluxwan-mikrotik-rb5009/config/
 
-          # Include RB5009 1-Click Flasher & Documentation
           if [ -d dist/rb5009 ]; then
             cp -rf dist/rb5009/* dist_pkg/fluxwan-mikrotik-rb5009/ 2>/dev/null || true
           fi
@@ -138,17 +168,36 @@ jobs:
           tar -czvf ../FluxWAN-MikroTik-RB5009-ARM64.tar.gz fluxwan-mikrotik-rb5009
           cd ..
 
-      # ========================================================================
-      # Generate Checksums (SHA256)
-      # ========================================================================
-      - name: Generate Checksums
+      - name: Upload ARM64 Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-arm64
+          path: |
+            FluxWAN-MikroTik-RB5009-ARM64.zip
+            FluxWAN-MikroTik-RB5009-ARM64.tar.gz
+
+  # ============================================================================
+  # 4. Publish Release to GitHub Releases
+  # ============================================================================
+  publish-release:
+    name: Publish Release to GitHub
+    needs: [build-x86_64, build-arm64]
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Download All Release Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release_files
+          merge-multiple: true
+
+      - name: Generate Checksums (SHA256)
         run: |
+          cd release_files
           sha256sum FluxWAN-*.zip FluxWAN-*.tar.gz > SHA256SUMS.txt
           cat SHA256SUMS.txt
+          cd ..
 
-      # ========================================================================
-      # Determine Release Tag & Details
-      # ========================================================================
       - name: Set Release Tag
         id: vars
         run: |
@@ -160,9 +209,6 @@ jobs:
             echo "IS_PRERELEASE=true" >> $GITHUB_OUTPUT
           fi
 
-      # ========================================================================
-      # Publish to GitHub Releases
-      # ========================================================================
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -171,11 +217,11 @@ jobs:
           prerelease: ${{ steps.vars.outputs.IS_PRERELEASE == 'true' }}
           draft: false
           files: |
-            FluxWAN-MikroTik-RB5009-ARM64.zip
-            FluxWAN-MikroTik-RB5009-ARM64.tar.gz
-            FluxWAN-x86_64-Appliance.zip
-            FluxWAN-x86_64-Appliance.tar.gz
-            SHA256SUMS.txt
+            release_files/FluxWAN-MikroTik-RB5009-ARM64.zip
+            release_files/FluxWAN-MikroTik-RB5009-ARM64.tar.gz
+            release_files/FluxWAN-x86_64-Appliance.zip
+            release_files/FluxWAN-x86_64-Appliance.tar.gz
+            release_files/SHA256SUMS.txt
           body: |
             ## 🚀 FluxWAN Carrier-Grade Multi-WAN Aggregator & Load Balancer
 
