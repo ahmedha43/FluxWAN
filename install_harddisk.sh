@@ -371,12 +371,32 @@ LABEL fluxwan
 EOF
         cp -f "$MOUNT_DIR/boot/syslinux/syslinux.cfg" "$MOUNT_DIR/boot/extlinux/extlinux.conf" 2>/dev/null || true
         command -v extlinux >/dev/null 2>&1 && extlinux --install "$MOUNT_DIR/boot/syslinux" 2>/dev/null || true
-        for mbr in /usr/lib/syslinux/mbr/mbr.bin /usr/share/syslinux/mbr.bin; do
+        command -v extlinux >/dev/null 2>&1 && extlinux --install "$MOUNT_DIR/boot/extlinux" 2>/dev/null || true
+
+        MBR_FOUND=0
+        for mbr in \
+            /usr/share/syslinux/isohdpfx.bin \
+            /boot/syslinux/isohdpfx.bin \
+            /usr/lib/syslinux/bios/isohdpfx.bin \
+            /media/*/boot/syslinux/isohdpfx.bin \
+            /media/sr0/boot/syslinux/isohdpfx.bin \
+            /usr/share/syslinux/mbr.bin \
+            /usr/lib/syslinux/mbr/mbr.bin \
+            /boot/syslinux/mbr.bin \
+            /usr/share/syslinux/gptmbr.bin; do
             if [ -f "$mbr" ]; then
+                echo -e "    * Writing MBR Boot Sector (${CYAN}$mbr${NC}) to $TARGET_DEV..."
                 dd bs=440 count=1 conv=notrunc if="$mbr" of="$TARGET_DEV" status=none 2>/dev/null || true
+                sync
+                MBR_FOUND=1
                 break
             fi
         done
+
+        if [ "$MBR_FOUND" -eq 0 ]; then
+            echo -e "${YELLOW}[!] WARNING: MBR binary not found in standard paths. Attempting syslinux MBR write...${NC}"
+            command -v syslinux >/dev/null 2>&1 && syslinux --install "$TARGET_DEV" 2>/dev/null || true
+        fi
     fi
 fi
 
