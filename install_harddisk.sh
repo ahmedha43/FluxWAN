@@ -375,17 +375,16 @@ EOF
 
         MBR_FOUND=0
         for mbr in \
-            /usr/share/syslinux/isohdpfx.bin \
-            /boot/syslinux/isohdpfx.bin \
-            /usr/lib/syslinux/bios/isohdpfx.bin \
-            /media/*/boot/syslinux/isohdpfx.bin \
-            /media/sr0/boot/syslinux/isohdpfx.bin \
             /usr/share/syslinux/mbr.bin \
             /usr/lib/syslinux/mbr/mbr.bin \
+            /usr/lib/syslinux/bios/mbr.bin \
             /boot/syslinux/mbr.bin \
+            /media/*/boot/syslinux/mbr.bin \
+            /media/sr0/boot/syslinux/mbr.bin \
+            "$MOUNT_DIR/boot/syslinux/mbr.bin" \
             /usr/share/syslinux/gptmbr.bin; do
             if [ -f "$mbr" ]; then
-                echo -e "    * Writing MBR Boot Sector (${CYAN}$mbr${NC}) to $TARGET_DEV..."
+                echo -e "    * Writing Hard Disk MBR Boot Sector (${CYAN}$mbr${NC}) to $TARGET_DEV..."
                 dd bs=440 count=1 conv=notrunc if="$mbr" of="$TARGET_DEV" status=none 2>/dev/null || true
                 sync
                 MBR_FOUND=1

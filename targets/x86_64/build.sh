@@ -130,10 +130,13 @@ cp -f "$PROJECT_ROOT/install_harddisk.sh" "$APKOVL_DIR/usr/local/bin/fluxwan-ins
 cp -f "$PROJECT_ROOT/install_harddisk.sh" "$APKOVL_DIR/usr/local/bin/install_harddisk.sh" 2>/dev/null || true
 chmod +x "$APKOVL_DIR/usr/local/bin/"* 2>/dev/null || true
 
-# Copy pure Alpine syslinux modules and binaries from base ISO
+# Copy pure Alpine syslinux modules and binaries from base ISO and builder host
 mkdir -p "$APKOVL_DIR/usr/share/syslinux" "$APKOVL_DIR/boot/syslinux"
 cp -a "$BUILD_DIR/iso_extract/boot/syslinux/"* "$APKOVL_DIR/boot/syslinux/" 2>/dev/null || true
 cp -a "$BUILD_DIR/iso_extract/boot/syslinux/"* "$APKOVL_DIR/usr/share/syslinux/" 2>/dev/null || true
+if [ -d /usr/share/syslinux ]; then
+    cp -a /usr/share/syslinux/. "$APKOVL_DIR/usr/share/syslinux/" 2>/dev/null || true
+fi
 
 # Embed GRUB2 BIOS (i386-pc) modules into apkovl for offline grub-install during disk setup
 if [ -d /usr/lib/grub/i386-pc ]; then
