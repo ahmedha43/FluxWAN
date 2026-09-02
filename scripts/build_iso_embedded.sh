@@ -124,7 +124,10 @@ EOF
 cp -f "$PROJECT_ROOT/fluxwan" "$APKOVL_DIR/opt/fluxwan/"
 cp -f "$PROJECT_ROOT/config/fluxwan.json" "$APKOVL_DIR/opt/fluxwan/config/"
 cp -f "$PROJECT_ROOT"/bpf/*.bpf.o "$APKOVL_DIR/opt/fluxwan/bpf/" 2>/dev/null || true
+cp -f "$PROJECT_ROOT/targets/x86_64/overlay/usr/local/bin/"* "$APKOVL_DIR/usr/local/bin/" 2>/dev/null || true
 cp -f "$PROJECT_ROOT/iso/overlay/usr/local/bin/"* "$APKOVL_DIR/usr/local/bin/" 2>/dev/null || true
+cp -f "$PROJECT_ROOT/install_harddisk.sh" "$APKOVL_DIR/usr/local/bin/fluxwan-install" 2>/dev/null || true
+cp -f "$PROJECT_ROOT/install_harddisk.sh" "$APKOVL_DIR/usr/local/bin/install_harddisk.sh" 2>/dev/null || true
 chmod +x "$APKOVL_DIR/usr/local/bin/"* 2>/dev/null || true
 
 # Copy pure Alpine syslinux modules and binaries from base ISO
