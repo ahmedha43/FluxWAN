@@ -7,7 +7,16 @@
  * =========================================================================== */
 #pragma once
 
+#if defined(__BPF__) || defined(__bpf__)
+#include <linux/types.h>
+#ifndef _BPF_INT_TYPES_
+#define _BPF_INT_TYPES_
+typedef __u32 uint32_t;
+typedef __u64 uint64_t;
+#endif
+#else
 #include <stdint.h>
+#endif
 
 /* ── Global Router Statistics (one entry, per-CPU for lockless updates) ───── */
 struct router_global_stats {

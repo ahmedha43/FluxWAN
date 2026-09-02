@@ -1,6 +1,5 @@
-/* ===========================================================================
- * FluxWAN — WAN Port Exclusivity & Multi-Session Validation Unit Tests
- * =========================================================================== */
+#define _GNU_SOURCE
+#define _DEFAULT_SOURCE
 
 #include <stdio.h>
 #include <stdlib.h>

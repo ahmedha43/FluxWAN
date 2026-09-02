@@ -1,3 +1,6 @@
+#define _GNU_SOURCE
+#define _DEFAULT_SOURCE
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -10,7 +13,7 @@
 #include <netinet/tcp.h>
 #include <netinet/if_ether.h>
 
-#include "bpf/nat46_maps.h"
+#include "../bpf/nat46_maps.h"
 
 /* Structure of synthetic IPv4 Client Packet */
 struct client_v4_pkt {

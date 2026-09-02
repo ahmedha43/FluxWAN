@@ -7,7 +7,16 @@
  * =========================================================================== */
 #pragma once
 
+#if defined(__BPF__) || defined(__bpf__)
+#include <linux/types.h>
+#ifndef _BPF_INT_TYPES_
+#define _BPF_INT_TYPES_
+typedef __u32 uint32_t;
+typedef __u64 uint64_t;
+#endif
+#else
 #include <stdint.h>
+#endif
 
 #define FLOW_DEBUG_RINGBUF_SIZE  (256 * 1024) /* 256 KB ring — Katran default */
 #define MAX_EVENT_SIZE           128          /* Katran: MAX_EVENT_SIZE = 128 */

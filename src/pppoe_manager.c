@@ -97,7 +97,7 @@ static bool get_ppp_interface_ip(const char *ifname, uint32_t *out_ip, uint32_t 
 
     if (strlen(gw_buf) == 0) {
         /* Fallback peer gateway detection */
-        strncpy(gw_buf, ip_buf, sizeof(gw_buf) - 1);
+        snprintf(gw_buf, sizeof(gw_buf), "%s", ip_buf);
         char *last_dot = strrchr(gw_buf, '.');
         if (last_dot) {
             *(last_dot + 1) = '1';
@@ -108,17 +108,17 @@ static bool get_ppp_interface_ip(const char *ifname, uint32_t *out_ip, uint32_t 
     struct in_addr addr;
     if (inet_pton(AF_INET, ip_buf, &addr) == 1) {
         *out_ip = ntohl(addr.s_addr);
-        if (out_ip_str) strncpy(out_ip_str, ip_buf, 19);
+        if (out_ip_str) snprintf(out_ip_str, 20, "%s", ip_buf);
     } else {
         return false;
     }
 
     if (inet_pton(AF_INET, gw_buf, &addr) == 1) {
         *out_gw = ntohl(addr.s_addr);
-        if (out_gw_str) strncpy(out_gw_str, gw_buf, 19);
+        if (out_gw_str) snprintf(out_gw_str, 20, "%s", gw_buf);
     } else {
         *out_gw = *out_ip;
-        if (out_gw_str) strncpy(out_gw_str, ip_buf, 19);
+        if (out_gw_str) snprintf(out_gw_str, 20, "%s", ip_buf);
     }
 
     return true;
@@ -385,8 +385,8 @@ void pppoe_manager_tick(pppoe_manager_ctx_t *pctx,
                 if (get_ppp_interface_ip(sess->ppp_ifname, &ip, &gw, ip_str, gw_str)) {
                     sess->assigned_ip = ip;
                     sess->remote_ip = gw;
-                    strncpy(sess->assigned_ip_str, ip_str, sizeof(sess->assigned_ip_str) - 1);
-                    strncpy(sess->remote_ip_str, gw_str, sizeof(sess->remote_ip_str) - 1);
+                    snprintf(sess->assigned_ip_str, sizeof(sess->assigned_ip_str), "%s", ip_str);
+                    snprintf(sess->remote_ip_str, sizeof(sess->remote_ip_str), "%s", gw_str);
                     sess->state = PPPOE_STATE_CONNECTED;
                     sess->connected_since_ms = now_ms;
                     sess->backoff_s = PPPOE_INITIAL_BACKOFF_S;
@@ -399,7 +399,7 @@ void pppoe_manager_tick(pppoe_manager_ctx_t *pctx,
                     w->ip_addr = htonl(ip);
                     w->gateway = htonl(gw);
                     w->netmask = htonl(0xFFFFFFFF); /* /32 Point-to-point */
-                    strncpy(w->probe_target, gw_str, sizeof(w->probe_target) - 1);
+                    snprintf(w->probe_target, sizeof(w->probe_target), "%s", gw_str);
                     w->probe_target_ip = htonl(gw);
 
                     if (on_connected) {

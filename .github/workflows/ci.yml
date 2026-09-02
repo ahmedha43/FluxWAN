@@ -1,0 +1,45 @@
+name: FluxWAN Continuous Integration
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    name: Build & Test (Ubuntu 22.04)
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Install Build Dependencies & Toolchains
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            gcc \
+            clang \
+            llvm \
+            libbpf-dev \
+            linux-libc-dev \
+            python3 \
+            cmake
+
+      - name: Compile FluxWAN Core, BPF & Lab Simulator
+        run: |
+          make clean
+          make all
+
+      - name: Run Automated Test Suites
+        run: |
+          make test
+
+      - name: Test CMake Build Equivalence
+        run: |
+          mkdir -p build && cd build
+          cmake ..
+          make
+          ctest --output-on-failure

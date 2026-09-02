@@ -6,7 +6,16 @@
  * =========================================================================== */
 #pragma once
 
+#if defined(__BPF__) || defined(__bpf__)
+#include <linux/types.h>
+#ifndef _BPF_INT_TYPES_
+#define _BPF_INT_TYPES_
+typedef __u32 uint32_t;
+typedef __u64 uint64_t;
+#endif
+#else
 #include <stdint.h>
+#endif
 
 /* ── Router Control Flags (router_ctrl.router_flags bitmask) ─────────────── */
 #define CTRL_FLAG_SNAT_ENABLED   (1u << 0) /* Apply SNAT in XDP path */

@@ -1,6 +1,5 @@
-/*
- * Unit Test: FluxWAN Real PPPoE Session Manager
- */
+#define _GNU_SOURCE
+#define _DEFAULT_SOURCE
 
 #include "pppoe_manager.h"
 #include "fluxwan.h"

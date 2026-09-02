@@ -16,18 +16,47 @@
  *   3. balancer_kern.c → LRU session map pattern, Maglev ring lookup
  * =========================================================================== */
 
-#include <stdint.h>
+#include <linux/types.h>
 #include <stdbool.h>
 #include <stddef.h>
 
-#if defined(__BPF__) || defined(BPF_HELPERS)
+#ifndef _BPF_INT_TYPES_
+#define _BPF_INT_TYPES_
+typedef __u8   uint8_t;
+typedef __u16  uint16_t;
+typedef __u32  uint32_t;
+typedef __u64  uint64_t;
+#endif
+
+#if defined(__BPF__) || defined(BPF_HELPERS) || defined(__bpf__)
 #include <linux/bpf.h>
 #include <linux/if_ether.h>
 #include <linux/ip.h>
 #include <linux/in.h>
 #include <linux/tcp.h>
 #include <linux/udp.h>
-#include <linux/icmp.h>
+struct icmphdr {
+    __u8   type;
+    __u8   code;
+    __sum16 checksum;
+    union {
+        struct {
+            __be16 id;
+            __be16 sequence;
+        } echo;
+        __be32 gateway;
+        struct {
+            __be16 __unused;
+            __be16 mtu;
+        } frag;
+    } un;
+};
+#ifndef ICMP_ECHO
+#define ICMP_ECHO 8
+#endif
+#ifndef ICMP_ECHOREPLY
+#define ICMP_ECHOREPLY 0
+#endif
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
 #else

@@ -10,6 +10,9 @@
  *   6. Verifies FIN/RST session teardown
  * =========================================================================== */
 
+#define _GNU_SOURCE
+#define _DEFAULT_SOURCE
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>

@@ -1,11 +1,11 @@
 TARGET ?= fluxwan
 CC ?= gcc
 CLANG ?= clang
-CFLAGS ?= -O2 -Wall -Wextra -std=c11 -Iinclude -D_GNU_SOURCE
+CFLAGS ?= -O2 -Wall -Wextra -std=c11 -Iinclude -D_GNU_SOURCE -D_DEFAULT_SOURCE
 LDFLAGS ?= -pthread
 
 BPF_CLANG ?= clang
-BPF_CFLAGS ?= -O2 -target bpf -Iinclude
+BPF_CFLAGS ?= -O2 -target bpf -D__TARGET_ARCH_x86 -Iinclude
 
 SRCS = src/main.c \
        src/config.c \
@@ -22,7 +22,7 @@ SRCS = src/main.c \
        src/dns64_daemon.c
 
 OBJS = $(SRCS:.c=.o)
-BPF_OBJ = bpf/xdp_router.bpf.o
+BPF_OBJS = bpf/xdp_router.bpf.o bpf/xdp_nat46.bpf.o
 
 LAB_SRCS = tests/lab_runner.c \
            src/config.c \
@@ -40,16 +40,22 @@ LAB_SRCS = tests/lab_runner.c \
 LAB_OBJS = $(LAB_SRCS:.c=.o)
 LAB_TARGET = fluxwan_lab
 
+# Test executables
+TEST_WAN = test_wan_validator
+TEST_PPPOE = test_pppoe_manager
+TEST_NAT46 = test_live_nat46_translation
+TEST_XDP = test_xdp_packet
+
 all: ui bpf $(TARGET) $(LAB_TARGET)
 
 ui:
 	@py scripts/embed_ui.py || python3 scripts/embed_ui.py
 
-bpf: $(BPF_OBJ)
+bpf: $(BPF_OBJS)
 
-$(BPF_OBJ): bpf/xdp_router.bpf.c
+bpf/%.bpf.o: bpf/%.bpf.c
 	@mkdir -p bpf
-	$(BPF_CLANG) $(BPF_CFLAGS) -c $< -o $@ || echo "BPF compilation skipped (clang bpf target required for kernel bytecode)"
+	$(BPF_CLANG) $(BPF_CFLAGS) -c $< -o $@ || echo "BPF compilation skipped (requires clang bpf target & kernel headers)"
 
 $(TARGET): $(OBJS)
 	$(CC) $(OBJS) -o $@ $(LDFLAGS)
@@ -60,8 +66,37 @@ $(LAB_TARGET): $(LAB_OBJS)
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
+# Unit & Functional Tests
+$(TEST_WAN): tests/test_wan_validator.c src/config.c
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+$(TEST_PPPOE): tests/test_pppoe_manager.c src/pppoe_manager.c
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+$(TEST_NAT46): tests/test_live_nat46_translation.c
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+$(TEST_XDP): tests/xdp_packet_test.c src/config.c src/wan_manager.c src/netlink_manager.c src/bpf_loader.c src/prober.c src/sticky.c src/net_discovery.c src/pppoe_manager.c src/dhcp_server.c src/net_apply.c src/dns64_daemon.c
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
+
+test: $(TEST_WAN) $(TEST_PPPOE) $(TEST_NAT46) $(LAB_TARGET)
+	@echo "================================================================"
+	@echo "   Running FluxWAN Automated Test Suites                        "
+	@echo "================================================================"
+	./$(TEST_WAN)
+	@echo ""
+	./$(TEST_PPPOE)
+	@echo ""
+	./$(TEST_NAT46)
+	@echo ""
+	./$(LAB_TARGET)
+	@echo ""
+	@echo "================================================================"
+	@echo "   [✓] ALL TESTS COMPLETED SUCCESSFULLY!                        "
+	@echo "================================================================"
+
 clean:
-	rm -f $(OBJS) $(LAB_OBJS) $(TARGET) $(LAB_TARGET) bpf/*.o include/ui_assets.h
+	rm -f $(OBJS) $(LAB_OBJS) $(TARGET) $(LAB_TARGET) $(TEST_WAN) $(TEST_PPPOE) $(TEST_NAT46) $(TEST_XDP) bpf/*.o include/ui_assets.h
 
 real-lab: $(TARGET)
 	@echo "Running Real Linux Network Lab (requires root)..."
@@ -74,17 +109,7 @@ asan: clean all
 valgrind: $(TARGET)
 	valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes ./$(TARGET) config/fluxwan.json
 
-appliance: iso
+appliance:
+	./build.sh all
 
-fluxwan-os: iso
-
-iso:
-	@echo "Building FluxWAN Embedded Standalone Bootable ISO..."
-	bash scripts/build_iso_embedded.sh
-
-iso-docker:
-	@echo "Building FluxWAN ISO using isolated Docker builder container..."
-	docker build -f iso/Dockerfile.builder -t fluxwan-iso-builder .
-	docker run --rm --privileged -v $$(pwd):/workspace fluxwan-iso-builder bash scripts/build_iso_embedded.sh
-
-.PHONY: all ui bpf clean lab real-lab asan valgrind iso iso-docker appliance fluxwan-os
+.PHONY: all ui bpf clean lab real-lab asan valgrind test appliance

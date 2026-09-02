@@ -15,6 +15,10 @@
 /fluxwan
 /fluxwan_lab
 /fluxwan_test
+/test_wan_validator
+/test_pppoe_manager
+/test_live_nat46_translation
+/test_xdp_packet
 
 # Cache & Temporary Directories
 .cache/

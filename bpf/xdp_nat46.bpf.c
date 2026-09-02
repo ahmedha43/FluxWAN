@@ -15,6 +15,10 @@
 #include <bpf/bpf_endian.h>
 #include "nat46_maps.h"
 
+#ifndef IP_DF
+#define IP_DF 0x4000
+#endif
+
 /* Forward Map: Synthetic IPv4 -> Real IPv6 Target */
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);

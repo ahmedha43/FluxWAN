@@ -26,6 +26,12 @@ static char *read_file_to_string(const char *filepath) {
     return buffer;
 }
 
+static inline void safe_str_copy(char *dst, const char *src, size_t max_len) {
+    if (!dst || max_len == 0) return;
+    if (!src) { dst[0] = '\0'; return; }
+    snprintf(dst, max_len, "%s", src);
+}
+
 static const char *extract_json_string(const char *json, const char *key, char *out_val, size_t max_len) {
     char pattern[128];
     snprintf(pattern, sizeof(pattern), "\"%s\"", key);
@@ -107,9 +113,9 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
     if (lan_pos) {
         char val[64];
         if (extract_json_string(lan_pos, "interface", val, sizeof(val))) {
-            strncpy(out_config->lan.name, val, sizeof(out_config->lan.name) - 1);
+            safe_str_copy(out_config->lan.name, val, sizeof(out_config->lan.name));
         } else {
-            strncpy(out_config->lan.name, "eth0", sizeof(out_config->lan.name) - 1);
+            safe_str_copy(out_config->lan.name, "eth0", sizeof(out_config->lan.name));
         }
 
         if (extract_json_string(lan_pos, "ip", val, sizeof(val))) {
@@ -154,10 +160,10 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
                     
                     char val[64];
                     if (extract_json_string(obj_str, "name", val, sizeof(val))) {
-                        strncpy(w->name, val, sizeof(w->name) - 1);
+                        safe_str_copy(w->name, val, sizeof(w->name));
                     }
                     if (extract_json_string(obj_str, "label", val, sizeof(val))) {
-                        strncpy(w->label, val, sizeof(w->label) - 1);
+                        safe_str_copy(w->label, val, sizeof(w->label));
                     }
                     
                     if (extract_json_string(obj_str, "type", val, sizeof(val))) {
@@ -177,10 +183,10 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
                     }
 
                     if (extract_json_string(obj_str, "username", val, sizeof(val))) {
-                        strncpy(w->ppp_username, val, sizeof(w->ppp_username) - 1);
+                        safe_str_copy(w->ppp_username, val, sizeof(w->ppp_username));
                     }
                     if (extract_json_string(obj_str, "password", val, sizeof(val))) {
-                        strncpy(w->ppp_password, val, sizeof(w->ppp_password) - 1);
+                        safe_str_copy(w->ppp_password, val, sizeof(w->ppp_password));
                     }
 
                     uint32_t weight = (uint32_t)extract_json_int(obj_str, "weight", 100);
@@ -190,7 +196,7 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
                     w->mss_clamping = (uint16_t)extract_json_int(obj_str, "mss_clamping", 1452);
 
                     if (extract_json_string(obj_str, "probe_target", val, sizeof(val))) {
-                        strncpy(w->probe_target, val, sizeof(w->probe_target) - 1);
+                        safe_str_copy(w->probe_target, val, sizeof(w->probe_target));
                         w->probe_target_ip = str_to_ip(val);
                     }
 
@@ -237,13 +243,13 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
     if (web_pos) {
         char val[64];
         if (extract_json_string(web_pos, "bind_ip", val, sizeof(val))) {
-            strncpy(out_config->web.bind_ip, val, sizeof(out_config->web.bind_ip) - 1);
+            safe_str_copy(out_config->web.bind_ip, val, sizeof(out_config->web.bind_ip));
         } else {
-            strncpy(out_config->web.bind_ip, "0.0.0.0", sizeof(out_config->web.bind_ip) - 1);
+            safe_str_copy(out_config->web.bind_ip, "0.0.0.0", sizeof(out_config->web.bind_ip));
         }
         out_config->web.port = (uint16_t)extract_json_int(web_pos, "port", 8080);
     } else {
-        strncpy(out_config->web.bind_ip, "0.0.0.0", sizeof(out_config->web.bind_ip) - 1);
+        safe_str_copy(out_config->web.bind_ip, "0.0.0.0", sizeof(out_config->web.bind_ip));
         out_config->web.port = 8080;
     }
 
@@ -253,25 +259,25 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
         out_config->auth.enabled = extract_json_bool(auth_pos, "enabled", true);
         char val[64];
         if (extract_json_string(auth_pos, "username", val, sizeof(val))) {
-            strncpy(out_config->auth.username, val, sizeof(out_config->auth.username) - 1);
+            safe_str_copy(out_config->auth.username, val, sizeof(out_config->auth.username));
         } else {
-            strncpy(out_config->auth.username, "admin", sizeof(out_config->auth.username) - 1);
+            safe_str_copy(out_config->auth.username, "admin", sizeof(out_config->auth.username));
         }
         if (extract_json_string(auth_pos, "password", val, sizeof(val))) {
-            strncpy(out_config->auth.password, val, sizeof(out_config->auth.password) - 1);
+            safe_str_copy(out_config->auth.password, val, sizeof(out_config->auth.password));
         } else {
-            strncpy(out_config->auth.password, "admin", sizeof(out_config->auth.password) - 1);
+            safe_str_copy(out_config->auth.password, "admin", sizeof(out_config->auth.password));
         }
         if (extract_json_string(auth_pos, "session_token", val, sizeof(val))) {
-            strncpy(out_config->auth.session_token, val, sizeof(out_config->auth.session_token) - 1);
+            safe_str_copy(out_config->auth.session_token, val, sizeof(out_config->auth.session_token));
         } else {
-            strncpy(out_config->auth.session_token, "flux_sec_token_987", sizeof(out_config->auth.session_token) - 1);
+            safe_str_copy(out_config->auth.session_token, "flux_sec_token_987", sizeof(out_config->auth.session_token));
         }
     } else {
         out_config->auth.enabled = true;
-        strncpy(out_config->auth.username, "admin", sizeof(out_config->auth.username) - 1);
-        strncpy(out_config->auth.password, "admin", sizeof(out_config->auth.password) - 1);
-        strncpy(out_config->auth.session_token, "flux_sec_token_987", sizeof(out_config->auth.session_token) - 1);
+        safe_str_copy(out_config->auth.username, "admin", sizeof(out_config->auth.username));
+        safe_str_copy(out_config->auth.password, "admin", sizeof(out_config->auth.password));
+        safe_str_copy(out_config->auth.session_token, "flux_sec_token_987", sizeof(out_config->auth.session_token));
     }
 
     /* Parse NAT46 block */
@@ -280,25 +286,25 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
         out_config->nat46.enabled = extract_json_bool(nat46_pos, "enabled", true);
         char val[64];
         if (extract_json_string(nat46_pos, "synthetic_prefix", val, sizeof(val))) {
-            strncpy(out_config->nat46.synthetic_prefix, val, sizeof(out_config->nat46.synthetic_prefix) - 1);
+            safe_str_copy(out_config->nat46.synthetic_prefix, val, sizeof(out_config->nat46.synthetic_prefix));
         } else {
-            strncpy(out_config->nat46.synthetic_prefix, "198.18.0.0/15", sizeof(out_config->nat46.synthetic_prefix) - 1);
+            safe_str_copy(out_config->nat46.synthetic_prefix, "198.18.0.0/15", sizeof(out_config->nat46.synthetic_prefix));
         }
         if (extract_json_string(nat46_pos, "upstream_dns", val, sizeof(val))) {
-            strncpy(out_config->nat46.upstream_dns, val, sizeof(out_config->nat46.upstream_dns) - 1);
+            safe_str_copy(out_config->nat46.upstream_dns, val, sizeof(out_config->nat46.upstream_dns));
         } else {
-            strncpy(out_config->nat46.upstream_dns, "1.1.1.1", sizeof(out_config->nat46.upstream_dns) - 1);
+            safe_str_copy(out_config->nat46.upstream_dns, "1.1.1.1", sizeof(out_config->nat46.upstream_dns));
         }
         if (extract_json_string(nat46_pos, "starlink_wan_name", val, sizeof(val))) {
-            strncpy(out_config->nat46.starlink_wan_name, val, sizeof(out_config->nat46.starlink_wan_name) - 1);
+            safe_str_copy(out_config->nat46.starlink_wan_name, val, sizeof(out_config->nat46.starlink_wan_name));
         } else {
-            strncpy(out_config->nat46.starlink_wan_name, "veth_wan2", sizeof(out_config->nat46.starlink_wan_name) - 1);
+            safe_str_copy(out_config->nat46.starlink_wan_name, "veth_wan2", sizeof(out_config->nat46.starlink_wan_name));
         }
     } else {
         out_config->nat46.enabled = true;
-        strncpy(out_config->nat46.synthetic_prefix, "198.18.0.0/15", sizeof(out_config->nat46.synthetic_prefix) - 1);
-        strncpy(out_config->nat46.upstream_dns, "1.1.1.1", sizeof(out_config->nat46.upstream_dns) - 1);
-        strncpy(out_config->nat46.starlink_wan_name, "veth_wan2", sizeof(out_config->nat46.starlink_wan_name) - 1);
+        safe_str_copy(out_config->nat46.synthetic_prefix, "198.18.0.0/15", sizeof(out_config->nat46.synthetic_prefix));
+        safe_str_copy(out_config->nat46.upstream_dns, "1.1.1.1", sizeof(out_config->nat46.upstream_dns));
+        safe_str_copy(out_config->nat46.starlink_wan_name, "veth_wan2", sizeof(out_config->nat46.starlink_wan_name));
     }
 
     free(json);

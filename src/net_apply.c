@@ -2,6 +2,20 @@
 #include <fcntl.h>
 #include <net/if.h>
 
+#if defined(__linux__)
+static inline int safe_system(const char *cmd) {
+    if (!cmd || cmd[0] == '\0') return -1;
+    int rc = system(cmd);
+    (void)rc; /* Acknowledged exit code */
+    return rc;
+}
+#else
+static inline int safe_system(const char *cmd) {
+    (void)cmd;
+    return 0;
+}
+#endif
+
 int net_apply_set_ip_forward(bool enable) {
 #if defined(__linux__)
     int fd = open("/proc/sys/net/ipv4/ip_forward", O_WRONLY);
@@ -26,13 +40,13 @@ int net_apply_set_ip_forward(bool enable) {
 int net_apply_wan_nat(const char *wan_ifname, bool enable) {
     if (!wan_ifname) return -1;
 #if defined(__linux__)
-    char cmd[256];
+    char cmd[512];
     if (enable) {
         snprintf(cmd, sizeof(cmd), "iptables -t nat -C POSTROUTING -o %s -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o %s -j MASQUERADE 2>/dev/null", wan_ifname, wan_ifname);
     } else {
         snprintf(cmd, sizeof(cmd), "iptables -t nat -D POSTROUTING -o %s -j MASQUERADE 2>/dev/null", wan_ifname);
     }
-    system(cmd);
+    safe_system(cmd);
 #endif
     LOG_INFO("[Firewall/NAT] %s Masquerade on WAN interface %s", enable ? "Enabling" : "Disabling", wan_ifname);
     return 0;
@@ -42,9 +56,9 @@ static void apply_mss_clamping(const wan_config_t *wan) {
     if (!wan) return;
     uint16_t mss = wan->mss_clamping > 0 ? wan->mss_clamping : (wan->type == WAN_TYPE_PPPOE ? 1452 : 1460);
 #if defined(__linux__)
-    char cmd[256];
+    char cmd[512];
     snprintf(cmd, sizeof(cmd), "iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -o %s -j TCPMSS --set-mss %u 2>/dev/null || iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -o %s -j TCPMSS --set-mss %u 2>/dev/null", wan->name, mss, wan->name, mss);
-    system(cmd);
+    safe_system(cmd);
 #endif
     LOG_INFO("[QoS / MTU] Configuring TCP MSS Clamping to %u bytes on %s", mss, wan->name);
 }
@@ -58,10 +72,10 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
     net_apply_set_ip_forward(true);
 #if defined(__linux__)
     /* Multi-WAN ARP Isolation & RP Filter for overlapping subnets/identical gateways (e.g. Starlink 192.168.1.1) */
-    system("sysctl -w net.ipv4.conf.all.arp_ignore=1 >/dev/null 2>&1");
-    system("sysctl -w net.ipv4.conf.all.arp_announce=2 >/dev/null 2>&1");
-    system("sysctl -w net.ipv4.conf.all.rp_filter=2 >/dev/null 2>&1");
-    system("sysctl -w net.ipv4.conf.default.rp_filter=2 >/dev/null 2>&1");
+    safe_system("sysctl -w net.ipv4.conf.all.arp_ignore=1 >/dev/null 2>&1");
+    safe_system("sysctl -w net.ipv4.conf.all.arp_announce=2 >/dev/null 2>&1");
+    safe_system("sysctl -w net.ipv4.conf.all.rp_filter=2 >/dev/null 2>&1");
+    safe_system("sysctl -w net.ipv4.conf.default.rp_filter=2 >/dev/null 2>&1");
 #endif
 
     /* 2. Configure Dedicated LAN Interface */
@@ -78,9 +92,9 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
         netlink_set_interface_ip(nl, l_ifidx, config->lan.ip_addr, config->lan.netmask);
     }
 #if defined(__linux__)
-    char ip_cmd[256];
+    char ip_cmd[512];
     snprintf(ip_cmd, sizeof(ip_cmd), "ip addr replace %s/24 dev %s 2>/dev/null || ip addr add %s/24 dev %s 2>/dev/null; ip link set %s up 2>/dev/null", lan_ip, config->lan.name, lan_ip, config->lan.name, config->lan.name);
-    system(ip_cmd);
+    safe_system(ip_cmd);
 #endif
 
     /* 3. Configure Multi-WAN Interfaces & Policy Tables */
@@ -121,8 +135,8 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
 
 #if defined(__linux__)
     /* 4. Configure Linux Kernel Mangle Rules with Conntrack Sticky Marks */
-    system("iptables -t mangle -F PREROUTING 2>/dev/null || true");
-    system("iptables -t mangle -A PREROUTING -j CONNMARK --restore-mark 2>/dev/null || true");
+    safe_system("iptables -t mangle -F PREROUTING 2>/dev/null || true");
+    safe_system("iptables -t mangle -A PREROUTING -j CONNMARK --restore-mark 2>/dev/null || true");
 
     /* Calculate total active dynamic weight */
     uint32_t total_active_weight = 0;
@@ -152,10 +166,10 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
                          config->lan.name, prob, fwmark);
                 remaining_weight -= w->dynamic_weight;
             }
-            system(cmd);
+            safe_system(cmd);
         }
     }
-    system("iptables -t mangle -A PREROUTING -j CONNMARK --save-mark 2>/dev/null || true");
+    safe_system("iptables -t mangle -A PREROUTING -j CONNMARK --save-mark 2>/dev/null || true");
 #endif
 
     LOG_INFO("Network configuration successfully applied to Kernel!");

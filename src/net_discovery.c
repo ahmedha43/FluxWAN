@@ -49,17 +49,17 @@ static void read_ipv6_addr(const char *ifname, char *out_v6, size_t max_len) {
         unsigned int ifidx, plen, scope, flags;
         if (sscanf(line, "%32s %x %x %x %x %s", addr_hex, &ifidx, &plen, &scope, &flags, dev) == 6) {
             if (strcmp(dev, ifname) == 0 && scope == 0x00) { /* Global scope */
-                char formatted[48];
+                char formatted[64];
                 int fpos = 0;
                 for (int i = 0; i < 32; i += 4) {
                     if (i > 0) formatted[fpos++] = ':';
-                    strncpy(formatted + fpos, addr_hex + i, 4);
+                    memcpy(formatted + fpos, addr_hex + i, 4);
                     fpos += 4;
                 }
                 formatted[fpos] = '\0';
 
                 struct in6_addr a6;
-                char compressed[48];
+                char compressed[64];
                 if (inet_pton(AF_INET6, formatted, &a6) > 0 &&
                     inet_ntop(AF_INET6, &a6, compressed, sizeof(compressed))) {
                     snprintf(out_v6, max_len, "%s/%u", compressed, plen);
