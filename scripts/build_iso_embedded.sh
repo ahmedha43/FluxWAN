@@ -36,6 +36,11 @@ strip --strip-all "$PROJECT_ROOT/fluxwan" 2>/dev/null || true
 # 2. Extract Kernel & Minimal Hardware Modules
 # ------------------------------------------------------------------------------
 echo "[2/4] Extracting Linux LTS Kernel & Essential Hardware Modules..."
+if [ ! -f "$ALPINE_STD_ISO" ]; then
+    echo "[+] Downloading Alpine Linux LTS base ISO..."
+    mkdir -p "$(dirname "$ALPINE_STD_ISO")"
+    curl -fSL -o "$ALPINE_STD_ISO" https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/x86_64/alpine-standard-3.19.1-x86_64.iso
+fi
 mkdir -p "$BUILD_DIR/iso_extract"
 xorriso -osirrox on -indev "$ALPINE_STD_ISO" -extract / "$BUILD_DIR/iso_extract" >/dev/null 2>&1
 

@@ -31,6 +31,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential \
             gcc \
+            gcc-multilib \
             clang \
             llvm \
             libbpf-dev \
@@ -55,10 +56,10 @@ jobs:
           ctest --output-on-failure
 
   # ============================================================================
-  # 2. Build x86_64 Release Package
+  # 2. Build x86_64 Release Packages (Full Bootable ISO + Standalone Service)
   # ============================================================================
   build-x86_64:
-    name: Build x86_64 Appliance Package
+    name: Build x86_64 ISO & Appliance Package
     needs: build-and-test
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-22.04
@@ -67,7 +68,7 @@ jobs:
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
-      - name: Install Build Tools
+      - name: Install Build & ISO Tools
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -79,15 +80,22 @@ jobs:
             linux-libc-dev \
             python3 \
             zip \
-            tar
+            tar \
+            xorriso \
+            squashfs-tools \
+            curl
 
-      - name: Build & Package x86_64
+      - name: Build Full Hybrid Bootable ISO (UEFI + BIOS)
         run: |
-          echo "[+] Compiling x86_64 binaries & eBPF bytecode..."
-          make clean
-          make all
-          strip fluxwan fluxwan_lab
+          echo "[+] Building full bootable x86_64 ISO image..."
+          mkdir -p dist
+          curl -fSL -o dist/alpine-standard-base.iso https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/x86_64/alpine-standard-3.19.1-x86_64.iso
+          bash scripts/build_iso_embedded.sh
+          cp -f dist/fluxwan-os-x86_64.iso FluxWAN-OS-x86_64-Bootable.iso
 
+      - name: Build Standalone x86_64 Appliance Package
+        run: |
+          echo "[+] Packaging standalone x86_64 daemon & service..."
           mkdir -p dist_pkg/fluxwan-x86_64/bin
           mkdir -p dist_pkg/fluxwan-x86_64/bpf
           mkdir -p dist_pkg/fluxwan-x86_64/config
@@ -112,11 +120,12 @@ jobs:
         with:
           name: release-x86_64
           path: |
+            FluxWAN-OS-x86_64-Bootable.iso
             FluxWAN-x86_64-Appliance.zip
             FluxWAN-x86_64-Appliance.tar.gz
 
   # ============================================================================
-  # 3. Build MikroTik RB5009 (ARM64) Release Package
+  # 3. Build MikroTik RB5009 (ARM64) Release Packages
   # ============================================================================
   build-arm64:
     name: Build MikroTik RB5009 (ARM64) Package
@@ -196,7 +205,7 @@ jobs:
       - name: Generate Checksums (SHA256)
         run: |
           cd release_files
-          sha256sum FluxWAN-*.zip FluxWAN-*.tar.gz > SHA256SUMS.txt
+          sha256sum * > SHA256SUMS.txt
           cat SHA256SUMS.txt
           cd ..
 
@@ -219,6 +228,7 @@ jobs:
           prerelease: ${{ steps.vars.outputs.IS_PRERELEASE == 'true' }}
           draft: false
           files: |
+            release_files/FluxWAN-OS-x86_64-Bootable.iso
             release_files/FluxWAN-MikroTik-RB5009-ARM64.zip
             release_files/FluxWAN-MikroTik-RB5009-ARM64.tar.gz
             release_files/FluxWAN-x86_64-Appliance.zip
@@ -227,21 +237,23 @@ jobs:
           body: |
             ## 🚀 FluxWAN Carrier-Grade Multi-WAN Aggregator & Load Balancer
 
-            ### 📦 الإصدارات وحزم التثبيت المتاحة (Release Packages):
+            ### 📦 حزم ونظام التشغيل الكامل الجاهز للتحميل والتنصيب المباشر (Ready-to-Deploy):
 
-            #### 1️⃣ راوترات مايكروتك MikroTik RB5009 (معمارية ARM64):
-            - **`FluxWAN-MikroTik-RB5009-ARM64.zip`**: حزمة التثبيت الشاملة لراوتر RB5009.
-              - تتضمن أداة الفلاش لويندوز بضغطة زر واحدة `FluxWAN-Windows-Flasher.bat`.
-              - تتضمن الثنائيات المترجمة لمعمارية ARM64 (`fluxwan`, `fluxwan_lab`).
-              - كود النواة `eBPF XDP` المسرع لتوجيه الرزم بسرعة السلك.
-              - دعم كامل لخطوط Starlink IPv6 والـ PPPoE المتعدد.
+            #### 1️⃣ صورة نظام التشغيل الكاملة لأجهزة وسيرفرات x86_64 (Bare-Metal & Virtual Appliance):
+            - **`FluxWAN-OS-x86_64-Bootable.iso` (~86 MB)**:
+              - صورة ISO ذاتية الإقلاع (Hybrid UEFI + BIOS) جاهزة للحرق المباشر على فلاشة USB باستخدام Rufus أو BalenaEtcher أو Ventoy.
+              - تتضمن نواة Linux LTS مع كامل تعريفات كروت الشبكة (Intel, Realtek, Mellanox 10G/25G/40G, VirtIO).
+              - تقلع وتثبت النظام تلقائياً على القرص الصلب أو الـ NVMe بضغطة زر.
+            - **`FluxWAN-x86_64-Appliance.zip`**: حزمة المحرك والخدمة المستقلة مع سكريبت التثبيت `install.sh`.
 
-            #### 2️⃣ أجهزة x86_64 (Bare-Metal & Virtual Appliance):
-            - **`FluxWAN-x86_64-Appliance.zip`**: حزمة التشغيل والتثبيت لسيرفرات وأجهزة x86_64.
-              - سكريبت التثبيت التلقائي `install.sh` وخدمة `systemd/fluxwan.service`.
-              - لوحة التحكم عبر الويب Web UI مع دعم WebSocket اللحظي.
+            #### 2️⃣ حزمة راوترات مايكروتك MikroTik RB5009 (معمارية ARM64):
+            - **`FluxWAN-MikroTik-RB5009-ARM64.zip`**:
+              - أداة الفلاش السريع لويندوز `FluxWAN-Windows-Flasher.bat` (فلاش بنقرة واحدة عبر TFTP/Netinstall).
+              - الثنائيات المترجمة لمعمارية ARM64 (`bin/fluxwan`, `bin/fluxwan_lab`).
+              - كائنات النواة `eBPF XDP` المسرعة لتوجيه الرزم بسرعة السلك.
+              - الدعم الكامل لجلسات Starlink IPv6 والـ PPPoE المتعدد.
 
             ---
 
             ### 🔐 التحقق من سلامة الملفات (Checksums):
-            تجدون تجزئات `SHA-256` لجميع الملفات داخل مرفق `SHA256SUMS.txt`.
+            تجدون بصمات `SHA-256` لجميع الملفات داخل المرفق `SHA256SUMS.txt`.
