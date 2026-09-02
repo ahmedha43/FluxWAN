@@ -68,13 +68,13 @@ static void read_ipv6_addr(const char *ifname, char *out_v6, size_t max_len) {
                 formatted[fpos] = '\0';
 
                 struct in6_addr a6;
-                char compressed[128];
-                char tmp[128];
+                char compressed[48];
+                char tmp[64];
                 if (inet_pton(AF_INET6, formatted, &a6) > 0 &&
                     inet_ntop(AF_INET6, &a6, compressed, sizeof(compressed))) {
-                    snprintf(tmp, sizeof(tmp), "%s/%u", compressed, plen);
+                    snprintf(tmp, sizeof(tmp), "%.45s/%u", compressed, plen);
                 } else {
-                    snprintf(tmp, sizeof(tmp), "%s/%u", formatted, plen);
+                    snprintf(tmp, sizeof(tmp), "%.45s/%u", formatted, plen);
                 }
                 safe_str_copy(out_v6, tmp, max_len);
                 break;
