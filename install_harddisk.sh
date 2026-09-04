@@ -235,12 +235,12 @@ ensure_ext4_ready() {
 
 ensure_ext4_ready
 
-echo -e "    * Formatting Root Partition ($ROOT_PART as Ext4)..."
-mkfs.ext4 -F -L "FLUXWAN_ROOT" "$ROOT_PART" || {
+echo -e "    * Formatting Root Partition ($ROOT_PART as Ext4, Syslinux-compatible)..."
+mkfs.ext4 -F -O ^64bit,^orphan_file,^metadata_csum_seed -L "FLUXWAN_ROOT" "$ROOT_PART" || {
     echo -e "${YELLOW}[*] Retrying ext4 format on $ROOT_PART...${NC}"
     sync
     sleep 2
-    mkfs.ext4 -F -L "FLUXWAN_ROOT" "$ROOT_PART"
+    mkfs.ext4 -F -O ^64bit,^orphan_file,^metadata_csum_seed -L "FLUXWAN_ROOT" "$ROOT_PART"
 }
 
 sync
@@ -305,25 +305,107 @@ if [ -d /opt/fluxwan ]; then
 fi
 chmod +x "$MOUNT_DIR/opt/fluxwan/fluxwan" 2>/dev/null || true
 
-# Locate live media boot files
-LIVE_BOOT_DIR=""
-for candidate in /media/*/boot /media/sr0/boot /media/cdrom/boot /boot; do
-    if [ -f "$candidate/vmlinuz-lts" ]; then
-        LIVE_BOOT_DIR="$candidate"
+# Locate live media boot files (Kernel, Initramfs, Modloop, Syslinux)
+echo -e "    * Locating Linux LTS Kernel & Boot Media Files..."
+
+# 1. Mount any CDROM / ISO block devices if not mounted
+mkdir -p /media/cdrom /media/sr0
+for blk in /dev/sr* /dev/cdrom* /dev/iso9660; do
+    if [ -b "$blk" ]; then
+        mount -t iso9660 -o ro "$blk" /media/cdrom 2>/dev/null || mount -o ro "$blk" /media/cdrom 2>/dev/null || true
+        mount -t iso9660 -o ro "$blk" /media/sr0 2>/dev/null || mount -o ro "$blk" /media/sr0 2>/dev/null || true
+    fi
+done
+
+# 2. Comprehensive search for vmlinuz-lts
+KERNEL_SRC=""
+for kcand in \
+    /media/cdrom/boot/vmlinuz-lts \
+    /media/sr0/boot/vmlinuz-lts \
+    /media/*/boot/vmlinuz-lts \
+    /boot/vmlinuz-lts \
+    /opt/fluxwan/boot/vmlinuz-lts; do
+    if [ -f "$kcand" ] && [ -s "$kcand" ]; then
+        KERNEL_SRC="$kcand"
         break
     fi
 done
 
-echo -e "    * Copying Linux LTS Kernel & Driver Modloop..."
-if [ -n "$LIVE_BOOT_DIR" ]; then
-    cp -f "$LIVE_BOOT_DIR/vmlinuz-lts" "$MOUNT_DIR/boot/"
-    cp -f "$LIVE_BOOT_DIR/initramfs-lts" "$MOUNT_DIR/boot/"
-    [ -f "$LIVE_BOOT_DIR/modloop-lts" ] && cp -f "$LIVE_BOOT_DIR/modloop-lts" "$MOUNT_DIR/boot/"
-    if [ -d "$LIVE_BOOT_DIR/syslinux" ]; then
-        mkdir -p "$MOUNT_DIR/boot/syslinux"
-        cp -a "$LIVE_BOOT_DIR/syslinux/." "$MOUNT_DIR/boot/syslinux/" 2>/dev/null || true
-    fi
+if [ -z "$KERNEL_SRC" ]; then
+    KERNEL_SRC=$(find /media /boot /opt -name "vmlinuz-lts" 2>/dev/null | head -n 1)
 fi
+
+[ -n "$KERNEL_SRC" ] && [ -s "$KERNEL_SRC" ] || {
+    echo -e "${RED}[!] ERROR: Cannot locate Linux kernel (vmlinuz-lts) on installation media.${NC}" >&2
+    exit 1
+}
+
+KERNEL_DIR=$(dirname "$KERNEL_SRC")
+LIVE_BOOT_DIR="$KERNEL_DIR"
+echo -e "    * Found Linux Kernel at: ${CYAN}$KERNEL_SRC${NC}"
+
+# 3. Copy kernel to /boot/, /boot/syslinux/, /boot/extlinux/, and /
+mkdir -p "$MOUNT_DIR/boot/syslinux" "$MOUNT_DIR/boot/extlinux"
+cp -f "$KERNEL_SRC" "$MOUNT_DIR/boot/vmlinuz-lts"
+cp -f "$KERNEL_SRC" "$MOUNT_DIR/boot/syslinux/vmlinuz-lts"
+cp -f "$KERNEL_SRC" "$MOUNT_DIR/boot/extlinux/vmlinuz-lts"
+cp -f "$KERNEL_SRC" "$MOUNT_DIR/vmlinuz-lts"
+
+# 4. Locate and copy initramfs-lts
+INITRAMFS_SRC=""
+for icand in \
+    "$KERNEL_DIR/initramfs-lts" \
+    /media/cdrom/boot/initramfs-lts \
+    /media/sr0/boot/initramfs-lts \
+    /media/*/boot/initramfs-lts \
+    /boot/initramfs-lts \
+    /opt/fluxwan/boot/initramfs-lts; do
+    if [ -f "$icand" ] && [ -s "$icand" ]; then
+        INITRAMFS_SRC="$icand"
+        break
+    fi
+done
+
+if [ -n "$INITRAMFS_SRC" ]; then
+    echo -e "    * Found Initramfs at: ${CYAN}$INITRAMFS_SRC${NC}"
+    cp -f "$INITRAMFS_SRC" "$MOUNT_DIR/boot/initramfs-lts"
+    cp -f "$INITRAMFS_SRC" "$MOUNT_DIR/boot/syslinux/initramfs-lts"
+    cp -f "$INITRAMFS_SRC" "$MOUNT_DIR/boot/extlinux/initramfs-lts"
+    cp -f "$INITRAMFS_SRC" "$MOUNT_DIR/initramfs-lts"
+fi
+
+# 5. Locate and copy modloop-lts
+for mcand in \
+    "$KERNEL_DIR/modloop-lts" \
+    /media/cdrom/boot/modloop-lts \
+    /media/sr0/boot/modloop-lts \
+    /media/*/boot/modloop-lts \
+    /boot/modloop-lts \
+    /opt/fluxwan/boot/modloop-lts; do
+    if [ -f "$mcand" ]; then
+        cp -f "$mcand" "$MOUNT_DIR/boot/modloop-lts" 2>/dev/null || true
+        break
+    fi
+done
+
+# 6. Copy live media syslinux files if found
+for scand in "$KERNEL_DIR/syslinux" /media/cdrom/boot/syslinux /media/sr0/boot/syslinux /media/*/boot/syslinux /boot/syslinux; do
+    if [ -d "$scand" ]; then
+        cp -a "$scand"/.[!.]* "$scand"/* "$MOUNT_DIR/boot/syslinux/" 2>/dev/null || true
+    fi
+done
+
+# 7. CRITICAL VERIFICATION: Ensure kernel and initramfs exist and are non-empty on target disk
+[ -s "$MOUNT_DIR/boot/vmlinuz-lts" ] || {
+    echo -e "${RED}[!] ERROR: vmlinuz-lts was not copied to $MOUNT_DIR/boot/. Target disk cannot boot.${NC}" >&2
+    exit 1
+}
+[ -s "$MOUNT_DIR/boot/initramfs-lts" ] || {
+    echo -e "${RED}[!] ERROR: initramfs-lts was not copied to $MOUNT_DIR/boot/. Target disk cannot boot.${NC}" >&2
+    exit 1
+}
+echo -e "    * Kernel verified: $(ls -lh "$MOUNT_DIR/boot/vmlinuz-lts" 2>/dev/null | awk '{print $5, $9}')"
+echo -e "    * Initramfs verified: $(ls -lh "$MOUNT_DIR/boot/initramfs-lts" 2>/dev/null | awk '{print $5, $9}')"
 
 # Ensure kernel modules are unpacked in /lib/modules
 if [ -d /lib/modules ]; then
@@ -430,27 +512,42 @@ EOF
         echo -e "    * ${GREEN}GRUB2 MBR installed successfully.${NC}"
     else
         echo -e "${YELLOW}[!] GRUB BIOS install unavailable or failed; trying Extlinux fallback.${NC}"
-        mkdir -p "$MOUNT_DIR/boot/syslinux" "$MOUNT_DIR/boot/extlinux"
+        mkdir -p "$MOUNT_DIR/boot" "$MOUNT_DIR/boot/syslinux" "$MOUNT_DIR/boot/extlinux"
 
-        # Copy all Syslinux C32 modules (ldlinux.c32, libcom32.c32, libutil.c32, mboot.c32, etc.)
+        # Copy all Syslinux C32 modules (ldlinux.c32, libcom32.c32, libutil.c32, mboot.c32, menu.c32, etc.)
         for src in /boot/syslinux /usr/share/syslinux /usr/lib/syslinux/bios /usr/lib/syslinux/mbr /media/*/boot/syslinux /media/sr0/boot/syslinux "$LIVE_BOOT_DIR/syslinux"; do
             if [ -d "$src" ]; then
+                cp -f "$src"/*.c32 "$MOUNT_DIR/boot/" 2>/dev/null || true
                 cp -f "$src"/*.c32 "$MOUNT_DIR/boot/syslinux/" 2>/dev/null || true
                 cp -f "$src"/*.c32 "$MOUNT_DIR/boot/extlinux/" 2>/dev/null || true
             fi
         done
 
         # Explicit fallback check for ldlinux.c32
-        if [ ! -f "$MOUNT_DIR/boot/syslinux/ldlinux.c32" ]; then
+        if [ ! -f "$MOUNT_DIR/boot/ldlinux.c32" ] || [ ! -f "$MOUNT_DIR/boot/syslinux/ldlinux.c32" ]; then
             for ld in /boot/syslinux/ldlinux.c32 /usr/share/syslinux/ldlinux.c32 /usr/lib/syslinux/bios/ldlinux.c32 /media/*/boot/syslinux/ldlinux.c32 /media/sr0/boot/syslinux/ldlinux.c32 "$LIVE_BOOT_DIR/syslinux/ldlinux.c32"; do
                 if [ -f "$ld" ]; then
+                    cp -f "$ld" "$MOUNT_DIR/boot/ldlinux.c32" 2>/dev/null || true
                     cp -f "$ld" "$MOUNT_DIR/boot/syslinux/ldlinux.c32" 2>/dev/null || true
+                    cp -f "$ld" "$MOUNT_DIR/boot/extlinux/ldlinux.c32" 2>/dev/null || true
+                    cp -f "$ld" "$MOUNT_DIR/ldlinux.c32" 2>/dev/null || true
                     break
                 fi
             done
         fi
-        cp -f "$MOUNT_DIR/boot/syslinux/ldlinux.c32" "$MOUNT_DIR/boot/extlinux/ldlinux.c32" 2>/dev/null || true
-        cp -f "$MOUNT_DIR/boot/syslinux/ldlinux.c32" "$MOUNT_DIR/ldlinux.c32" 2>/dev/null || true
+
+        # Ensure real kernel and initramfs binaries exist in /boot, /boot/syslinux, /boot/extlinux, and /
+        cp -f "$KERNEL_SRC" "$MOUNT_DIR/boot/vmlinuz-lts" 2>/dev/null || true
+        cp -f "$KERNEL_SRC" "$MOUNT_DIR/boot/syslinux/vmlinuz-lts" 2>/dev/null || true
+        cp -f "$KERNEL_SRC" "$MOUNT_DIR/boot/extlinux/vmlinuz-lts" 2>/dev/null || true
+        cp -f "$KERNEL_SRC" "$MOUNT_DIR/vmlinuz-lts" 2>/dev/null || true
+
+        if [ -n "$INITRAMFS_SRC" ]; then
+            cp -f "$INITRAMFS_SRC" "$MOUNT_DIR/boot/initramfs-lts" 2>/dev/null || true
+            cp -f "$INITRAMFS_SRC" "$MOUNT_DIR/boot/syslinux/initramfs-lts" 2>/dev/null || true
+            cp -f "$INITRAMFS_SRC" "$MOUNT_DIR/boot/extlinux/initramfs-lts" 2>/dev/null || true
+            cp -f "$INITRAMFS_SRC" "$MOUNT_DIR/initramfs-lts" 2>/dev/null || true
+        fi
 
         CFG_CONTENT="DEFAULT fluxwan
 PROMPT 0
@@ -467,35 +564,34 @@ LABEL fluxwan-rel
   LINUX vmlinuz-lts
   INITRD initramfs-lts
   APPEND root=$ROOT_SPEC rootfstype=ext4 rw quiet console=tty0 console=ttyS0,115200
+
+LABEL fluxwan-safe
+  MENU LABEL FluxWAN (Safe Mode / Verbose)
+  LINUX /boot/vmlinuz-lts
+  INITRD /boot/initramfs-lts
+  APPEND root=$ROOT_SPEC rootfstype=ext4 rw debug verbose console=tty0 console=ttyS0,115200
 "
-        mkdir -p "$MOUNT_DIR/boot/syslinux" "$MOUNT_DIR/boot/extlinux"
 
         # Write configuration to all possible locations and filenames expected by Extlinux/Syslinux
         for cfg in \
+            "$MOUNT_DIR/boot/extlinux.conf" \
+            "$MOUNT_DIR/boot/syslinux.cfg" \
             "$MOUNT_DIR/boot/syslinux/extlinux.conf" \
             "$MOUNT_DIR/boot/syslinux/syslinux.cfg" \
             "$MOUNT_DIR/boot/extlinux/extlinux.conf" \
             "$MOUNT_DIR/boot/extlinux/syslinux.cfg" \
             "$MOUNT_DIR/extlinux.conf" \
-            "$MOUNT_DIR/syslinux.cfg" \
-            "$MOUNT_DIR/boot/extlinux.conf" \
-            "$MOUNT_DIR/boot/syslinux.cfg"; do
+            "$MOUNT_DIR/syslinux.cfg"; do
             printf "%s\n" "$CFG_CONTENT" > "$cfg"
             sed -i 's/\r$//' "$cfg" 2>/dev/null || true
         done
-
-        # Also place kernel and initramfs links in /boot/syslinux for relative path safety
-        ln -sf ../vmlinuz-lts "$MOUNT_DIR/boot/syslinux/vmlinuz-lts" 2>/dev/null || true
-        ln -sf ../initramfs-lts "$MOUNT_DIR/boot/syslinux/initramfs-lts" 2>/dev/null || true
-        ln -sf ../vmlinuz-lts "$MOUNT_DIR/boot/extlinux/vmlinuz-lts" 2>/dev/null || true
-        ln -sf ../initramfs-lts "$MOUNT_DIR/boot/extlinux/initramfs-lts" 2>/dev/null || true
 
         command -v extlinux >/dev/null 2>&1 || {
             echo -e "${RED}[!] ERROR: Neither GRUB nor extlinux is available; the disk is not bootable.${NC}" >&2
             exit 1
         }
         echo -e "    * Installing Extlinux bootloader on $ROOT_PART..."
-        extlinux --install "$MOUNT_DIR/boot/syslinux" || extlinux --install "$MOUNT_DIR/boot/extlinux" || extlinux --install "$MOUNT_DIR" || {
+        extlinux --install "$MOUNT_DIR/boot" 2>/dev/null || extlinux --install "$MOUNT_DIR/boot/syslinux" 2>/dev/null || extlinux --install "$MOUNT_DIR/boot/extlinux" 2>/dev/null || extlinux --install "$MOUNT_DIR" || {
             echo -e "${RED}[!] ERROR: Extlinux installation failed; the disk is not bootable.${NC}" >&2
             exit 1
         }

@@ -234,10 +234,13 @@ cp -f "$DIST_DIR/localhost.apkovl.tar.gz" "$ISO_DIR/localhost.apkovl.tar.gz"
 cp -f "$DIST_DIR/localhost.apkovl.tar.gz" "$ISO_DIR/alpine.apkovl.tar.gz"
 cp -f "$DIST_DIR/localhost.apkovl.tar.gz" "$ISO_DIR/fluxwan.apkovl.tar.gz"
 cp -f "$DIST_DIR/localhost.apkovl.tar.gz" "$ISO_DIR/apkovl.tar.gz"
-mkdir -p "$ISO_DIR/opt/fluxwan"
+mkdir -p "$ISO_DIR/opt/fluxwan/boot"
 cp -f "$PROJECT_ROOT/fluxwan" "$ISO_DIR/opt/fluxwan/"
 cp -f "$PROJECT_ROOT/config/fluxwan.json" "$ISO_DIR/opt/fluxwan/config.json"
 cp -f "$DIST_DIR/fluxwan-rootfs.tar.gz" "$ISO_DIR/opt/fluxwan/"
+cp -f "$ISO_DIR/boot/vmlinuz-lts" "$ISO_DIR/opt/fluxwan/boot/" 2>/dev/null || true
+cp -f "$ISO_DIR/boot/initramfs-lts" "$ISO_DIR/opt/fluxwan/boot/" 2>/dev/null || true
+cp -f "$ISO_DIR/boot/modloop-lts" "$ISO_DIR/opt/fluxwan/boot/" 2>/dev/null || true
 
 # Direct injection into initramfs-lts (guarantees /usr/local/bin/fluxwan-menu exists immediately on boot)
 echo "[+] Embedding FluxWAN control console and filesystem drivers into initramfs-lts..."
