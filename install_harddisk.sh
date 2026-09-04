@@ -452,24 +452,50 @@ EOF
         cp -f "$MOUNT_DIR/boot/syslinux/ldlinux.c32" "$MOUNT_DIR/boot/extlinux/ldlinux.c32" 2>/dev/null || true
         cp -f "$MOUNT_DIR/boot/syslinux/ldlinux.c32" "$MOUNT_DIR/ldlinux.c32" 2>/dev/null || true
 
-        cat << EOF > "$MOUNT_DIR/boot/syslinux/syslinux.cfg"
-DEFAULT fluxwan
-TIMEOUT 20
+        CFG_CONTENT="DEFAULT fluxwan
 PROMPT 0
+TIMEOUT 20
+
 LABEL fluxwan
   MENU LABEL FluxWAN Multi-WAN Router Appliance
   LINUX /boot/vmlinuz-lts
   INITRD /boot/initramfs-lts
   APPEND root=$ROOT_SPEC rootfstype=ext4 rw quiet console=tty0 console=ttyS0,115200
-EOF
-        cp -f "$MOUNT_DIR/boot/syslinux/syslinux.cfg" "$MOUNT_DIR/boot/extlinux/extlinux.conf" 2>/dev/null || true
+
+LABEL fluxwan-rel
+  MENU LABEL FluxWAN (Relative Boot)
+  LINUX vmlinuz-lts
+  INITRD initramfs-lts
+  APPEND root=$ROOT_SPEC rootfstype=ext4 rw quiet console=tty0 console=ttyS0,115200
+"
+        mkdir -p "$MOUNT_DIR/boot/syslinux" "$MOUNT_DIR/boot/extlinux"
+
+        # Write configuration to all possible locations and filenames expected by Extlinux/Syslinux
+        for cfg in \
+            "$MOUNT_DIR/boot/syslinux/extlinux.conf" \
+            "$MOUNT_DIR/boot/syslinux/syslinux.cfg" \
+            "$MOUNT_DIR/boot/extlinux/extlinux.conf" \
+            "$MOUNT_DIR/boot/extlinux/syslinux.cfg" \
+            "$MOUNT_DIR/extlinux.conf" \
+            "$MOUNT_DIR/syslinux.cfg" \
+            "$MOUNT_DIR/boot/extlinux.conf" \
+            "$MOUNT_DIR/boot/syslinux.cfg"; do
+            printf "%s\n" "$CFG_CONTENT" > "$cfg"
+            sed -i 's/\r$//' "$cfg" 2>/dev/null || true
+        done
+
+        # Also place kernel and initramfs links in /boot/syslinux for relative path safety
+        ln -sf ../vmlinuz-lts "$MOUNT_DIR/boot/syslinux/vmlinuz-lts" 2>/dev/null || true
+        ln -sf ../initramfs-lts "$MOUNT_DIR/boot/syslinux/initramfs-lts" 2>/dev/null || true
+        ln -sf ../vmlinuz-lts "$MOUNT_DIR/boot/extlinux/vmlinuz-lts" 2>/dev/null || true
+        ln -sf ../initramfs-lts "$MOUNT_DIR/boot/extlinux/initramfs-lts" 2>/dev/null || true
 
         command -v extlinux >/dev/null 2>&1 || {
             echo -e "${RED}[!] ERROR: Neither GRUB nor extlinux is available; the disk is not bootable.${NC}" >&2
             exit 1
         }
         echo -e "    * Installing Extlinux bootloader on $ROOT_PART..."
-        extlinux --install "$MOUNT_DIR/boot/syslinux" || extlinux --install "$MOUNT_DIR/boot/extlinux" || {
+        extlinux --install "$MOUNT_DIR/boot/syslinux" || extlinux --install "$MOUNT_DIR/boot/extlinux" || extlinux --install "$MOUNT_DIR" || {
             echo -e "${RED}[!] ERROR: Extlinux installation failed; the disk is not bootable.${NC}" >&2
             exit 1
         }
