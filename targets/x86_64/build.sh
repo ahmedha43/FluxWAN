@@ -240,7 +240,7 @@ cp -f "$PROJECT_ROOT/config/fluxwan.json" "$ISO_DIR/opt/fluxwan/config.json"
 cp -f "$DIST_DIR/fluxwan-rootfs.tar.gz" "$ISO_DIR/opt/fluxwan/"
 
 # Direct injection into initramfs-lts (guarantees /usr/local/bin/fluxwan-menu exists immediately on boot)
-echo "[+] Embedding FluxWAN control console into initramfs-lts..."
+echo "[+] Embedding FluxWAN control console and filesystem drivers into initramfs-lts..."
 mkdir -p "$BUILD_DIR/initramfs_unpacked"
 (cd "$BUILD_DIR/initramfs_unpacked" && zcat "$ISO_DIR/boot/initramfs-lts" | cpio -idmu >/dev/null 2>&1 || true)
 cp -a "$APKOVL_DIR/." "$BUILD_DIR/initramfs_unpacked/"
@@ -249,6 +249,16 @@ cp -f "$APKOVL_DIR/usr/local/bin/"* "$BUILD_DIR/initramfs_unpacked/usr/local/bin
 cp -f "$APKOVL_DIR/usr/local/bin/"* "$BUILD_DIR/initramfs_unpacked/usr/bin/" 2>/dev/null || true
 cp -f "$APKOVL_DIR/usr/local/bin/"* "$BUILD_DIR/initramfs_unpacked/bin/" 2>/dev/null || true
 chmod +x "$BUILD_DIR/initramfs_unpacked/usr/local/bin/"* "$BUILD_DIR/initramfs_unpacked/usr/bin/"* "$BUILD_DIR/initramfs_unpacked/bin/"* 2>/dev/null || true
+
+# Embed kernel filesystem modules (ext4, jbd2, mbcache, crc16, vfat, fat) directly into initramfs
+mkdir -p "$BUILD_DIR/initramfs_unpacked/lib/modules"
+cp -a "$BUILD_DIR/filtered_modules/." "$BUILD_DIR/initramfs_unpacked/lib/modules/" 2>/dev/null || true
+for kdir in "$BUILD_DIR/initramfs_unpacked/lib/modules/"*; do
+    if [ -d "$kdir" ]; then
+        depmod -b "$BUILD_DIR/initramfs_unpacked" "$(basename "$kdir")" 2>/dev/null || true
+    fi
+done
+
 find "$BUILD_DIR/initramfs_unpacked" -type f \( -name "*.sh" -o -name "fluxwan-*" -o -name "inittab" -o -name "*.cfg" \) -exec sed -i 's/\r$//' {} + 2>/dev/null || true
 (cd "$BUILD_DIR/initramfs_unpacked" && find . | cpio -H newc -o | gzip -9 > "$ISO_DIR/boot/initramfs-lts")
 
@@ -262,7 +272,7 @@ LABEL fluxwan
   MENU LABEL FluxWAN Embedded Network Appliance
   KERNEL /boot/vmlinuz-lts
   INITRD /boot/initramfs-lts
-  APPEND modules=loop,squashfs,sd-mod,usb-storage,sr-mod,cdrom,isofs console=tty0 console=ttyS0,115200
+  APPEND modules=loop,squashfs,sd-mod,usb-storage,sr-mod,cdrom,isofs,ext4 console=tty0 console=ttyS0,115200
 EOF
 
 # Ensure isolinux.cfg also points to the same configuration
@@ -274,7 +284,7 @@ set timeout=2
 set default=0
 
 menuentry "FluxWAN Embedded Network Appliance" {
-    linux /boot/vmlinuz-lts modules=loop,squashfs,sd-mod,usb-storage,sr-mod,cdrom,isofs console=tty0 console=ttyS0,115200
+    linux /boot/vmlinuz-lts modules=loop,squashfs,sd-mod,usb-storage,sr-mod,cdrom,isofs,ext4 console=tty0 console=ttyS0,115200
     initrd /boot/initramfs-lts
 }
 EOF

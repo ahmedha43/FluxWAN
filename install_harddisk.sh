@@ -199,8 +199,43 @@ fi
 mdev -s 2>/dev/null || true
 sleep 1
 
+# Helper: Ensure ext4 kernel module is actively loaded in the running kernel
+ensure_ext4_ready() {
+    grep -qw "ext4" /proc/filesystems && return 0
+    modprobe ext4 2>/dev/null || true
+    grep -qw "ext4" /proc/filesystems && return 0
+
+    echo -e "    * Loading ext4 filesystem kernel modules..."
+    # Attempt to mount modloop if modules are still compressed on boot media
+    for ml in /media/*/boot/modloop-lts /media/sr0/boot/modloop-lts /boot/modloop-lts; do
+        if [ -f "$ml" ]; then
+            mkdir -p /.modloop_tmp
+            mount -t squashfs -o loop,ro "$ml" /.modloop_tmp 2>/dev/null || true
+            if [ -d /.modloop_tmp/modules ]; then
+                cp -a /.modloop_tmp/modules/* /lib/modules/ 2>/dev/null || true
+                depmod -a 2>/dev/null || true
+                modprobe ext4 2>/dev/null || true
+            fi
+            umount /.modloop_tmp 2>/dev/null || true
+            break
+        fi
+    done
+    grep -qw "ext4" /proc/filesystems && return 0
+
+    # Manual insmod discovery fallback
+    for mod in crc16 mbcache jbd2 ext4; do
+        modfile=$(find /lib/modules /media -name "${mod}.ko*" 2>/dev/null | head -n 1)
+        if [ -n "$modfile" ]; then
+            insmod "$modfile" 2>/dev/null || true
+        fi
+    done
+    grep -qw "ext4" /proc/filesystems && return 0
+    echo -e "${YELLOW}[!] WARNING: ext4 filesystem module not yet registered in kernel.${NC}"
+}
+
+ensure_ext4_ready
+
 echo -e "    * Formatting Root Partition ($ROOT_PART as Ext4)..."
-modprobe ext4 2>/dev/null || true
 mkfs.ext4 -F -L "FLUXWAN_ROOT" "$ROOT_PART" || {
     echo -e "${YELLOW}[*] Retrying ext4 format on $ROOT_PART...${NC}"
     sync
@@ -209,6 +244,7 @@ mkfs.ext4 -F -L "FLUXWAN_ROOT" "$ROOT_PART" || {
 }
 
 sync
+mdev -s 2>/dev/null || true
 sleep 1
 
 # 6. Deploying Filesystem & Kernel
@@ -218,9 +254,31 @@ umount -f "$MOUNT_DIR" 2>/dev/null || true
 rm -rf "$MOUNT_DIR"
 mkdir -p "$MOUNT_DIR"
 
-modprobe ext4 2>/dev/null || true
-mdev -s 2>/dev/null || true
-mount -t ext4 "$ROOT_PART" "$MOUNT_DIR" || mount "$ROOT_PART" "$MOUNT_DIR"
+ensure_ext4_ready
+
+# Ensure root partition block device is ready
+if [ ! -b "$ROOT_PART" ]; then
+    echo -e "    * Waiting for $ROOT_PART block device node..."
+    mdev -s 2>/dev/null || true
+    partprobe "$TARGET_DEV" 2>/dev/null || true
+    sleep 2
+fi
+
+# Mount root partition
+MOUNTED=0
+for i in 1 2 3; do
+    if mount -t ext4 "$ROOT_PART" "$MOUNT_DIR" 2>/dev/null || mount "$ROOT_PART" "$MOUNT_DIR" 2>/dev/null; then
+        MOUNTED=1
+        break
+    fi
+    sleep 1
+    mdev -s 2>/dev/null || true
+done
+
+if [ "$MOUNTED" -ne 1 ]; then
+    echo -e "${RED}[!] ERROR: Failed to mount root partition $ROOT_PART on $MOUNT_DIR.${NC}" >&2
+    exit 1
+fi
 
 # Create standard Linux root directory structure
 mkdir -p "$MOUNT_DIR/bin" "$MOUNT_DIR/sbin" "$MOUNT_DIR/lib" "$MOUNT_DIR/etc" \
