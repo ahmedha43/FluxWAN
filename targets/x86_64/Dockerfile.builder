@@ -16,6 +16,7 @@ RUN apk update && apk add --no-cache \
     syslinux \
     mtools \
     grub-bios \
+    grub-efi \
     grub \
     squashfs-tools \
     wget \

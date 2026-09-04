@@ -175,6 +175,10 @@ blockdev --rereadpt "$TARGET_DEV" 2>/dev/null || true
 mdev -s 2>/dev/null || true
 sleep 2
 
+if [ "$IS_UEFI" -eq 0 ]; then
+    sfdisk --activate "$TARGET_DEV" 1 2>/dev/null || true
+fi
+
 # Detect partition naming (e.g. sda1 vs nvme0n1p1)
 if [ -b "${TARGET_DEV}p1" ]; then
     PART_PREFIX="${TARGET_DEV}p"
@@ -257,6 +261,10 @@ if [ -n "$LIVE_BOOT_DIR" ]; then
     cp -f "$LIVE_BOOT_DIR/vmlinuz-lts" "$MOUNT_DIR/boot/"
     cp -f "$LIVE_BOOT_DIR/initramfs-lts" "$MOUNT_DIR/boot/"
     [ -f "$LIVE_BOOT_DIR/modloop-lts" ] && cp -f "$LIVE_BOOT_DIR/modloop-lts" "$MOUNT_DIR/boot/"
+    if [ -d "$LIVE_BOOT_DIR/syslinux" ]; then
+        mkdir -p "$MOUNT_DIR/boot/syslinux"
+        cp -a "$LIVE_BOOT_DIR/syslinux/." "$MOUNT_DIR/boot/syslinux/" 2>/dev/null || true
+    fi
 fi
 
 # Ensure kernel modules are unpacked in /lib/modules
@@ -304,16 +312,13 @@ EOF
 echo -e "${BLUE}[5/6] Installing GRUB Bootloader to $TARGET_DEV...${NC}"
 
 if [ "$IS_UEFI" -eq 1 ]; then
-    echo "    * Setting up GRUB EFI Bootloader..."
+    echo "    * Installing GRUB EFI Bootloader..."
+    mkdir -p "$MOUNT_DIR/boot/efi"
+    mount "$EFI_PART" "$MOUNT_DIR/boot/efi" || {
+        echo -e "${RED}[!] ERROR: Cannot mount EFI system partition $EFI_PART.${NC}" >&2
+        exit 1
+    }
     mkdir -p "$MOUNT_DIR/boot/efi/EFI/BOOT"
-    mount "$EFI_PART" "$MOUNT_DIR/boot/efi" 2>/dev/null || true
-
-    for efi_binary in /boot/efi/EFI/BOOT/BOOTX64.EFI /media/*/efi/boot/bootx64.efi /usr/lib/grub/x86_64-efi/monolithic/grubx64.efi; do
-        if [ -f "$efi_binary" ]; then
-            cp -f "$efi_binary" "$MOUNT_DIR/boot/efi/EFI/BOOT/BOOTX64.EFI" 2>/dev/null || true
-            break
-        fi
-    done
 
     cat << EOF > "$MOUNT_DIR/boot/efi/EFI/BOOT/grub.cfg"
 set default=0
@@ -328,8 +333,22 @@ menuentry "FluxWAN (Safe Mode / Verbose)" {
     initrd /boot/initramfs-lts
 }
 EOF
-    cp -f "$MOUNT_DIR/boot/efi/EFI/BOOT/grub.cfg" "$MOUNT_DIR/boot/grub/grub.cfg" 2>/dev/null || true
-    umount "$MOUNT_DIR/boot/efi" 2>/dev/null || true
+    mkdir -p "$MOUNT_DIR/boot/grub"
+    cp -f "$MOUNT_DIR/boot/efi/EFI/BOOT/grub.cfg" "$MOUNT_DIR/boot/grub/grub.cfg"
+    command -v grub-install >/dev/null 2>&1 || {
+        echo -e "${RED}[!] ERROR: grub-install is missing from the live installer image.${NC}" >&2
+        exit 1
+    }
+    grub-install --target=x86_64-efi --efi-directory="$MOUNT_DIR/boot/efi" \
+        --boot-directory="$MOUNT_DIR/boot" --bootloader-id=FluxWAN --removable --no-nvram || {
+        echo -e "${RED}[!] ERROR: GRUB EFI installation failed; the disk is not bootable.${NC}" >&2
+        exit 1
+    }
+    [ -f "$MOUNT_DIR/boot/efi/EFI/BOOT/BOOTX64.EFI" ] || {
+        echo -e "${RED}[!] ERROR: GRUB did not create EFI/BOOT/BOOTX64.EFI.${NC}" >&2
+        exit 1
+    }
+    umount "$MOUNT_DIR/boot/efi"
 else
     echo "    * Installing GRUB2 to MBR on $TARGET_DEV..."
     mkdir -p "$MOUNT_DIR/boot/grub"
@@ -348,17 +367,33 @@ menuentry "FluxWAN (Safe Mode / Verbose)" {
 }
 EOF
 
-    GRUB_OK=0
-    if command -v grub-install >/dev/null 2>&1; then
-        grub-install --target=i386-pc --recheck --boot-directory="$MOUNT_DIR/boot" "$TARGET_DEV" 2>/dev/null && GRUB_OK=1 || true
-    fi
-
-    if [ "$GRUB_OK" -eq 1 ]; then
+    if command -v grub-install >/dev/null 2>&1 && \
+        grub-install --target=i386-pc --recheck --boot-directory="$MOUNT_DIR/boot" "$TARGET_DEV"; then
         echo -e "    * ${GREEN}GRUB2 MBR installed successfully.${NC}"
     else
-        # Extlinux fallback
-        echo -e "    * Fallback to Syslinux/Extlinux MBR..."
+        echo -e "${YELLOW}[!] GRUB BIOS install unavailable or failed; trying Extlinux fallback.${NC}"
         mkdir -p "$MOUNT_DIR/boot/syslinux" "$MOUNT_DIR/boot/extlinux"
+
+        # Copy all Syslinux C32 modules (ldlinux.c32, libcom32.c32, libutil.c32, mboot.c32, etc.)
+        for src in /boot/syslinux /usr/share/syslinux /usr/lib/syslinux/bios /usr/lib/syslinux/mbr /media/*/boot/syslinux /media/sr0/boot/syslinux "$LIVE_BOOT_DIR/syslinux"; do
+            if [ -d "$src" ]; then
+                cp -f "$src"/*.c32 "$MOUNT_DIR/boot/syslinux/" 2>/dev/null || true
+                cp -f "$src"/*.c32 "$MOUNT_DIR/boot/extlinux/" 2>/dev/null || true
+            fi
+        done
+
+        # Explicit fallback check for ldlinux.c32
+        if [ ! -f "$MOUNT_DIR/boot/syslinux/ldlinux.c32" ]; then
+            for ld in /boot/syslinux/ldlinux.c32 /usr/share/syslinux/ldlinux.c32 /usr/lib/syslinux/bios/ldlinux.c32 /media/*/boot/syslinux/ldlinux.c32 /media/sr0/boot/syslinux/ldlinux.c32 "$LIVE_BOOT_DIR/syslinux/ldlinux.c32"; do
+                if [ -f "$ld" ]; then
+                    cp -f "$ld" "$MOUNT_DIR/boot/syslinux/ldlinux.c32" 2>/dev/null || true
+                    break
+                fi
+            done
+        fi
+        cp -f "$MOUNT_DIR/boot/syslinux/ldlinux.c32" "$MOUNT_DIR/boot/extlinux/ldlinux.c32" 2>/dev/null || true
+        cp -f "$MOUNT_DIR/boot/syslinux/ldlinux.c32" "$MOUNT_DIR/ldlinux.c32" 2>/dev/null || true
+
         cat << EOF > "$MOUNT_DIR/boot/syslinux/syslinux.cfg"
 DEFAULT fluxwan
 TIMEOUT 20
@@ -370,35 +405,35 @@ LABEL fluxwan
   APPEND root=$ROOT_SPEC rootfstype=ext4 rw quiet console=tty0 console=ttyS0,115200
 EOF
         cp -f "$MOUNT_DIR/boot/syslinux/syslinux.cfg" "$MOUNT_DIR/boot/extlinux/extlinux.conf" 2>/dev/null || true
-        command -v extlinux >/dev/null 2>&1 && extlinux --install "$MOUNT_DIR/boot/syslinux" 2>/dev/null || true
-        command -v extlinux >/dev/null 2>&1 && extlinux --install "$MOUNT_DIR/boot/extlinux" 2>/dev/null || true
+
+        command -v extlinux >/dev/null 2>&1 || {
+            echo -e "${RED}[!] ERROR: Neither GRUB nor extlinux is available; the disk is not bootable.${NC}" >&2
+            exit 1
+        }
+        echo -e "    * Installing Extlinux bootloader on $ROOT_PART..."
+        extlinux --install "$MOUNT_DIR/boot/syslinux" || extlinux --install "$MOUNT_DIR/boot/extlinux" || {
+            echo -e "${RED}[!] ERROR: Extlinux installation failed; the disk is not bootable.${NC}" >&2
+            exit 1
+        }
 
         MBR_FOUND=0
-        for mbr in \
-            /usr/share/syslinux/mbr.bin \
-            /usr/lib/syslinux/mbr/mbr.bin \
-            /usr/lib/syslinux/bios/mbr.bin \
-            /boot/syslinux/mbr.bin \
-            /media/*/boot/syslinux/mbr.bin \
-            /media/sr0/boot/syslinux/mbr.bin \
-            "$MOUNT_DIR/boot/syslinux/mbr.bin" \
-            /usr/share/syslinux/gptmbr.bin; do
+        for mbr in /usr/share/syslinux/mbr.bin /usr/lib/syslinux/mbr/mbr.bin \
+            /usr/lib/syslinux/bios/mbr.bin /boot/syslinux/mbr.bin \
+            /media/*/boot/syslinux/mbr.bin /media/sr0/boot/syslinux/mbr.bin "$LIVE_BOOT_DIR/syslinux/mbr.bin"; do
             if [ -f "$mbr" ]; then
                 echo -e "    * Writing Hard Disk MBR Boot Sector (${CYAN}$mbr${NC}) to $TARGET_DEV..."
-                dd bs=440 count=1 conv=notrunc if="$mbr" of="$TARGET_DEV" status=none 2>/dev/null || true
+                dd bs=440 count=1 conv=notrunc if="$mbr" of="$TARGET_DEV" status=none
                 sync
                 MBR_FOUND=1
                 break
             fi
         done
-
-        if [ "$MBR_FOUND" -eq 0 ]; then
-            echo -e "${YELLOW}[!] WARNING: MBR binary not found in standard paths. Attempting syslinux MBR write...${NC}"
-            command -v syslinux >/dev/null 2>&1 && syslinux --install "$TARGET_DEV" 2>/dev/null || true
-        fi
+        [ "$MBR_FOUND" -eq 1 ] || {
+            echo -e "${RED}[!] ERROR: Syslinux MBR code is missing; the disk is not bootable.${NC}" >&2
+            exit 1
+        }
     fi
 fi
-
 # 8. Enable OpenRC Services
 echo -e "${BLUE}[6/6] Finalizing installation and enabling system services...${NC}"
 mkdir -p "$MOUNT_DIR/etc/runlevels/default" "$MOUNT_DIR/etc/runlevels/boot"

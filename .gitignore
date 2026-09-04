@@ -63,3 +63,5 @@ __pycache__/
 *~
 .DS_Store
 Thumbs.db
+ref_winzard/
+dist/iso_run/

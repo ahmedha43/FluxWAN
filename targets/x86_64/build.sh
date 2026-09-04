@@ -138,19 +138,35 @@ if [ -d /usr/share/syslinux ]; then
     cp -a /usr/share/syslinux/. "$APKOVL_DIR/usr/share/syslinux/" 2>/dev/null || true
 fi
 
-# Embed GRUB2 BIOS (i386-pc) modules into apkovl for offline grub-install during disk setup
+mkdir -p "$APKOVL_DIR/usr/sbin" "$APKOVL_DIR/sbin" "$APKOVL_DIR/usr/lib" "$APKOVL_DIR/lib"
+
+# Embed the complete offline bootloader toolchain. The disk installer runs from
+# initramfs, so apk/world alone cannot provide these commands at install time.
 if [ -d /usr/lib/grub/i386-pc ]; then
     mkdir -p "$APKOVL_DIR/usr/lib/grub/i386-pc"
     cp -a /usr/lib/grub/i386-pc/. "$APKOVL_DIR/usr/lib/grub/i386-pc/"
-    # Copy grub-install and grub-mkimage binaries
-    for bin in grub-install grub-mkimage grub-bios-setup grub-probe grub-setup; do
-        SRC=$(command -v "$bin" 2>/dev/null || true)
-        [ -n "$SRC" ] && cp -f "$SRC" "$APKOVL_DIR/usr/sbin/$bin" 2>/dev/null || true
-        SRC=$(command -v "$bin" 2>/dev/null || true)
-        [ -n "$SRC" ] && cp -f "$SRC" "$APKOVL_DIR/usr/bin/$bin" 2>/dev/null || true
-    done
 fi
 
+if [ -d /usr/lib/grub/x86_64-efi ]; then
+    mkdir -p "$APKOVL_DIR/usr/lib/grub/x86_64-efi"
+    cp -a /usr/lib/grub/x86_64-efi/. "$APKOVL_DIR/usr/lib/grub/x86_64-efi/"
+fi
+
+for bin in grub-install grub-mkimage grub-bios-setup grub-probe grub-setup; do
+    SRC=$(command -v "$bin" 2>/dev/null || true)
+    [ -n "$SRC" ] && cp -f "$SRC" "$APKOVL_DIR/usr/sbin/$bin"
+done
+
+# extlinux is the BIOS fallback and requires its executable in addition to the
+# Syslinux modules and MBR code copied above.
+EXTLINUX_BIN=$(command -v extlinux 2>/dev/null || true)
+[ -n "$EXTLINUX_BIN" ] && cp -f "$EXTLINUX_BIN" "$APKOVL_DIR/sbin/extlinux"
+
+# grub-install is dynamically linked on Alpine; include its non-base runtime
+# libraries in initramfs so it cannot fail after the disk is repartitioned.
+for lib in /usr/lib/liblzma.so.5 /lib/libdevmapper.so.1.02; do
+    [ -f "$lib" ] && cp -a "$lib" "${APKOVL_DIR}${lib}"
+done
 # Copy appliance configuration files
 cp -f "$PROJECT_ROOT/appliance/etc/inittab" "$APKOVL_DIR/etc/inittab" 2>/dev/null || true
 cp -f "$PROJECT_ROOT/appliance/etc/sysctl.conf" "$APKOVL_DIR/etc/sysctl.conf" 2>/dev/null || true
