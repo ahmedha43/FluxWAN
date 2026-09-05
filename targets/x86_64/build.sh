@@ -205,9 +205,10 @@ EOF
 chmod +x "$APKOVL_DIR/etc/init.d/fluxwan"
 ln -sf /etc/init.d/fluxwan "$APKOVL_DIR/etc/runlevels/default/fluxwan"
 
-# Also include rcS for Busybox fallback
+# Also include rcS and rcK for Busybox init (no openrc dependency)
 cp -f "$PROJECT_ROOT/appliance/etc/init.d/rcS" "$APKOVL_DIR/etc/init.d/rcS" 2>/dev/null || true
-chmod +x "$APKOVL_DIR/etc/init.d/rcS" 2>/dev/null || true
+cp -f "$PROJECT_ROOT/appliance/etc/init.d/rcK" "$APKOVL_DIR/etc/init.d/rcK" 2>/dev/null || true
+chmod +x "$APKOVL_DIR/etc/init.d/rcS" "$APKOVL_DIR/etc/init.d/rcK" 2>/dev/null || true
 
 # Strip Windows CRLF line endings only from text and config files (do NOT touch binaries or bpf.o!)
 find "$APKOVL_DIR/etc" "$APKOVL_DIR/usr" -type f \( -name "*.cfg" -o -name "*.conf" -o -name "*.sh" -o -name "*.json" -o -name "inittab" -o -name "interfaces" -o -name "passwd" -o -name "shadow" -o -name "group" -o -name "fluxwan-*" \) -exec sed -i 's/\r$//' {} + 2>/dev/null || true

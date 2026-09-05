@@ -1,13 +1,13 @@
-# /etc/inittab - Configuration for FluxWAN Network Appliance (Alpine OpenRC)
-::sysinit:/sbin/openrc sysinit
-::sysinit:/sbin/openrc boot
-::wait:/sbin/openrc default
+# /etc/inittab - FluxWAN Network Appliance (Busybox Init - No openrc required)
 
-# Management Console on TTY1 (VGA / VMware) & TTYS0 (Serial / QEMU / Cloud)
+# System Initialization
+::sysinit:/etc/init.d/rcS
+
+# Management Console (TTY1 = VGA/VMware, ttyS0 = Serial/QEMU)
 tty1::respawn:/usr/local/bin/fluxwan-menu
 ttyS0::respawn:/usr/local/bin/fluxwan-menu
-tty2::respawn:/bin/sh
+tty2::respawn:/bin/ash
 
-# System actions
+# System Actions
 ::ctrlaltdel:/sbin/reboot
-::shutdown:/sbin/openrc shutdown
+::shutdown:/etc/init.d/rcK

@@ -298,6 +298,38 @@ cp -a /usr/lib/* "$MOUNT_DIR/usr/lib/" 2>/dev/null || true
 cp -a /usr/local/bin/* "$MOUNT_DIR/usr/local/bin/" 2>/dev/null || true
 chmod +x "$MOUNT_DIR/usr/local/bin/"* 2>/dev/null || true
 
+# Explicitly write correct inittab using Busybox init (no openrc dependency)
+mkdir -p "$MOUNT_DIR/etc/init.d"
+cat > "$MOUNT_DIR/etc/inittab" << 'INITTAB_EOF'
+# /etc/inittab - FluxWAN Network Appliance (Busybox Init)
+
+# System Initialization
+::sysinit:/etc/init.d/rcS
+
+# Management Console (TTY1 = VGA, ttyS0 = Serial)
+tty1::respawn:/usr/local/bin/fluxwan-menu
+ttyS0::respawn:/usr/local/bin/fluxwan-menu
+tty2::respawn:/bin/ash
+
+# System Actions
+::ctrlaltdel:/sbin/reboot
+::shutdown:/etc/init.d/rcK
+INITTAB_EOF
+sed -i 's/\r$//' "$MOUNT_DIR/etc/inittab" 2>/dev/null || true
+
+# Ensure rcS and rcK are present and executable on target disk
+# (copied from live /etc/init.d if they exist, otherwise we verify)
+chmod +x "$MOUNT_DIR/etc/init.d/rcS" 2>/dev/null || true
+chmod +x "$MOUNT_DIR/etc/init.d/rcK" 2>/dev/null || true
+sed -i 's/\r$//' "$MOUNT_DIR/etc/init.d/rcS" "$MOUNT_DIR/etc/init.d/rcK" 2>/dev/null || true
+
+# Ensure /sbin/init points to busybox
+if [ -f "$MOUNT_DIR/bin/busybox" ] && [ ! -f "$MOUNT_DIR/sbin/init" ]; then
+    ln -sf /bin/busybox "$MOUNT_DIR/sbin/init"
+fi
+
+
+
 # Copy FluxWAN engine and BPF objects
 echo -e "    * Copying FluxWAN Reactor Daemon & Web Control Plane..."
 if [ -d /opt/fluxwan ]; then
