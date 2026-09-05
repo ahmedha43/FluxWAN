@@ -164,9 +164,9 @@ EXTLINUX_BIN=$(command -v extlinux 2>/dev/null || true)
 
 # grub-install is dynamically linked on Alpine; include its non-base runtime
 # libraries in initramfs so it cannot fail after the disk is repartitioned.
-for lib in /usr/lib/liblzma.so.5 /lib/libdevmapper.so.1.02; do
-    [ -f "$lib" ] && cp -a "$lib" "${APKOVL_DIR}${lib}"
-done
+mkdir -p "$APKOVL_DIR/usr/lib" "$APKOVL_DIR/lib"
+cp -aL /usr/lib/liblzma.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
+cp -aL /lib/libdevmapper.so* "$APKOVL_DIR/lib/" 2>/dev/null || true
 # Copy appliance configuration files
 cp -f "$PROJECT_ROOT/appliance/etc/inittab" "$APKOVL_DIR/etc/inittab" 2>/dev/null || true
 cp -f "$PROJECT_ROOT/appliance/etc/sysctl.conf" "$APKOVL_DIR/etc/sysctl.conf" 2>/dev/null || true
