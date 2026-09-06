@@ -111,8 +111,23 @@ bpf_loader_ctx_t *bpf_loader_init(const char *bpf_obj_path) {
     ctx->fd_maglev_group = -1;
     ctx->num_cpus = get_num_cpus();
 
-    const char *path = bpf_obj_path ? bpf_obj_path : BPF_OBJ_DEFAULT;
-    strncpy(ctx->bpf_obj_path, path, sizeof(ctx->bpf_obj_path) - 1);
+    const char *candidates[] = {
+        bpf_obj_path,
+        BPF_OBJ_DEFAULT,
+        "bpf/xdp_router.bpf.o",
+        "/opt/fluxwan/bpf/xdp_router.bpf.o",
+        "./xdp_router.bpf.o",
+        NULL
+    };
+    const char *chosen_path = NULL;
+    for (int i = 0; candidates[i] != NULL; i++) {
+        if (candidates[i] && access(candidates[i], R_OK) == 0) {
+            chosen_path = candidates[i];
+            break;
+        }
+    }
+    if (!chosen_path) chosen_path = bpf_obj_path ? bpf_obj_path : BPF_OBJ_DEFAULT;
+    strncpy(ctx->bpf_obj_path, chosen_path, sizeof(ctx->bpf_obj_path) - 1);
 
     raise_rlimit_memlock();
 
@@ -123,7 +138,7 @@ bpf_loader_ctx_t *bpf_loader_init(const char *bpf_obj_path) {
         .object_name = "xdp_router",
     };
 
-    ctx->obj = bpf_object__open_opts(ctx->bpf_obj_path, &opts);
+    ctx->obj = bpf_object__open_file(ctx->bpf_obj_path, &opts);
     if (!ctx->obj || libbpf_get_error(ctx->obj)) {
         LOG_WARN("[BPF Loader] Cannot open %s: %s — running in simulation mode",
                  ctx->bpf_obj_path, strerror(errno));
@@ -387,8 +402,6 @@ int bpf_loader_get_percpu_wan_stats(bpf_loader_ctx_t *ctx, uint32_t wan_idx,
         if (out_tx_bytes) *out_tx_bytes  = total_tx_bytes;
         if (out_tx_pkts)  *out_tx_pkts   = total_tx_pkts;
         return 0;
-
-        (void)val_size; /* suppress unused warning */
     }
 fallback:
 #endif
