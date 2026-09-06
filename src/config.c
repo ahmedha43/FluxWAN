@@ -101,33 +101,6 @@ static const char *find_matching_bracket(const char *start) {
     return NULL;
 }
 
-static inline void parse_cidr_subnet(const char *cidr, uint32_t *out_ip, uint32_t *out_netmask, uint32_t *out_prefix) {
-    if (!cidr || !out_ip || !out_netmask || !out_prefix) return;
-    char ip_buf[32];
-    uint32_t prefix = 24;
-    const char *slash = strchr(cidr, '/');
-    if (slash) {
-        size_t len = slash - cidr;
-        if (len >= sizeof(ip_buf)) len = sizeof(ip_buf) - 1;
-        strncpy(ip_buf, cidr, len);
-        ip_buf[len] = '\0';
-        prefix = (uint32_t)atoi(slash + 1);
-        if (prefix > 32) prefix = 32;
-    } else {
-        safe_str_copy(ip_buf, cidr, sizeof(ip_buf));
-    }
-    *out_ip = str_to_ip(ip_buf);
-    *out_prefix = prefix;
-    if (prefix == 0) {
-        *out_netmask = 0;
-    } else if (prefix == 32) {
-        *out_netmask = 0xFFFFFFFFU;
-    } else {
-        uint32_t mask = (0xFFFFFFFFU << (32 - prefix));
-        *out_netmask = htonl(mask);
-    }
-}
-
 int config_load(const char *config_path, fluxwan_config_t *out_config) {
     if (!config_path || !out_config) return -1;
     memset(out_config, 0, sizeof(fluxwan_config_t));

@@ -92,6 +92,7 @@ int main(int argc, char *argv[]) {
 
     /* 11. Initialize Embedded Web Server & REST Engine */
     web_server_ctx_t *web = web_server_init(&config, nl, dhcp);
+    web_server_set_wan_manager(web, wan_mgr);
 
     LOG_INFO("FluxWAN Core Daemon fully initialized and running on Bare-Metal reactor loop...");
 

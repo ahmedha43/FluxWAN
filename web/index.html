@@ -697,7 +697,8 @@
                 isEditing: false,
                 interfaces: [],
                 config: {
-                    lan: { interface: 'eth0', ip: '10.10.10.1', netmask: '255.255.255.0', dhcp_enabled: true, dhcp_start: '10.10.10.100', dhcp_end: '10.10.10.200', dhcp_lease_time: 43200 },
+                    lan: { interface: 'eth0', ip: '10.10.10.1', netmask: '255.255.255.0', dhcp_enabled: true, dhcp_start: '10.10.10.100', dhcp_end: '10.10.10.200', dhcp_lease_time: 43200, policy_routes: [] },
+                    groups: [],
                     wans: [
                         { id: 1, name: 'eth1', label: 'Fiber_Uplink', type: 'static', ip: '192.168.10.2', netmask: '255.255.255.0', gateway: '192.168.10.1', weight: 100, enabled: true, probe_target: '8.8.8.8' },
                         { id: 2, name: 'eth2', label: 'LTE_Backup', type: 'dhcp', weight: 50, enabled: true, probe_target: '1.1.1.1' }
@@ -1113,6 +1114,13 @@
                     })
                     .then(d => {
                         if (d.lan && d.lan.interface) this.config.lan.interface = d.lan.interface;
+                        if (d.groups && !this.isEditing) {
+                            this.config.groups = d.groups;
+                        }
+                        if (d.policy_routes && !this.isEditing) {
+                            if (!this.config.lan) this.config.lan = {};
+                            this.config.lan.policy_routes = d.policy_routes;
+                        }
                         if (d.wans && d.wans.length > 0) {
                             this.config.wans = d.wans.map((w, idx) => ({
                                 id: w.id || (idx + 1),

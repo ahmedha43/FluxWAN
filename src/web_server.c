@@ -2,6 +2,7 @@
 #include "ui_assets.h"
 #include "config.h"
 #include "net_apply.h"
+#include "wan_manager.h"
 #include <fcntl.h>
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <poll.h>
@@ -27,8 +28,13 @@ struct web_server_ctx {
     fluxwan_config_t *config;
     netlink_ctx_t *nl;
     dhcp_server_ctx_t *dhcp;
+    struct wan_manager_ctx *wan_mgr;
     client_conn_t clients[MAX_CLIENTS];
 };
+
+void web_server_set_wan_manager(web_server_ctx_t *ctx, struct wan_manager_ctx *wm) {
+    if (ctx) ctx->wan_mgr = wm;
+}
 
 static void set_socket_timeout(socket_t fd, int timeout_ms) {
 #if defined(_WIN32) || defined(_WIN64)
@@ -250,6 +256,47 @@ static void build_json_status(fluxwan_config_t *config, char *buf, size_t max_le
             w->metrics.packet_loss_pct, w->enabled ? "true" : "false", state_str, (i == config->wan_count - 1) ? "" : ",");
     }
 
+    offset += snprintf(buf + offset, max_len - offset, "  ],\n  \"groups\": [\n");
+    for (uint32_t g = 0; g < config->group_count; g++) {
+        const wan_group_t *grp = &config->groups[g];
+        offset += snprintf(buf + offset, max_len - offset,
+            "    {\n"
+            "      \"id\": %u,\n"
+            "      \"name\": \"%s\",\n"
+            "      \"description\": \"%s\",\n"
+            "      \"enabled\": %s,\n"
+            "      \"wan_count\": %u,\n"
+            "      \"active_wan_count\": %u,\n"
+            "      \"wans\": [",
+            grp->id, grp->name, grp->description,
+            grp->enabled ? "true" : "false",
+            grp->wan_count, grp->active_wan_count);
+        for (uint32_t w = 0; w < grp->wan_count; w++) {
+            offset += snprintf(buf + offset, max_len - offset, "\"%s\"%s",
+                               grp->wan_names[w], (w == grp->wan_count - 1) ? "" : ", ");
+        }
+        offset += snprintf(buf + offset, max_len - offset, "]\n    }%s\n",
+                           (g == config->group_count - 1) ? "" : ",");
+    }
+
+    offset += snprintf(buf + offset, max_len - offset, "  ],\n  \"policy_routes\": [\n");
+    for (uint32_t p = 0; p < config->lan.policy_route_count; p++) {
+        const policy_route_t *pr = &config->lan.policy_routes[p];
+        offset += snprintf(buf + offset, max_len - offset,
+            "    {\n"
+            "      \"subnet\": \"%s\",\n"
+            "      \"gateway_ip\": \"%s\",\n"
+            "      \"target_group\": \"%s\",\n"
+            "      \"target_group_id\": %u,\n"
+            "      \"description\": \"%s\",\n"
+            "      \"enabled\": %s\n"
+            "    }%s\n",
+            pr->subnet_str, pr->gateway_ip_str, pr->target_group,
+            pr->target_group_id, pr->description,
+            pr->enabled ? "true" : "false",
+            (p == config->lan.policy_route_count - 1) ? "" : ",");
+    }
+
     snprintf(buf + offset, max_len - offset, "  ],\n  \"sticky_count\": 128\n}\n");
 }
 
@@ -297,6 +344,56 @@ static void build_json_logs(char *buf, size_t max_len) {
     snprintf(buf + offset, max_len - offset, "  ]\n}\n");
 }
 
+static void build_json_groups(const fluxwan_config_t *config, char *buf, size_t max_len) {
+    int offset = snprintf(buf, max_len, "{\n  \"count\": %u,\n  \"groups\": [\n", config->group_count);
+    for (uint32_t g = 0; g < config->group_count; g++) {
+        const wan_group_t *grp = &config->groups[g];
+        offset += snprintf(buf + offset, max_len - offset,
+            "    {\n"
+            "      \"id\": %u,\n"
+            "      \"name\": \"%s\",\n"
+            "      \"description\": \"%s\",\n"
+            "      \"enabled\": %s,\n"
+            "      \"wan_count\": %u,\n"
+            "      \"active_wan_count\": %u,\n"
+            "      \"wans\": [",
+            grp->id, grp->name, grp->description,
+            grp->enabled ? "true" : "false",
+            grp->wan_count, grp->active_wan_count);
+
+        for (uint32_t w = 0; w < grp->wan_count; w++) {
+            offset += snprintf(buf + offset, max_len - offset, "\"%s\"%s",
+                               grp->wan_names[w], (w == grp->wan_count - 1) ? "" : ", ");
+        }
+
+        offset += snprintf(buf + offset, max_len - offset,
+            "]\n    }%s\n", (g == config->group_count - 1) ? "" : ",");
+    }
+    snprintf(buf + offset, max_len - offset, "  ]\n}\n");
+}
+
+static void build_json_policy_routes(const fluxwan_config_t *config, char *buf, size_t max_len) {
+    int offset = snprintf(buf, max_len, "{\n  \"count\": %u,\n  \"policy_routes\": [\n", config->lan.policy_route_count);
+    for (uint32_t p = 0; p < config->lan.policy_route_count; p++) {
+        const policy_route_t *pr = &config->lan.policy_routes[p];
+        offset += snprintf(buf + offset, max_len - offset,
+            "    {\n"
+            "      \"subnet\": \"%s\",\n"
+            "      \"gateway_ip\": \"%s\",\n"
+            "      \"target_group\": \"%s\",\n"
+            "      \"target_group_id\": %u,\n"
+            "      \"description\": \"%s\",\n"
+            "      \"enabled\": %s\n"
+            "    }%s\n",
+            pr->subnet_str, pr->gateway_ip_str, pr->target_group,
+            pr->target_group_id, pr->description,
+            pr->enabled ? "true" : "false",
+            (p == config->lan.policy_route_count - 1) ? "" : ",");
+    }
+    snprintf(buf + offset, max_len - offset, "  ]\n}\n");
+}
+
+
 static bool is_request_authorized(const fluxwan_config_t *config, const char *req) {
     if (!config->auth.enabled) return true;
     char token_header[128];
@@ -330,6 +427,61 @@ static const char *extract_json_string(const char *json, const char *key, char *
     }
     return NULL;
 }
+
+static int extract_json_int(const char *json, const char *key, int default_val) {
+    char pattern[128];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char *p = strstr(json, pattern);
+    if (!p) return default_val;
+    p += strlen(pattern);
+    while (*p && (*p == ' ' || *p == ':' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
+    return atoi(p);
+}
+
+static bool extract_json_bool(const char *json, const char *key, bool default_val) {
+    char pattern[128];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char *p = strstr(json, pattern);
+    if (!p) return default_val;
+    p += strlen(pattern);
+    while (*p && (*p == ' ' || *p == ':' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
+    if (strncmp(p, "true", 4) == 0) return true;
+    if (strncmp(p, "false", 5) == 0) return false;
+    return default_val;
+}
+
+static void parse_json_string_array(const char *json, const char *key, char out_arr[MAX_GROUP_MEMBERS][MAX_LABEL_LEN], uint32_t *out_count) {
+    *out_count = 0;
+    char pattern[64];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char *pos = strstr(json, pattern);
+    if (!pos) return;
+    const char *p = strchr(pos, '[');
+    if (!p) return;
+    p++;
+    while (*p && *p != ']' && *out_count < MAX_GROUP_MEMBERS) {
+        while (*p && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n' || *p == ',')) p++;
+        if (*p == '"') {
+            p++;
+            const char *end = strchr(p, '"');
+            if (end) {
+                size_t len = end - p;
+                if (len >= MAX_LABEL_LEN) len = MAX_LABEL_LEN - 1;
+                strncpy(out_arr[*out_count], p, len);
+                out_arr[*out_count][len] = '\0';
+                (*out_count)++;
+                p = end + 1;
+            } else {
+                break;
+            }
+        } else if (*p == ']') {
+            break;
+        } else {
+            p++;
+        }
+    }
+}
+
 
 int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
     if (!ctx || !IS_VALID_SOCK(client_fd)) return -1;
@@ -446,10 +598,10 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
                 strlen(rb), rb);
             send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
         }
-        char json_buf[8192];
+        char json_buf[16384];
         build_json_status(ctx->config, json_buf, sizeof(json_buf));
 
-        char resp[8500];
+        char resp[17000];
         int len = snprintf(resp, sizeof(resp),
             "HTTP/1.1 200 OK\r\n"
             "Content-Type: application/json\r\n"
@@ -505,6 +657,234 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
 
         send(client_fd, resp, (int)len, 0);
         close_client_socket(client_fd);
+    } else if (strstr(req, "GET /api/v1/groups") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        char json_buf[4096];
+        build_json_groups(ctx->config, json_buf, sizeof(json_buf));
+
+        char resp[4500];
+        int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: application/json\r\n"
+            "Access-Control-Allow-Origin: *\r\n"
+            "Content-Length: %zu\r\n"
+            "Connection: close\r\n\r\n%s",
+            strlen(json_buf), json_buf);
+
+        send(client_fd, resp, (int)len, 0);
+        close_client_socket(client_fd);
+    } else if (strstr(req, "POST /api/v1/groups/delete") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        if (body) {
+            body += 4;
+            char gname[64] = {0};
+            extract_json_string(body, "name", gname, sizeof(gname));
+            int gid = extract_json_int(body, "id", -1);
+            int found_idx = -1;
+            for (uint32_t i = 0; i < ctx->config->group_count; i++) {
+                if ((gname[0] && strcmp(ctx->config->groups[i].name, gname) == 0) ||
+                    (gid >= 0 && (int)ctx->config->groups[i].id == gid)) {
+                    found_idx = (int)i;
+                    break;
+                }
+            }
+            if (found_idx >= 0) {
+                for (uint32_t i = found_idx; i + 1 < ctx->config->group_count; i++) {
+                    ctx->config->groups[i] = ctx->config->groups[i + 1];
+                }
+                ctx->config->group_count--;
+                config_save("config/fluxwan.json", ctx->config);
+                config_load("config/fluxwan.json", ctx->config);
+                if (ctx->wan_mgr) wan_manager_rebalance(ctx->wan_mgr);
+            }
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"Group deleted\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd);
+    } else if (strstr(req, "POST /api/v1/groups") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        if (body) {
+            body += 4;
+            char gname[64] = {0}, gdesc[64] = {0};
+            extract_json_string(body, "name", gname, sizeof(gname));
+            extract_json_string(body, "description", gdesc, sizeof(gdesc));
+            bool genabled = extract_json_bool(body, "enabled", true);
+            char wans[MAX_GROUP_MEMBERS][MAX_LABEL_LEN];
+            uint32_t wcount = 0;
+            parse_json_string_array(body, "wans", wans, &wcount);
+
+            if (gname[0]) {
+                int found_idx = -1;
+                for (uint32_t i = 0; i < ctx->config->group_count; i++) {
+                    if (strcmp(ctx->config->groups[i].name, gname) == 0) {
+                        found_idx = (int)i;
+                        break;
+                    }
+                }
+                if (found_idx < 0 && ctx->config->group_count < MAX_WAN_GROUPS) {
+                    found_idx = (int)ctx->config->group_count;
+                    ctx->config->group_count++;
+                    ctx->config->groups[found_idx].id = (uint32_t)(found_idx + 1);
+                }
+                if (found_idx >= 0) {
+                    wan_group_t *grp = &ctx->config->groups[found_idx];
+                    strncpy(grp->name, gname, sizeof(grp->name) - 1);
+                    grp->name[sizeof(grp->name) - 1] = '\0';
+                    strncpy(grp->description, gdesc, sizeof(grp->description) - 1);
+                    grp->description[sizeof(grp->description) - 1] = '\0';
+                    grp->enabled = genabled;
+                    grp->wan_count = wcount;
+                    for (uint32_t w = 0; w < wcount; w++) {
+                        strncpy(grp->wan_names[w], wans[w], sizeof(grp->wan_names[w]) - 1);
+                        grp->wan_names[w][sizeof(grp->wan_names[w]) - 1] = '\0';
+                    }
+                    config_save("config/fluxwan.json", ctx->config);
+                    config_load("config/fluxwan.json", ctx->config);
+                    if (ctx->wan_mgr) wan_manager_rebalance(ctx->wan_mgr);
+                }
+            }
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"Group saved\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd);
+    } else if (strstr(req, "GET /api/v1/policy_routes") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        char json_buf[4096];
+        build_json_policy_routes(ctx->config, json_buf, sizeof(json_buf));
+
+        char resp[4500];
+        int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: application/json\r\n"
+            "Access-Control-Allow-Origin: *\r\n"
+            "Content-Length: %zu\r\n"
+            "Connection: close\r\n\r\n%s",
+            strlen(json_buf), json_buf);
+
+        send(client_fd, resp, (int)len, 0);
+        close_client_socket(client_fd);
+    } else if (strstr(req, "POST /api/v1/policy_routes/delete") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        if (body) {
+            body += 4;
+            char subnet[64] = {0};
+            extract_json_string(body, "subnet", subnet, sizeof(subnet));
+            int found_idx = -1;
+            for (uint32_t i = 0; i < ctx->config->lan.policy_route_count; i++) {
+                if (subnet[0] && strcmp(ctx->config->lan.policy_routes[i].subnet_str, subnet) == 0) {
+                    found_idx = (int)i;
+                    break;
+                }
+            }
+            if (found_idx >= 0) {
+                for (uint32_t i = found_idx; i + 1 < ctx->config->lan.policy_route_count; i++) {
+                    ctx->config->lan.policy_routes[i] = ctx->config->lan.policy_routes[i + 1];
+                }
+                ctx->config->lan.policy_route_count--;
+                config_save("config/fluxwan.json", ctx->config);
+                config_load("config/fluxwan.json", ctx->config);
+                if (ctx->wan_mgr) wan_manager_rebalance(ctx->wan_mgr);
+                net_apply_policy_routes(ctx->config);
+            }
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"Policy route deleted\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd);
+    } else if (strstr(req, "POST /api/v1/policy_routes") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        if (body) {
+            body += 4;
+            char subnet[64] = {0}, gw[64] = {0}, tgroup[64] = {0}, desc[64] = {0};
+            extract_json_string(body, "subnet", subnet, sizeof(subnet));
+            extract_json_string(body, "gateway_ip", gw, sizeof(gw));
+            extract_json_string(body, "target_group", tgroup, sizeof(tgroup));
+            extract_json_string(body, "description", desc, sizeof(desc));
+            bool penabled = extract_json_bool(body, "enabled", true);
+
+            if (subnet[0]) {
+                int found_idx = -1;
+                for (uint32_t i = 0; i < ctx->config->lan.policy_route_count; i++) {
+                    if (strcmp(ctx->config->lan.policy_routes[i].subnet_str, subnet) == 0) {
+                        found_idx = (int)i;
+                        break;
+                    }
+                }
+                if (found_idx < 0 && ctx->config->lan.policy_route_count < MAX_POLICY_ROUTES) {
+                    found_idx = (int)ctx->config->lan.policy_route_count;
+                    ctx->config->lan.policy_route_count++;
+                }
+                if (found_idx >= 0) {
+                    policy_route_t *pr = &ctx->config->lan.policy_routes[found_idx];
+                    strncpy(pr->subnet_str, subnet, sizeof(pr->subnet_str) - 1);
+                    pr->subnet_str[sizeof(pr->subnet_str) - 1] = '\0';
+                    parse_cidr_subnet(subnet, &pr->subnet_ip, &pr->netmask, &pr->prefix_len);
+                    strncpy(pr->gateway_ip_str, gw, sizeof(pr->gateway_ip_str) - 1);
+                    pr->gateway_ip_str[sizeof(pr->gateway_ip_str) - 1] = '\0';
+                    pr->gateway_ip = str_to_ip(gw);
+                    strncpy(pr->target_group, tgroup, sizeof(pr->target_group) - 1);
+                    pr->target_group[sizeof(pr->target_group) - 1] = '\0';
+                    strncpy(pr->description, desc, sizeof(pr->description) - 1);
+                    pr->description[sizeof(pr->description) - 1] = '\0';
+                    pr->enabled = penabled;
+
+                    config_save("config/fluxwan.json", ctx->config);
+                    config_load("config/fluxwan.json", ctx->config);
+                    if (ctx->wan_mgr) wan_manager_rebalance(ctx->wan_mgr);
+                    net_apply_policy_routes(ctx->config);
+                }
+            }
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"Policy route saved\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd);
     } else if (strstr(req, "POST /api/v1/assign") != NULL || strstr(req, "POST /api/v1/apply") != NULL) {
         /* Check admin authorization */
         if (!is_request_authorized(ctx->config, req)) {
@@ -572,6 +952,9 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
 
         /* Re-apply configuration to Linux Kernel & Policy Routing */
         net_apply_configuration(ctx->config, ctx->nl);
+        if (ctx->wan_mgr) {
+            wan_manager_rebalance(ctx->wan_mgr);
+        }
 
         const char *resp_body = "{\"status\":\"ok\",\"message\":\"Configuration validated, saved, and applied to Linux Kernel\"}";
         char resp[512];
@@ -594,10 +977,10 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
             "Access-Control-Allow-Origin: *\r\n\r\n";
         send(client_fd, hdr, (int)strlen(hdr), 0);
 
-        char json_buf[8192];
+        char json_buf[16384];
         build_json_status(ctx->config, json_buf, sizeof(json_buf));
 
-        char sse_msg[8500];
+        char sse_msg[17000];
         int len = snprintf(sse_msg, sizeof(sse_msg), "data: %s\n\n", json_buf);
         send(client_fd, sse_msg, (int)len, 0);
     } else {

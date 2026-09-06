@@ -24,4 +24,9 @@ int net_apply_set_ip_forward(bool enable);
  */
 int net_apply_wan_nat(const char *wan_ifname, bool enable);
 
+/**
+ * Apply Secondary LAN Subnet Gateways and Policy Routing Rules
+ */
+int net_apply_policy_routes(const fluxwan_config_t *config);
+
 #endif /* NET_APPLY_H */

@@ -291,4 +291,32 @@ static inline uint32_t str_to_ip(const char *str) {
     return addr.s_addr;
 }
 
+static inline void parse_cidr_subnet(const char *cidr, uint32_t *out_ip, uint32_t *out_netmask, uint32_t *out_prefix) {
+    if (!cidr || !out_ip || !out_netmask || !out_prefix) return;
+    char ip_buf[32];
+    uint32_t prefix = 24;
+    const char *slash = strchr(cidr, '/');
+    if (slash) {
+        size_t len = slash - cidr;
+        if (len >= sizeof(ip_buf)) len = sizeof(ip_buf) - 1;
+        strncpy(ip_buf, cidr, len);
+        ip_buf[len] = '\0';
+        prefix = (uint32_t)atoi(slash + 1);
+        if (prefix > 32) prefix = 32;
+    } else {
+        strncpy(ip_buf, cidr, sizeof(ip_buf) - 1);
+        ip_buf[sizeof(ip_buf) - 1] = '\0';
+    }
+    *out_ip = str_to_ip(ip_buf);
+    *out_prefix = prefix;
+    if (prefix == 0) {
+        *out_netmask = 0;
+    } else if (prefix == 32) {
+        *out_netmask = 0xFFFFFFFFU;
+    } else {
+        uint32_t mask = (0xFFFFFFFFU << (32 - prefix));
+        *out_netmask = htonl(mask);
+    }
+}
+
 #endif /* FLUXWAN_H */

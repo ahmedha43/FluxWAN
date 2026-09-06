@@ -96,18 +96,8 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
     snprintf(ip_cmd, sizeof(ip_cmd), "ip addr replace %s/24 dev %s 2>/dev/null || ip addr add %s/24 dev %s 2>/dev/null; ip link set %s up 2>/dev/null", lan_ip, config->lan.name, lan_ip, config->lan.name, config->lan.name);
     safe_system(ip_cmd);
 
-    /* Apply Secondary LAN Subnet Gateways for Policy Routes */
-    for (uint32_t p = 0; p < config->lan.policy_route_count; p++) {
-        const policy_route_t *pr = &config->lan.policy_routes[p];
-        if (pr->enabled && pr->gateway_ip_str[0]) {
-            char gw_cmd[512];
-            snprintf(gw_cmd, sizeof(gw_cmd), "ip addr add %s/%u dev %s 2>/dev/null || true",
-                     pr->gateway_ip_str, pr->prefix_len > 0 ? pr->prefix_len : 24, config->lan.name);
-            safe_system(gw_cmd);
-            LOG_INFO("[Kernel Netlink] Added Policy Gateway Alias %s/%u on %s (Target Group: %s)",
-                     pr->gateway_ip_str, pr->prefix_len > 0 ? pr->prefix_len : 24, config->lan.name, pr->target_group);
-        }
-    }
+    /* Apply Secondary LAN Subnet Gateways and Kernel Rules for Policy Routes */
+    net_apply_policy_routes(config);
 #endif
 
     /* 3. Configure Multi-WAN Interfaces & Policy Tables */
@@ -188,3 +178,38 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
     LOG_INFO("Network configuration successfully applied to Kernel!");
     return 0;
 }
+
+int net_apply_policy_routes(const fluxwan_config_t *config) {
+    if (!config) return -1;
+#if defined(__linux__)
+    for (uint32_t p = 0; p < config->lan.policy_route_count; p++) {
+        const policy_route_t *pr = &config->lan.policy_routes[p];
+        if (pr->enabled && pr->gateway_ip_str[0]) {
+            char gw_cmd[512];
+            snprintf(gw_cmd, sizeof(gw_cmd), "ip addr add %s/%u dev %s 2>/dev/null || true",
+                     pr->gateway_ip_str, pr->prefix_len > 0 ? pr->prefix_len : 24, config->lan.name);
+            safe_system(gw_cmd);
+            LOG_INFO("[Kernel Netlink] Added Policy Gateway Alias %s/%u on %s (Target Group: %s)",
+                     pr->gateway_ip_str, pr->prefix_len > 0 ? pr->prefix_len : 24, config->lan.name, pr->target_group);
+
+            /* If target group has members, add kernel policy routing rule for this subnet */
+            for (uint32_t g = 0; g < config->group_count; g++) {
+                if (config->groups[g].id == pr->target_group_id && config->groups[g].wan_count > 0) {
+                    uint32_t first_wan_idx = config->groups[g].wan_member_indices[0];
+                    if (first_wan_idx < config->wan_count) {
+                        uint32_t tbl = config->wans[first_wan_idx].table_id;
+                        char rule_cmd[512];
+                        snprintf(rule_cmd, sizeof(rule_cmd),
+                                 "ip rule del from %s lookup %u 2>/dev/null || true; ip rule add from %s lookup %u priority %u 2>/dev/null || true",
+                                 pr->subnet_str, tbl, pr->subnet_str, tbl, 500 + p);
+                        safe_system(rule_cmd);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+#endif
+    return 0;
+}
+
