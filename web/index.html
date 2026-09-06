@@ -408,9 +408,9 @@
                                         <span>🌐</span>
                                         <span>Native IPv6 (SLAAC / Starlink):</span>
                                     </span>
-                                    <span class="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.2 rounded text-4xs font-bold">ONLINE</span>
+                                    <span :class="wan.ip6 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-700/30 text-slate-400 border border-slate-600/30'" class="px-1.5 py-0.2 rounded text-4xs font-bold" x-text="wan.ip6 ? 'ONLINE' : 'OFFLINE'"></span>
                                 </div>
-                                <div class="text-emerald-400 font-bold truncate" x-text="wan.ip6 || '2a02:cb40:1000:88::50/64'"></div>
+                                <div class="text-emerald-400 font-bold truncate" x-text="wan.ip6 || 'No IPv6 Configured'"></div>
                             </div>
 
                             <!-- Health Prober Target -->

@@ -110,6 +110,23 @@ int prober_send_probes(prober_ctx_t *ctx) {
     for (uint32_t i = 0; i < ctx->config->wan_count; i++) {
         wan_config_t *w = &ctx->config->wans[i];
         wan_probe_state_t *ps = &ctx->wan_states[i];
+        if (!w->enabled) continue;
+
+        uint16_t seq = ps->current_seq++;
+        uint32_t slot = seq % 16;
+
+        /* Check if previous probe in this slot timed out */
+        if (ps->pending_probes[slot].send_time_us > 0 && !ps->pending_probes[slot].received) {
+            uint64_t elapsed_ms = (now_us - ps->pending_probes[slot].send_time_us) / 1000ULL;
+            if (elapsed_ms >= (uint64_t)ctx->config->prober.timeout_ms) {
+                ps->loss_history[ps->history_idx % PROBE_WINDOW_SIZE] = true;
+                ps->history_idx++;
+            }
+        }
+
+        ps->pending_probes[slot].seq = seq;
+        ps->pending_probes[slot].send_time_us = now_us;
+        ps->pending_probes[slot].received = false;
 
         if (ctx->raw_fd >= 0 && w->probe_target_ip != 0) {
             char packet[64];
@@ -119,7 +136,12 @@ int prober_send_probes(prober_ctx_t *ctx) {
             icmp->type = ICMP_ECHO;
             icmp->code = 0;
             icmp->un.echo.id = htons((uint16_t)(ctx->pid + i));
-            icmp->un.echo.sequence = htons(ps->current_seq++);
+            icmp->un.echo.sequence = htons(seq);
+
+            /* Embed 64-bit microsecond send timestamp in payload */
+            uint64_t *ts_payload = (uint64_t *)(packet + sizeof(struct icmphdr));
+            *ts_payload = now_us;
+
             icmp->checksum = checksum(packet, sizeof(packet));
 
             struct sockaddr_in dest;
@@ -127,18 +149,16 @@ int prober_send_probes(prober_ctx_t *ctx) {
             dest.sin_family = AF_INET;
             dest.sin_addr.s_addr = w->probe_target_ip;
 
+            /* Bind socket to WAN interface name so ICMP exits strictly via that WAN */
+#if defined(SO_BINDTODEVICE)
+            if (w->name[0]) {
+                setsockopt(ctx->raw_fd, SOL_SOCKET, SO_BINDTODEVICE, w->name, (socklen_t)strlen(w->name));
+            }
+#endif
             sendto(ctx->raw_fd, packet, sizeof(packet), 0, (struct sockaddr *)&dest, sizeof(dest));
         }
 
-        /* Compute / Update live metrics */
-        uint32_t sim_rtt = 12 + (rand() % 15);
-        if (i == 1) sim_rtt += rand() % 40; /* WAN2 jitter */
-
-        ps->rtt_history[ps->history_idx % PROBE_WINDOW_SIZE] = sim_rtt;
-        ps->loss_history[ps->history_idx % PROBE_WINDOW_SIZE] = false;
-        ps->history_idx++;
-
-        /* Calculate moving average RTT, Jitter, Loss */
+        /* Calculate moving average RTT, Jitter, and Loss from real packet history */
         uint64_t total_rtt = 0;
         uint32_t count = 0, losses = 0;
         for (uint32_t k = 0; k < PROBE_WINDOW_SIZE; k++) {
@@ -149,12 +169,16 @@ int prober_send_probes(prober_ctx_t *ctx) {
             if (ps->loss_history[k]) losses++;
         }
 
-        w->metrics.rtt_ms = count > 0 ? (uint32_t)(total_rtt / count) : sim_rtt;
-        w->metrics.jitter_ms = rand() % 5;
+        if (count > 0) {
+            uint32_t avg_rtt = (uint32_t)(total_rtt / count);
+            w->metrics.jitter_ms = (avg_rtt >= w->metrics.rtt_ms) ?
+                                   (avg_rtt - w->metrics.rtt_ms) : (w->metrics.rtt_ms - avg_rtt);
+            w->metrics.rtt_ms = avg_rtt;
+        }
         w->metrics.packet_loss_pct = (losses * 100.0f) / PROBE_WINDOW_SIZE;
         w->metrics.last_probe_time = now_us / 1000ULL;
 
-        /* Determine health state based on parameters */
+        /* Evaluate Link Health */
         wan_state_t new_state = WAN_STATE_HEALTHY;
         if (w->metrics.packet_loss_pct > ctx->config->prober.max_acceptable_loss_pct) {
             new_state = WAN_STATE_DOWN;
@@ -174,12 +198,56 @@ int prober_send_probes(prober_ctx_t *ctx) {
 
 int prober_process_responses(prober_ctx_t *ctx) {
     if (!ctx || ctx->raw_fd < 0) return 0;
-    char buf[512];
+    uint8_t buf[512];
     struct sockaddr_in from;
     socklen_t fromlen = sizeof(from);
 
-    ssize_t len = recvfrom(ctx->raw_fd, buf, sizeof(buf), MSG_DONTWAIT, (struct sockaddr *)&from, &fromlen);
-    if (len <= 0) return 0;
+    ssize_t len;
+    while ((len = recvfrom(ctx->raw_fd, buf, sizeof(buf), MSG_DONTWAIT, (struct sockaddr *)&from, &fromlen)) > 0) {
+        /* Minimum IPv4 header (20 bytes) + ICMP header (8 bytes) */
+        if (len < 28) continue;
 
+        int ip_hl = (buf[0] & 0x0F) * 4;
+        if (len < ip_hl + 8) continue;
+
+        struct icmphdr *icmp = (struct icmphdr *)(buf + ip_hl);
+        if (icmp->type != ICMP_ECHOREPLY) continue;
+
+        uint16_t id = ntohs(icmp->un.echo.id);
+        uint16_t seq = ntohs(icmp->un.echo.sequence);
+
+        if (id < ctx->pid || id >= ctx->pid + ctx->config->wan_count) continue;
+
+        uint32_t wan_idx = id - ctx->pid;
+        wan_config_t *w = &ctx->config->wans[wan_idx];
+        wan_probe_state_t *ps = &ctx->wan_states[wan_idx];
+
+        uint64_t now_us = get_time_us();
+        uint64_t send_time_us = 0;
+
+        /* Extract embedded timestamp from ICMP payload */
+        if (len >= ip_hl + (int)sizeof(struct icmphdr) + (int)sizeof(uint64_t)) {
+            uint64_t *ts_ptr = (uint64_t *)(buf + ip_hl + sizeof(struct icmphdr));
+            send_time_us = *ts_ptr;
+        } else {
+            send_time_us = ps->pending_probes[seq % 16].send_time_us;
+        }
+
+        uint32_t measured_rtt_ms = 1;
+        if (send_time_us > 0 && now_us >= send_time_us) {
+            uint64_t diff_us = now_us - send_time_us;
+            measured_rtt_ms = (uint32_t)(diff_us / 1000ULL);
+            if (measured_rtt_ms == 0) measured_rtt_ms = 1; /* Sub-millisecond local latency */
+        }
+
+        /* Record real RTT in moving history */
+        ps->rtt_history[ps->history_idx % PROBE_WINDOW_SIZE] = measured_rtt_ms;
+        ps->loss_history[ps->history_idx % PROBE_WINDOW_SIZE] = false;
+        ps->history_idx++;
+
+        w->metrics.rtt_ms = measured_rtt_ms;
+        w->metrics.last_probe_time = now_us / 1000ULL;
+        ps->pending_probes[seq % 16].received = true;
+    }
     return 0;
 }

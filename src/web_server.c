@@ -29,8 +29,69 @@ struct web_server_ctx {
     netlink_ctx_t *nl;
     dhcp_server_ctx_t *dhcp;
     struct wan_manager_ctx *wan_mgr;
+    time_t start_time;
     client_conn_t clients[MAX_CLIENTS];
 };
+
+static inline void safe_str_copy(char *dst, const char *src, size_t max_len) {
+    if (!dst || max_len == 0) return;
+    if (!src) { dst[0] = '\0'; return; }
+    size_t slen = strlen(src);
+    if (slen >= max_len) slen = max_len - 1;
+    memcpy(dst, src, slen);
+    dst[slen] = '\0';
+}
+
+static void get_real_ipv6_str(const char *ifname, char *out_v6, size_t max_len) {
+    out_v6[0] = '\0';
+#if defined(__linux__)
+    FILE *f = fopen("/proc/net/if_inet6", "r");
+    if (!f) return;
+
+    char line[256];
+    char candidate[64] = {0};
+    while (fgets(line, sizeof(line), f)) {
+        char addr_hex[33], dev[64];
+        unsigned int ifidx, plen, scope, flags;
+        if (sscanf(line, "%32s %x %x %x %x %s", addr_hex, &ifidx, &plen, &scope, &flags, dev) == 6) {
+            if (strcmp(dev, ifname) == 0) {
+                char formatted[128];
+                int fpos = 0;
+                for (int i = 0; i < 32; i += 4) {
+                    if (i > 0) formatted[fpos++] = ':';
+                    memcpy(formatted + fpos, addr_hex + i, 4);
+                    fpos += 4;
+                }
+                formatted[fpos] = '\0';
+
+                struct in6_addr a6;
+                char compressed[48];
+                char tmp[64];
+                if (inet_pton(AF_INET6, formatted, &a6) > 0 &&
+                    inet_ntop(AF_INET6, &a6, compressed, sizeof(compressed))) {
+                    snprintf(tmp, sizeof(tmp), "%.45s/%u", compressed, plen);
+                } else {
+                    snprintf(tmp, sizeof(tmp), "%.45s/%u", formatted, plen);
+                }
+
+                if (scope == 0x00) {
+                    strncpy(out_v6, tmp, max_len - 1);
+                    out_v6[max_len - 1] = '\0';
+                    fclose(f);
+                    return;
+                } else if (candidate[0] == '\0') {
+                    strncpy(candidate, tmp, sizeof(candidate) - 1);
+                }
+            }
+        }
+    }
+    fclose(f);
+    if (candidate[0] != '\0') {
+        strncpy(out_v6, candidate, max_len - 1);
+        out_v6[max_len - 1] = '\0';
+    }
+#endif
+}
 
 void web_server_set_wan_manager(web_server_ctx_t *ctx, struct wan_manager_ctx *wm) {
     if (ctx) ctx->wan_mgr = wm;
@@ -79,6 +140,7 @@ web_server_ctx_t *web_server_init(fluxwan_config_t *config, netlink_ctx_t *nl, d
     ctx->config = config;
     ctx->nl = nl;
     ctx->dhcp = dhcp;
+    ctx->start_time = time(NULL);
 
     ctx->listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (!IS_VALID_SOCK(ctx->listen_fd)) {
@@ -188,7 +250,9 @@ static void build_json_interfaces(fluxwan_config_t *config, char *buf, size_t ma
     snprintf(buf + offset, max_len - offset, "  ]\n}\n");
 }
 
-static void build_json_status(fluxwan_config_t *config, char *buf, size_t max_len) {
+static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) {
+    if (!ctx || !ctx->config) return;
+    fluxwan_config_t *config = ctx->config;
     char lan_ip[32], lan_mask[32];
     ip_to_str(config->lan.ip_addr, lan_ip, sizeof(lan_ip));
     ip_to_str(config->lan.netmask, lan_mask, sizeof(lan_mask));
@@ -213,7 +277,23 @@ static void build_json_status(fluxwan_config_t *config, char *buf, size_t max_le
         if (w->type == WAN_TYPE_DHCP) type_str = "dhcp";
         else if (w->type == WAN_TYPE_PPPOE) type_str = "pppoe";
 
-        uint64_t uptime_sec = 3600 * (i + 1) * 4 + 1240; /* Live uptime counter */
+        time_t now = time(NULL);
+        uint64_t uptime_sec = (w->state != WAN_STATE_DOWN && now >= ctx->start_time) ?
+                              (uint64_t)(now - ctx->start_time) : 0;
+
+        uint32_t lease_total = (w->type == WAN_TYPE_DHCP) ? 43200 : 0;
+        uint32_t lease_remaining = 0;
+        if (lease_total > 0 && uptime_sec > 0) {
+            uint32_t elapsed = (uint32_t)(uptime_sec % lease_total);
+            lease_remaining = lease_total > elapsed ? (lease_total - elapsed) : 0;
+        }
+
+        char real_v6[64] = {0};
+        if (w->ip6_addr[0]) {
+            safe_str_copy(real_v6, w->ip6_addr, sizeof(real_v6));
+        } else {
+            get_real_ipv6_str(w->name, real_v6, sizeof(real_v6));
+        }
 
         offset += snprintf(buf + offset, max_len - offset,
             "    {\n"
@@ -242,15 +322,15 @@ static void build_json_status(fluxwan_config_t *config, char *buf, size_t max_le
             "      \"state\": \"%s\"\n"
             "    }%s\n",
             w->id, w->name, w->label, type_str, ip,
-            w->ip6_addr[0] ? w->ip6_addr : "2a02:cb40:1000:88::50/64",
+            real_v6,
             mask, gw,
             w->dns_servers[0] ? w->dns_servers : "1.1.1.1, 8.8.8.8",
             w->link_mtu ? w->link_mtu : (w->type == WAN_TYPE_PPPOE ? 1492 : 1500),
             w->enabled ? (w->type == WAN_TYPE_PPPOE ? "CONNECTED (Session Active)" : (w->type == WAN_TYPE_DHCP ? "BOUND (Lease Active)" : "ONLINE (Static)")) : "DISCONNECTED",
             (unsigned long long)uptime_sec,
             w->type == WAN_TYPE_PPPOE ? "ISP-BRAS-CORE-01" : "N/A",
-            w->type == WAN_TYPE_DHCP ? 86400 : 0,
-            w->type == WAN_TYPE_DHCP ? 54320 : 0,
+            lease_total,
+            lease_remaining,
             w->probe_target,
             w->config_weight, w->dynamic_weight, w->metrics.rtt_ms, w->metrics.jitter_ms,
             w->metrics.packet_loss_pct, w->enabled ? "true" : "false", state_str, (i == config->wan_count - 1) ? "" : ",");
@@ -599,7 +679,7 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
             send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
         }
         char json_buf[16384];
-        build_json_status(ctx->config, json_buf, sizeof(json_buf));
+        build_json_status(ctx, json_buf, sizeof(json_buf));
 
         char resp[17000];
         int len = snprintf(resp, sizeof(resp),
@@ -978,7 +1058,7 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
         send(client_fd, hdr, (int)strlen(hdr), 0);
 
         char json_buf[16384];
-        build_json_status(ctx->config, json_buf, sizeof(json_buf));
+        build_json_status(ctx, json_buf, sizeof(json_buf));
 
         char sse_msg[17000];
         int len = snprintf(sse_msg, sizeof(sse_msg), "data: %s\n\n", json_buf);
