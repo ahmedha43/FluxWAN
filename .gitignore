@@ -19,6 +19,7 @@
 /test_pppoe_manager
 /test_live_nat46_translation
 /test_xdp_packet
+/test_disparate_speeds_benchmark
 
 # Cache & Temporary Directories
 .cache/
