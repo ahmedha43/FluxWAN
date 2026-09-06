@@ -287,6 +287,7 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
         const char *state_str = "HEALTHY";
         if (w->state == WAN_STATE_DEGRADED) state_str = "DEGRADED";
         else if (w->state == WAN_STATE_DOWN) state_str = "DOWN";
+        else if (w->state == WAN_STATE_DRAINING) state_str = "DRAINING";
 
         const char *type_str = "static";
         if (w->type == WAN_TYPE_DHCP) type_str = "dhcp";

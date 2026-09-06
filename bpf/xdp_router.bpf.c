@@ -99,11 +99,13 @@ struct icmphdr {
 #define MAX_EBPF_WANS       8
 #define MAX_STICKY_ENTRIES  16384   /* LRU evicts old flows automatically */
 
-/* Katran-inspired packet flags (mirrors F_SYN_SET, F_RST_SET, F_ICMP) */
+/* Katran-inspired packet flags (mirrors F_SYN_SET, F_RST_SET, F_ICMP, F_QUIC) */
 #define PKT_FLAG_SYN  (1 << 0)
 #define PKT_FLAG_RST  (1 << 1)
 #define PKT_FLAG_FIN  (1 << 2)
 #define PKT_FLAG_ICMP (1 << 3)
+#define PKT_FLAG_QUIC (1 << 4)
+#define PKT_FLAG_PMTU (1 << 5)
 
 /* =========================================================================
  * DATA STRUCTURES
@@ -116,8 +118,8 @@ struct flow_5tuple {
     uint16_t src_port;
     uint16_t dst_port;
     uint8_t  proto;
-    uint8_t  pkt_flags;  /* SYN/RST/FIN/ICMP flags — from Katran pattern */
-    uint16_t pad;
+    uint8_t  pkt_flags;  /* SYN/RST/FIN/ICMP/QUIC/PMTU flags — from Katran pattern */
+    uint16_t quic_token; /* 16-bit hashed token from QUIC DCID for QUIC roaming */
 };
 
 /* WAN Uplink Backend Entry — synced from userspace wan_manager */
@@ -130,6 +132,7 @@ struct bpf_wan_entry {
     uint32_t is_active;
     uint32_t table_id;
     uint32_t fwmark;     /* Policy routing mark: 0x101..0x108 */
+    uint32_t is_draining;/* Meta Katran Graceful Draining state */
 };
 
 /* Per-CPU WAN Telemetry — lockless multi-core stats (Katran pattern) */
@@ -146,7 +149,7 @@ struct bpf_wan_stats {
 struct bpf_session_val {
     uint32_t wan_idx;
     uint32_t wan_id;
-    uint32_t orig_src_ip;    /* Original LAN client IP (before SNAT) */
+    uint32_t orig_src_ip;    /* Store original LAN IP before SNAT */
     uint64_t last_seen_ns;   /* bpf_ktime_get_ns() timestamp */
 };
 
@@ -180,7 +183,15 @@ struct {
     __type(value, struct bpf_wan_entry);
 } wan_table_map SEC(".maps");
 
-/* 3. LRU Session Persistence Map (Katran: per-connection state) */
+/* 3a. Local Per-CPU LRU Session Map (Katran: local_lru_cache, 100% lockless) */
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_PERCPU_HASH);
+    __uint(max_entries, 32768);
+    __type(key, struct flow_5tuple);
+    __type(value, struct bpf_session_val);
+} local_lru_map SEC(".maps");
+
+/* 3b. Global LRU Session Persistence Map (Katran: fallback_lru_cache) */
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, MAX_STICKY_ENTRIES);
@@ -227,9 +238,15 @@ struct {
  * In XDP, we use a fast 32-bit finalizer matching the same distribution.
  * ========================================================================= */
 static __always_inline uint32_t hash_5tuple(const struct flow_5tuple *key) {
-    uint32_t h = key->src_ip ^ key->dst_ip;
-    h ^= ((uint32_t)key->src_port << 16) | (uint32_t)key->dst_port;
-    h ^= (uint32_t)key->proto;
+    uint32_t h;
+    if (key->pkt_flags & PKT_FLAG_QUIC) {
+        /* Katran QUIC pattern: hash by QUIC DCID token & destination server */
+        h = key->dst_ip ^ ((uint32_t)key->quic_token << 16) ^ (uint32_t)key->dst_port;
+    } else {
+        h = key->src_ip ^ key->dst_ip;
+        h ^= ((uint32_t)key->src_port << 16) | (uint32_t)key->dst_port;
+        h ^= (uint32_t)key->proto;
+    }
     /* Wang hash finalizer — avalanche effect */
     h = (h ^ (h >> 16)) * 0x45d9f3bU;
     h = (h ^ (h >> 16)) * 0x45d9f3bU;
@@ -345,7 +362,7 @@ static __always_inline int parse_tcp(
     return 0;
 }
 
-/* Parse UDP */
+/* Parse UDP & QUIC (Katran RFC 9000 QUIC Connection ID pattern) */
 static __always_inline int parse_udp(
     void **cur, void *data_end, struct flow_5tuple *flow)
 {
@@ -353,13 +370,52 @@ static __always_inline int parse_udp(
     if ((void *)(udph + 1) > data_end)
         return -1;
 
-    flow->src_port  = udph->source;
-    flow->dst_port  = udph->dest;
-    flow->pkt_flags = 0;
+    flow->src_port   = udph->source;
+    flow->dst_port   = udph->dest;
+    flow->pkt_flags  = 0;
+    flow->quic_token = 0;
+
+    /* Katran QUIC CID Parser: Inspect UDP/443 (HTTP/3) or other QUIC flows */
+    if (udph->dest == 0xBB01 /* htons(443) */ || udph->source == 0xBB01) {
+        void *quic_data = (void *)(udph + 1);
+        if (quic_data + 1 <= data_end) {
+            uint8_t first_byte = *(uint8_t *)quic_data;
+            /* QUIC packets must have the Fixed Bit (0x40) set */
+            if (first_byte & 0x40) {
+                flow->pkt_flags |= PKT_FLAG_QUIC;
+                uint16_t token = 0;
+                if (first_byte & 0x80) {
+                    /* Long Header: [flags 1B][version 4B][dcil 1B][dcid...] */
+                    if (quic_data + 6 <= data_end) {
+                        uint8_t dcid_len = *(uint8_t *)(quic_data + 5);
+                        if (dcid_len >= 4 && quic_data + 6 + 4 <= data_end) {
+                            uint8_t *dcid = (uint8_t *)(quic_data + 6);
+                            token = ((uint16_t)dcid[0] << 8) | (dcid[1] ^ dcid[2]);
+                        } else if (quic_data + 8 <= data_end) {
+                            uint8_t *dcid = (uint8_t *)(quic_data + 6);
+                            token = ((uint16_t)dcid[0] << 8) | dcid[1];
+                        }
+                    }
+                } else {
+                    /* Short Header (1-RTT Data): [flags 1B][dcid typically 4-8 bytes] */
+                    if (quic_data + 5 <= data_end) {
+                        uint8_t *dcid = (uint8_t *)(quic_data + 1);
+                        token = ((uint16_t)dcid[0] << 8) | (dcid[1] ^ dcid[2]);
+                    }
+                }
+                if (token != 0) {
+                    flow->quic_token = token;
+                    /* Normalize src_ip & src_port for mobile QUIC client roaming session preservation */
+                    flow->src_ip = 0;
+                    flow->src_port = 0;
+                }
+            }
+        }
+    }
     return 0;
 }
 
-/* Parse ICMP — use Echo ID as flow identifier (Katran ICMP pattern) */
+/* Parse ICMP — handle Echo and PMTU Inner Packets (Katran handle_icmp pattern) */
 static __always_inline int parse_icmp(
     void **cur, void *data_end, struct flow_5tuple *flow)
 {
@@ -367,14 +423,36 @@ static __always_inline int parse_icmp(
     if ((void *)(icmph + 1) > data_end)
         return -1;
 
+    flow->quic_token = 0;
     if (icmph->type == ICMP_ECHO || icmph->type == ICMP_ECHOREPLY) {
         flow->src_port = icmph->un.echo.id;
         flow->dst_port = icmph->un.echo.sequence;
+        flow->pkt_flags = PKT_FLAG_ICMP;
+    } else if (icmph->type == 3 || icmph->type == 11) {
+        /* Katran ICMP PMTUD pattern: unpack original inner IP & transport headers */
+        flow->pkt_flags = PKT_FLAG_ICMP | PKT_FLAG_PMTU;
+        void *inner_data = (void *)(icmph + 1);
+        struct iphdr *inner_iph = inner_data;
+        if ((void *)(inner_iph + 1) <= data_end && inner_iph->version == 4) {
+            int inner_ihl = inner_iph->ihl * 4;
+            if (inner_ihl >= 20 && (void *)inner_iph + inner_ihl + 4 <= data_end) {
+                uint16_t *inner_ports = (void *)inner_iph + inner_ihl;
+                /* Reconstruct original client flow so PMTUD packet maps to the right WAN */
+                flow->src_ip   = inner_iph->saddr;
+                flow->dst_ip   = inner_iph->daddr;
+                flow->src_port = inner_ports[0];
+                flow->dst_port = inner_ports[1];
+                flow->proto    = inner_iph->protocol;
+                return 0;
+            }
+        }
+        flow->src_port = 0;
+        flow->dst_port = 0;
     } else {
         flow->src_port = 0;
         flow->dst_port = 0;
+        flow->pkt_flags = PKT_FLAG_ICMP;
     }
-    flow->pkt_flags = PKT_FLAG_ICMP;
     return 0;
 }
 
@@ -463,8 +541,15 @@ int xdp_router_func(struct xdp_md *ctx) {
     uint64_t pkt_len = (uint64_t)((char *)data_end - (char *)data);
     stats_inc_rx(gstats, pkt_len);
 
-    /* ── 4. LRU Sticky Session Lookup (Katran: per-connection persistence) */
-    struct bpf_session_val *sticky = bpf_map_lookup_elem(&sticky_flow_map, &key);
+    /* ── 4. Dual-Tier LRU Sticky Session Lookup (Katran: local_lru + fallback_lru) */
+    struct bpf_session_val *sticky = bpf_map_lookup_elem(&local_lru_map, &key);
+    if (!sticky) {
+        sticky = bpf_map_lookup_elem(&sticky_flow_map, &key);
+        if (sticky) {
+            /* Populate local CPU cache for subsequent lockless hits */
+            bpf_map_update_elem(&local_lru_map, &key, sticky, BPF_ANY);
+        }
+    }
     uint32_t target_wan_idx = 0;
     bool need_dispatch = true;
     uint32_t flow_hash = hash_5tuple(&key);
@@ -473,9 +558,11 @@ int xdp_router_func(struct xdp_md *ctx) {
         uint32_t cidx = sticky->wan_idx;
         if (cidx < MAX_EBPF_WANS) {
             struct bpf_wan_entry *ce = bpf_map_lookup_elem(&wan_table_map, &cidx);
-            if (ce && ce->is_active && ce->weight > 0) {
-                /* RST or FIN → evict session to allow re-routing */
+            /* Accept active WANs with positive weight OR WANs in Graceful Draining mode */
+            if (ce && ce->is_active && (ce->weight > 0 || ce->is_draining)) {
+                /* RST or FIN → evict session from both LRU tiers (Katran pattern) */
                 if (key.pkt_flags & (PKT_FLAG_RST | PKT_FLAG_FIN)) {
+                    bpf_map_delete_elem(&local_lru_map, &key);
                     bpf_map_delete_elem(&sticky_flow_map, &key);
                     stats_inc_session_evict(gstats);
                     flow_debug_emit(key.src_ip, key.dst_ip, key.src_port, key.dst_port,
@@ -529,14 +616,15 @@ int xdp_router_func(struct xdp_md *ctx) {
         }
         stats_inc_maglev(gstats);
 
-        /* Health check — fall back to first healthy WAN (Katran: ch_rings fallback) */
+        /* Health check — fall back to first healthy WAN (Katran: ch_rings fallback)
+         * Notice: Draining WANs (is_draining=1) or weight==0 are NOT eligible for new dispatches! */
         struct bpf_wan_entry *we = bpf_map_lookup_elem(&wan_table_map, &target_wan_idx);
-        if (!we || !we->is_active || we->weight == 0) {
+        if (!we || !we->is_active || we->weight == 0 || we->is_draining) {
             #pragma unroll
             for (uint32_t i = 0; i < MAX_EBPF_WANS; i++) {
                 uint32_t fi = i;
                 struct bpf_wan_entry *fe = bpf_map_lookup_elem(&wan_table_map, &fi);
-                if (fe && fe->is_active && fe->weight > 0) {
+                if (fe && fe->is_active && fe->weight > 0 && !fe->is_draining) {
                     target_wan_idx = fi;
                     stats_inc_failover(gstats);
                     flow_debug_emit(key.src_ip, key.dst_ip, key.src_port, key.dst_port,
@@ -548,7 +636,7 @@ int xdp_router_func(struct xdp_md *ctx) {
             }
         }
 
-        /* Write new session into LRU map (SYN opens session) */
+        /* Write new session into both LRU tiers (SYN / new flow) */
         if (!(key.pkt_flags & (PKT_FLAG_RST | PKT_FLAG_FIN))) {
             struct bpf_session_val new_sess = {
                 .wan_idx     = target_wan_idx,
@@ -556,6 +644,7 @@ int xdp_router_func(struct xdp_md *ctx) {
                 .orig_src_ip = key.src_ip,
                 .last_seen_ns = 0,
             };
+            bpf_map_update_elem(&local_lru_map, &key, &new_sess, BPF_ANY);
             bpf_map_update_elem(&sticky_flow_map, &key, &new_sess, BPF_ANY);
             struct bpf_wan_entry *target_we = bpf_map_lookup_elem(&wan_table_map, &target_wan_idx);
             flow_debug_emit(key.src_ip, key.dst_ip, key.src_port, key.dst_port,

@@ -79,6 +79,7 @@ struct bpf_wan_entry {
     uint32_t is_active;
     uint32_t table_id;
     uint32_t fwmark;
+    uint32_t is_draining; /* Meta Katran Graceful Draining state */
 };
 
 /* BPF WAN Telemetry Counters */
@@ -97,6 +98,14 @@ struct bpf_session_val {
     uint64_t last_seen_sec;
 };
 
+/* Katran-inspired packet flags (mirrors F_SYN_SET, F_RST_SET, F_ICMP, F_QUIC) */
+#define PKT_FLAG_SYN  (1 << 0)
+#define PKT_FLAG_RST  (1 << 1)
+#define PKT_FLAG_FIN  (1 << 2)
+#define PKT_FLAG_ICMP (1 << 3)
+#define PKT_FLAG_QUIC (1 << 4)
+#define PKT_FLAG_PMTU (1 << 5)
+
 /* Log Macros */
 #define LOG_INFO(fmt, ...)  fprintf(stdout, "[INFO]  " fmt "\n", ##__VA_ARGS__)
 #define LOG_WARN(fmt, ...)  fprintf(stdout, "[WARN]  " fmt "\n", ##__VA_ARGS__)
@@ -114,7 +123,8 @@ typedef enum {
 typedef enum {
     WAN_STATE_DOWN = 0,
     WAN_STATE_DEGRADED,
-    WAN_STATE_HEALTHY
+    WAN_STATE_HEALTHY,
+    WAN_STATE_DRAINING
 } wan_state_t;
 
 /* WAN Metrics & Telemetry */

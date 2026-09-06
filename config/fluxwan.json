@@ -1,45 +1,5 @@
 {
-  "lan": {
-    "interface": "veth_lan",
-    "ip": "10.10.10.1",
-    "netmask": "255.255.255.0",
-    "dhcp_enabled": true,
-    "dhcp_start": "10.10.10.100",
-    "dhcp_end": "10.10.10.200",
-    "dhcp_lease_time": 43200,
-    "policy_routes": [
-      {
-        "subnet": "10.10.20.0/24",
-        "gateway_ip": "10.10.20.1",
-        "target_group": "Starlink_Fleet",
-        "description": "Starlink Dedicated VIP Subscribers",
-        "enabled": true
-      },
-      {
-        "subnet": "10.10.30.0/24",
-        "gateway_ip": "10.10.30.1",
-        "target_group": "Iraq_Local",
-        "description": "Local Low-Latency Gaming & Iraqi Services",
-        "enabled": true
-      }
-    ]
-  },
-  "groups": [
-    {
-      "id": 1,
-      "name": "Iraq_Local",
-      "description": "Local Iraqi Fiber & LTE Lines",
-      "wans": ["WAN1_Fiber_ISP1", "WAN3_LTE_ISP3"],
-      "enabled": true
-    },
-    {
-      "id": 2,
-      "name": "Starlink_Fleet",
-      "description": "Starlink Satellite Constellation Fleet",
-      "wans": ["WAN2_Starlink_ISP2"],
-      "enabled": true
-    }
-  ],
+  "lan": { "interface": "veth_lan", "ip": "10.10.10.1", "netmask": "255.255.255.0", "dhcp_enabled": true },
   "wans": [
     {
       "id": 1,
@@ -47,11 +7,24 @@
       "label": "WAN1_Fiber_ISP1",
       "type": "dhcp",
       "ip": "10.10.1.50",
+      "ip6": "fe80::d80b:49ff:fe9a:a595/64",
       "netmask": "255.255.255.0",
       "gateway": "10.10.1.1",
-      "weight": 100,
+      "dns": "10.10.1.1",
+      "mtu": 1500,
+      "session_status": "BOUND (Lease Active)",
+      "uptime_sec": 60,
+      "ac_name": "N/A",
+      "lease_total_sec": 43200,
+      "lease_remaining_sec": 43140,
       "probe_target": "10.10.1.1",
-      "table_id": 101
+      "config_weight": 100,
+      "dynamic_weight": 100,
+      "rtt_ms": 1,
+      "jitter_ms": 0,
+      "packet_loss": 0.0,
+      "enabled": true,
+      "state": "DRAINING"
     },
     {
       "id": 2,
@@ -59,11 +32,24 @@
       "label": "WAN2_Starlink_ISP2",
       "type": "dhcp",
       "ip": "10.10.2.50",
+      "ip6": "fe80::74f8:1eff:fea1:59df/64",
       "netmask": "255.255.255.0",
       "gateway": "10.10.2.1",
-      "weight": 50,
+      "dns": "10.10.2.1",
+      "mtu": 1500,
+      "session_status": "BOUND (Lease Active)",
+      "uptime_sec": 60,
+      "ac_name": "N/A",
+      "lease_total_sec": 43200,
+      "lease_remaining_sec": 43140,
       "probe_target": "10.10.2.1",
-      "table_id": 102
+      "config_weight": 50,
+      "dynamic_weight": 50,
+      "rtt_ms": 1,
+      "jitter_ms": 0,
+      "packet_loss": 0.0,
+      "enabled": true,
+      "state": "DRAINING"
     },
     {
       "id": 3,
@@ -71,32 +57,63 @@
       "label": "WAN3_LTE_ISP3",
       "type": "dhcp",
       "ip": "10.10.3.50",
+      "ip6": "fe80::b4dd:f4ff:fe62:4ef2/64",
       "netmask": "255.255.255.0",
       "gateway": "10.10.3.1",
-      "weight": 75,
+      "dns": "10.10.3.1",
+      "mtu": 1500,
+      "session_status": "BOUND (Lease Active)",
+      "uptime_sec": 60,
+      "ac_name": "N/A",
+      "lease_total_sec": 43200,
+      "lease_remaining_sec": 43140,
       "probe_target": "10.10.3.1",
-      "table_id": 103
+      "config_weight": 75,
+      "dynamic_weight": 75,
+      "rtt_ms": 1,
+      "jitter_ms": 0,
+      "packet_loss": 0.0,
+      "enabled": true,
+      "state": "DRAINING"
     }
   ],
-  "prober": {
-    "interval_ms": 500,
-    "timeout_ms": 1000,
-    "loss_window": 20,
-    "max_acceptable_rtt_ms": 250,
-    "max_acceptable_loss_pct": 20.0
-  },
-  "sticky": {
-    "enabled": true,
-    "timeout_seconds": 300
-  },
-  "web": {
-    "bind_ip": "0.0.0.0",
-    "port": 8080
-  },
-  "auth": {
-    "enabled": true,
-    "username": "admin",
-    "password": "admin",
-    "session_token": "flux_token_abc123"
-  }
+  "groups": [
+    {
+      "id": 1,
+      "name": "Iraq_Local",
+      "description": "Local Iraqi Fiber & LTE Lines",
+      "enabled": true,
+      "wan_count": 2,
+      "active_wan_count": 2,
+      "wans": ["WAN1_Fiber_ISP1", "WAN3_LTE_ISP3"]
+    },
+    {
+      "id": 2,
+      "name": "Starlink_Fleet",
+      "description": "Starlink Satellite Constellation Fleet",
+      "enabled": true,
+      "wan_count": 1,
+      "active_wan_count": 1,
+      "wans": ["WAN2_Starlink_ISP2"]
+    }
+  ],
+  "policy_routes": [
+    {
+      "subnet": "10.10.20.0/24",
+      "gateway_ip": "10.10.20.1",
+      "target_group": "Starlink_Fleet",
+      "target_group_id": 2,
+      "description": "Starlink Dedicated VIP Subscribers",
+      "enabled": true
+    },
+    {
+      "subnet": "10.10.30.0/24",
+      "gateway_ip": "10.10.30.1",
+      "target_group": "Iraq_Local",
+      "target_group_id": 1,
+      "description": "Local Low-Latency Gaming & Iraqi Services",
+      "enabled": true
+    }
+  ],
+  "sticky_count": 12
 }

@@ -256,6 +256,21 @@
                 </button>
             </div>
 
+            <!-- Meta Katran Architecture Status Banner -->
+            <div class="bg-gradient-to-r from-blue-900/30 via-indigo-900/20 to-purple-900/30 border border-blue-500/30 p-3.5 rounded-xl flex flex-wrap items-center justify-between gap-3 text-2xs font-mono">
+                <div class="flex items-center space-x-2 text-white">
+                    <span class="text-base">🚀</span>
+                    <span class="font-bold text-blue-300">Meta Katran Engine:</span>
+                    <span class="text-slate-300">Wire-Speed L4 Egress Gateway</span>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <span class="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold">✓ QUIC CID Roaming</span>
+                    <span class="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold">✓ ICMP PMTUD Unpack</span>
+                    <span class="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold">✓ Dual-Tier Per-CPU LRU</span>
+                    <span class="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold">✓ Zero-Drop Draining</span>
+                </div>
+            </div>
+
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <template x-for="(wan, index) in config.wans" :key="wan.id">
                     <div class="glass-card p-6 rounded-2xl border border-slate-700 space-y-4 relative transition-all"
@@ -267,6 +282,13 @@
                                 <input type="text" x-model="wan.label" class="bg-transparent text-sm font-bold text-white focus:outline-none border-b border-transparent focus:border-blue-500 truncate w-full" placeholder="Label (e.g. Fiber)">
                             </div>
                             <div class="flex items-center space-x-1.5 shrink-0">
+                                <button type="button" @click="toggleWanDraining(wan)" 
+                                        :class="wan.state === 'DRAINING' ? 'bg-amber-500/20 text-amber-400 border-amber-500/40 hover:bg-amber-500/30' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'"
+                                        class="text-3xs font-bold px-2 py-1 rounded-lg border flex items-center space-x-1 transition-all shadow-sm"
+                                        title="Meta Katran Graceful Draining: Zero-drop maintenance mode">
+                                    <span class="w-1.5 h-1.5 rounded-full shrink-0" :class="wan.state === 'DRAINING' ? 'bg-amber-400 animate-ping' : 'bg-slate-500'"></span>
+                                    <span x-text="wan.state === 'DRAINING' ? 'DRAINING' : 'DRAIN'"></span>
+                                </button>
                                 <button type="button" @click="toggleWanEnabled(wan)" 
                                         :class="wan.enabled !== false ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 hover:bg-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border-rose-500/40 hover:bg-rose-500/30'"
                                         class="text-3xs font-bold px-2 py-1 rounded-lg border flex items-center space-x-1 transition-all shadow-sm">
@@ -352,8 +374,8 @@
                                         <span class="uppercase">Live Session Telemetry</span>
                                     </span>
                                     <span class="px-2 py-0.5 rounded-full text-4xs font-bold"
-                                          :class="wan.enabled !== false ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-700 text-slate-400'"
-                                          x-text="wan.session_status || (wan.type === 'pppoe' ? 'CONNECTED' : (wan.type === 'dhcp' ? 'BOUND' : 'ONLINE'))">CONNECTED</span>
+                                          :class="wan.state === 'DRAINING' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30 animate-pulse' : (wan.enabled !== false ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-700 text-slate-400')"
+                                          x-text="wan.state === 'DRAINING' ? 'DRAINING (Zero-Drop)' : (wan.session_status || (wan.type === 'pppoe' ? 'CONNECTED' : (wan.type === 'dhcp' ? 'BOUND' : 'ONLINE')))">CONNECTED</span>
                                 </div>
 
                                 <div class="space-y-1.5 text-slate-400">
@@ -984,6 +1006,19 @@
                     wan.enabled = !wan.enabled;
                     this.toastMessage = (wan.label || wan.name) + (wan.enabled ? ' ENABLED (Traffic Resumed)' : ' DISABLED (Traffic Halted)');
                     setTimeout(() => this.toastMessage = '', 4000);
+                    this.saveAndApply();
+                },
+
+                toggleWanDraining(wan) {
+                    if (!wan) return;
+                    if (wan.state === 'DRAINING') {
+                        wan.state = 'HEALTHY';
+                        this.toastMessage = (wan.label || wan.name) + ' DRAINING DEACTIVATED (Normal Maglev Dispatch)';
+                    } else {
+                        wan.state = 'DRAINING';
+                        this.toastMessage = (wan.label || wan.name) + ' SET TO DRAINING (Zero-Drop Maintenance: Existing sessions preserved, new flows bypassed)';
+                    }
+                    setTimeout(() => this.toastMessage = '', 5000);
                     this.saveAndApply();
                 },
 

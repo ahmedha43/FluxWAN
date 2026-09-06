@@ -262,8 +262,17 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
                     }
 
                     w->enabled = extract_json_bool(obj_str, "enabled", true);
-                    w->state = w->enabled ? WAN_STATE_HEALTHY : WAN_STATE_DOWN;
+                    char state_val[32] = {0};
+                    if (extract_json_string(obj_str, "state", state_val, sizeof(state_val))) {
+                        if (strcmp(state_val, "DRAINING") == 0) w->state = WAN_STATE_DRAINING;
+                        else if (strcmp(state_val, "DOWN") == 0) w->state = WAN_STATE_DOWN;
+                        else if (strcmp(state_val, "DEGRADED") == 0) w->state = WAN_STATE_DEGRADED;
+                        else w->state = WAN_STATE_HEALTHY;
+                    } else {
+                        w->state = w->enabled ? WAN_STATE_HEALTHY : WAN_STATE_DOWN;
+                    }
                     if (!w->enabled) w->dynamic_weight = 0;
+                    else if (w->state == WAN_STATE_DRAINING) w->dynamic_weight = 0;
                     free(obj_str);
                     idx++;
                 }

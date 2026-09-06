@@ -54,6 +54,7 @@ struct bpf_loader_ctx {
     /* BPF map file descriptors */
     int fd_maglev_lut;     /* maglev_lut_map    ARRAY[65537] */
     int fd_wan_table;      /* wan_table_map     ARRAY[8]     */
+    int fd_local_lru;      /* local_lru_map     LRU_PERCPU_HASH */
     int fd_sticky_flow;    /* sticky_flow_map   LRU_HASH     */
     int fd_percpu_stats;   /* wan_percpu_stats  PERCPU_ARRAY */
     int fd_ctrl_map;       /* ctrl_map          ARRAY[1]     */
@@ -156,6 +157,9 @@ bpf_loader_ctx_t *bpf_loader_init(const char *bpf_obj_path) {
     m = bpf_object__find_map_by_name(ctx->obj, "wan_table_map");
     ctx->fd_wan_table = m ? bpf_map__fd(m) : -1;
 
+    m = bpf_object__find_map_by_name(ctx->obj, "local_lru_map");
+    ctx->fd_local_lru = m ? bpf_map__fd(m) : -1;
+
     m = bpf_object__find_map_by_name(ctx->obj, "sticky_flow_map");
     ctx->fd_sticky_flow = m ? bpf_map__fd(m) : -1;
 
@@ -174,8 +178,8 @@ bpf_loader_ctx_t *bpf_loader_init(const char *bpf_obj_path) {
     m = bpf_object__find_map_by_name(ctx->obj, "maglev_group_map");
     ctx->fd_maglev_group = m ? bpf_map__fd(m) : -1;
 
-    LOG_INFO("[BPF Loader] XDP object loaded. Maps: maglev(%d) wan(%d) sticky(%d) stats(%d) ctrl(%d) policy(%d) grp(%d)",
-             ctx->fd_maglev_lut, ctx->fd_wan_table,
+    LOG_INFO("[BPF Loader] XDP object loaded. Maps: maglev(%d) wan(%d) local_lru(%d) sticky(%d) stats(%d) ctrl(%d) policy(%d) grp(%d)",
+             ctx->fd_maglev_lut, ctx->fd_wan_table, ctx->fd_local_lru,
              ctx->fd_sticky_flow, ctx->fd_percpu_stats,
              ctx->fd_ctrl_map, ctx->fd_policy_route, ctx->fd_maglev_group);
 
@@ -207,13 +211,22 @@ int bpf_loader_attach_xdp(bpf_loader_ctx_t *ctx, const char *ifname) {
 
 #ifdef HAVE_LIBBPF
     if (ctx->prog) {
-        /* Try Native (driver) mode first, fall back to SKB/Generic mode */
+        int prog_fd = bpf_program__fd(ctx->prog);
+
+        /* 1. Try Native Driver Mode (Katran Wire-Speed Path) */
+        if (bpf_xdp_attach(ctx->ifindex_lan, prog_fd, XDP_FLAGS_DRV_MODE, NULL) == 0) {
+            ctx->is_attached = true;
+            LOG_INFO("[BPF Loader] XDP attached in NATIVE DRIVER mode on %s (ifindex=%d) — Wire-Speed Katran Path Active",
+                     ifname, ctx->ifindex_lan);
+            return 0;
+        }
+
+        /* 2. Try libbpf standard link attach */
         ctx->xdp_link = bpf_program__attach_xdp(ctx->prog, ctx->ifindex_lan);
         if (!ctx->xdp_link || libbpf_get_error(ctx->xdp_link)) {
             LOG_WARN("[BPF Loader] Native XDP attach failed on %s — trying SKB mode", ifname);
 
-            /* SKB mode: works on all drivers including VMware vmxnet3 */
-            int prog_fd = bpf_program__fd(ctx->prog);
+            /* 3. SKB mode fallback: works on virtual interfaces (veth) and all NIC drivers */
             if (bpf_xdp_attach(ctx->ifindex_lan, prog_fd,
                                 XDP_FLAGS_SKB_MODE, NULL) == 0) {
                 ctx->is_attached = true;
@@ -271,14 +284,15 @@ int bpf_loader_update_wan_map(bpf_loader_ctx_t *ctx, uint32_t wan_idx,
     }
 
     struct bpf_wan_entry entry = {
-        .wan_id    = wan->id,
-        .ifindex   = (uint32_t)if_nametoindex(wan->name),
-        .ip_addr   = wan->ip_addr,
-        .gateway   = wan->gateway,
-        .weight    = wan->dynamic_weight,
-        .is_active = (wan->state != WAN_STATE_DOWN) ? 1 : 0,
-        .table_id  = wan->table_id,
-        .fwmark    = 0x100 + wan_idx + 1, /* 0x101 .. 0x108 */
+        .wan_id      = wan->id,
+        .ifindex     = (uint32_t)if_nametoindex(wan->name),
+        .ip_addr     = wan->ip_addr,
+        .gateway     = wan->gateway,
+        .weight      = (wan->state == WAN_STATE_DRAINING) ? 0 : wan->dynamic_weight,
+        .is_active   = (wan->state != WAN_STATE_DOWN) ? 1 : 0,
+        .table_id    = wan->table_id,
+        .fwmark      = 0x100 + wan_idx + 1, /* 0x101 .. 0x108 */
+        .is_draining = (wan->state == WAN_STATE_DRAINING) ? 1 : 0,
     };
 
 #ifdef HAVE_LIBBPF
@@ -293,8 +307,8 @@ int bpf_loader_update_wan_map(bpf_loader_ctx_t *ctx, uint32_t wan_idx,
     }
 #endif
 
-    LOG_INFO("[BPF Map] wan_table_map[%u] updated: %s | active=%u | weight=%u | fwmark=0x%x",
-             wan_idx, wan->name, entry.is_active, entry.weight, entry.fwmark);
+    LOG_INFO("[BPF Map] wan_table_map[%u] updated: %s | active=%u | weight=%u | draining=%u | fwmark=0x%x",
+             wan_idx, wan->name, entry.is_active, entry.weight, entry.is_draining, entry.fwmark);
     return 0;
 }
 

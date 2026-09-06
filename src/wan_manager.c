@@ -152,7 +152,7 @@ static void build_single_maglev_ring(const fluxwan_config_t *config,
         permutation[2 * m + 1] = (uint32_t)((skip_hash % (MAGLEV_RING_SIZE - 1)) + 1);
         next[m] = 0;
 
-        if (w->enabled && w->state != WAN_STATE_DOWN && w->dynamic_weight > 0) {
+        if (w->enabled && w->state != WAN_STATE_DOWN && w->state != WAN_STATE_DRAINING && w->dynamic_weight > 0) {
             weights[m] = w->dynamic_weight;
             if (active_members == 0) first_active_idx = w_idx;
             active_members++;
@@ -338,17 +338,23 @@ void wan_manager_on_health_update(uint32_t wan_idx, wan_state_t state, const wan
     if (!ctx || wan_idx >= ctx->config->wan_count) return;
 
     wan_config_t *w = &ctx->config->wans[wan_idx];
-    wan_state_t old_state = w->state;
-    w->state = state;
-
     if (metrics) {
         w->metrics = *metrics;
     }
+
+    /* If WAN is manually set to DRAINING for maintenance, preserve DRAINING status */
+    if (w->state == WAN_STATE_DRAINING) {
+        return;
+    }
+
+    wan_state_t old_state = w->state;
+    w->state = state;
 
     if (old_state != state) {
         const char *state_str = "HEALTHY";
         if (state == WAN_STATE_DEGRADED) state_str = "DEGRADED";
         else if (state == WAN_STATE_DOWN) state_str = "DOWN";
+        else if (state == WAN_STATE_DRAINING) state_str = "DRAINING";
 
         LOG_WARN("[WAN FAILOVER / STATE CHANGE] %s (%s) changed state to %s (RTT: %ums, Loss: %.1f%%)",
                  w->name, w->label, state_str, w->metrics.rtt_ms, w->metrics.packet_loss_pct);
@@ -369,6 +375,8 @@ int wan_manager_rebalance(wan_manager_ctx_t *ctx) {
         if (!w->enabled || w->state == WAN_STATE_DOWN) {
             w->dynamic_weight = 0;
             if (!w->enabled) w->state = WAN_STATE_DOWN;
+        } else if (w->state == WAN_STATE_DRAINING) {
+            w->dynamic_weight = 0;
         } else if (w->state == WAN_STATE_DEGRADED) {
             w->dynamic_weight = w->config_weight / 4;
             if (w->dynamic_weight == 0) w->dynamic_weight = 1;
