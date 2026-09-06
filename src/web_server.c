@@ -93,6 +93,21 @@ static void get_real_ipv6_str(const char *ifname, char *out_v6, size_t max_len) 
 #endif
 }
 
+static uint32_t get_real_active_connections(void) {
+#if defined(__linux__)
+    FILE *f = fopen("/proc/sys/net/netfilter/nf_conntrack_count", "r");
+    if (f) {
+        uint32_t count = 0;
+        if (fscanf(f, "%u", &count) == 1) {
+            fclose(f);
+            return count;
+        }
+        fclose(f);
+    }
+#endif
+    return 0;
+}
+
 void web_server_set_wan_manager(web_server_ctx_t *ctx, struct wan_manager_ctx *wm) {
     if (ctx) ctx->wan_mgr = wm;
 }
@@ -324,11 +339,11 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
             w->id, w->name, w->label, type_str, ip,
             real_v6,
             mask, gw,
-            w->dns_servers[0] ? w->dns_servers : "1.1.1.1, 8.8.8.8",
+            w->dns_servers[0] ? w->dns_servers : (w->gateway ? gw : "N/A"),
             w->link_mtu ? w->link_mtu : (w->type == WAN_TYPE_PPPOE ? 1492 : 1500),
             w->enabled ? (w->type == WAN_TYPE_PPPOE ? "CONNECTED (Session Active)" : (w->type == WAN_TYPE_DHCP ? "BOUND (Lease Active)" : "ONLINE (Static)")) : "DISCONNECTED",
             (unsigned long long)uptime_sec,
-            w->type == WAN_TYPE_PPPOE ? "ISP-BRAS-CORE-01" : "N/A",
+            w->ac_name[0] ? w->ac_name : "N/A",
             lease_total,
             lease_remaining,
             w->probe_target,
@@ -377,7 +392,7 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
             (p == config->lan.policy_route_count - 1) ? "" : ",");
     }
 
-    snprintf(buf + offset, max_len - offset, "  ],\n  \"sticky_count\": 128\n}\n");
+    snprintf(buf + offset, max_len - offset, "  ],\n  \"sticky_count\": %u\n}\n", get_real_active_connections());
 }
 
 static void build_json_dhcp_leases(dhcp_server_ctx_t *dhcp, char *buf, size_t max_len) {

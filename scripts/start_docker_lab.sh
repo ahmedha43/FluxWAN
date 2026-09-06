@@ -61,6 +61,8 @@ ip netns add ns_client
 ip link add veth_lan type veth peer name veth_client
 ip link set veth_client netns ns_client
 ip netns exec ns_client ip addr add 10.10.10.50/24 dev veth_client
+ip netns exec ns_client ip addr add 10.10.20.50/24 dev veth_client
+ip netns exec ns_client ip addr add 10.10.30.50/24 dev veth_client
 ip netns exec ns_client ip link set veth_client up
 ip netns exec ns_client ip link set lo up
 ip netns exec ns_client ip route add default via 10.10.10.1
@@ -201,4 +203,9 @@ fi
 echo "======================================================================"
 echo "   🎉 LIVE LAB READY: Open http://localhost:8080 in your browser!    "
 echo "======================================================================"
-exec ./fluxwan config/fluxwan.json
+if [ "$DAEMON" = "1" ]; then
+    ./fluxwan config/fluxwan.json > fluxwan.log 2>&1 &
+    echo "FluxWAN started in background (PID: $!)"
+else
+    exec ./fluxwan config/fluxwan.json
+fi

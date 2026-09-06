@@ -50,7 +50,6 @@
       "netmask": "255.255.255.0",
       "gateway": "10.10.1.1",
       "weight": 100,
-      "enabled": true,
       "probe_target": "10.10.1.1",
       "table_id": 101
     },
@@ -63,7 +62,6 @@
       "netmask": "255.255.255.0",
       "gateway": "10.10.2.1",
       "weight": 50,
-      "enabled": true,
       "probe_target": "10.10.2.1",
       "table_id": 102
     },
@@ -76,7 +74,6 @@
       "netmask": "255.255.255.0",
       "gateway": "10.10.3.1",
       "weight": 75,
-      "enabled": true,
       "probe_target": "10.10.3.1",
       "table_id": 103
     }
@@ -101,11 +98,5 @@
     "username": "admin",
     "password": "admin",
     "session_token": "flux_token_abc123"
-  },
-  "nat46": {
-    "enabled": true,
-    "synthetic_prefix": "198.18.0.0/15",
-    "upstream_dns": "1.1.1.1",
-    "starlink_wan_name": "veth_wan2"
   }
 }

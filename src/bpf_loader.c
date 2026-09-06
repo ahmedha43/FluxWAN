@@ -67,9 +67,12 @@ struct bpf_loader_ctx {
     char    bpf_obj_path[256];
     int     num_cpus;      /* For Per-CPU map aggregation */
 
-    /* Fallback simulated counters (when libbpf unavailable) */
-    uint64_t sim_rx_bytes[MAX_WANS];
-    uint64_t sim_rx_pkts[MAX_WANS];
+    /* Kernel sysfs network interface counters */
+    char     wan_ifnames[MAX_WANS][32];
+    uint64_t net_rx_bytes[MAX_WANS];
+    uint64_t net_rx_pkts[MAX_WANS];
+    uint64_t net_tx_bytes[MAX_WANS];
+    uint64_t net_tx_pkts[MAX_WANS];
 };
 
 /* =========================================================================
@@ -262,6 +265,11 @@ int bpf_loader_update_wan_map(bpf_loader_ctx_t *ctx, uint32_t wan_idx,
                               const wan_config_t *wan) {
     if (!ctx || !wan || wan_idx >= MAX_WANS) return -1;
 
+    if (wan->name[0]) {
+        strncpy(ctx->wan_ifnames[wan_idx], wan->name, sizeof(ctx->wan_ifnames[wan_idx]) - 1);
+        ctx->wan_ifnames[wan_idx][sizeof(ctx->wan_ifnames[wan_idx]) - 1] = '\0';
+    }
+
     struct bpf_wan_entry entry = {
         .wan_id    = wan->id,
         .ifindex   = (uint32_t)if_nametoindex(wan->name),
@@ -371,14 +379,46 @@ int bpf_loader_get_percpu_wan_stats(bpf_loader_ctx_t *ctx, uint32_t wan_idx,
 fallback:
 #endif
 
-    /* Simulation mode: increment realistic counters */
-    ctx->sim_rx_pkts[wan_idx]  += (uint64_t)(rand() % 150 + 10);
-    ctx->sim_rx_bytes[wan_idx] += (uint64_t)(rand() % 150000 + 10000);
+    /* Read actual Linux kernel network stats for this WAN interface */
+#if defined(__linux__)
+    const char *ifn = ctx->wan_ifnames[wan_idx];
+    if (ifn && ifn[0]) {
+        char path[256];
+        snprintf(path, sizeof(path), "/sys/class/net/%s/statistics/rx_bytes", ifn);
+        FILE *f = fopen(path, "r");
+        if (f) {
+            uint64_t v = 0;
+            if (fscanf(f, "%llu", (unsigned long long *)&v) == 1) ctx->net_rx_bytes[wan_idx] = v;
+            fclose(f);
+        }
+        snprintf(path, sizeof(path), "/sys/class/net/%s/statistics/rx_packets", ifn);
+        f = fopen(path, "r");
+        if (f) {
+            uint64_t v = 0;
+            if (fscanf(f, "%llu", (unsigned long long *)&v) == 1) ctx->net_rx_pkts[wan_idx] = v;
+            fclose(f);
+        }
+        snprintf(path, sizeof(path), "/sys/class/net/%s/statistics/tx_bytes", ifn);
+        f = fopen(path, "r");
+        if (f) {
+            uint64_t tx_b = 0;
+            if (fscanf(f, "%llu", (unsigned long long *)&tx_b) == 1) ctx->net_tx_bytes[wan_idx] = tx_b;
+            fclose(f);
+        }
+        snprintf(path, sizeof(path), "/sys/class/net/%s/statistics/tx_packets", ifn);
+        f = fopen(path, "r");
+        if (f) {
+            uint64_t tx_p = 0;
+            if (fscanf(f, "%llu", (unsigned long long *)&tx_p) == 1) ctx->net_tx_pkts[wan_idx] = tx_p;
+            fclose(f);
+        }
+    }
+#endif
 
-    if (out_rx_bytes) *out_rx_bytes = ctx->sim_rx_bytes[wan_idx];
-    if (out_rx_pkts)  *out_rx_pkts  = ctx->sim_rx_pkts[wan_idx];
-    if (out_tx_bytes) *out_tx_bytes  = ctx->sim_rx_bytes[wan_idx] / 3;
-    if (out_tx_pkts)  *out_tx_pkts   = ctx->sim_rx_pkts[wan_idx]  / 3;
+    if (out_rx_bytes) *out_rx_bytes = ctx->net_rx_bytes[wan_idx];
+    if (out_rx_pkts)  *out_rx_pkts  = ctx->net_rx_pkts[wan_idx];
+    if (out_tx_bytes) *out_tx_bytes = ctx->net_tx_bytes[wan_idx];
+    if (out_tx_pkts)  *out_tx_pkts  = ctx->net_tx_pkts[wan_idx];
     return 0;
 }
 

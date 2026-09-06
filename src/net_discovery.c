@@ -53,11 +53,12 @@ static void read_ipv6_addr(const char *ifname, char *out_v6, size_t max_len) {
     if (!f) return;
 
     char line[256];
+    char candidate[64] = {0};
     while (fgets(line, sizeof(line), f)) {
         char addr_hex[33], dev[64];
         unsigned int ifidx, plen, scope, flags;
         if (sscanf(line, "%32s %x %x %x %x %s", addr_hex, &ifidx, &plen, &scope, &flags, dev) == 6) {
-            if (strcmp(dev, ifname) == 0 && scope == 0x00) { /* Global scope */
+            if (strcmp(dev, ifname) == 0) {
                 char formatted[128];
                 int fpos = 0;
                 for (int i = 0; i < 32; i += 4) {
@@ -76,17 +77,26 @@ static void read_ipv6_addr(const char *ifname, char *out_v6, size_t max_len) {
                 } else {
                     snprintf(tmp, sizeof(tmp), "%.45s/%u", formatted, plen);
                 }
-                safe_str_copy(out_v6, tmp, max_len);
-                break;
+
+                if (scope == 0x00) {
+                    safe_str_copy(out_v6, tmp, max_len);
+                    fclose(f);
+                    return;
+                } else if (candidate[0] == '\0') {
+                    safe_str_copy(candidate, tmp, sizeof(candidate));
+                }
             }
         }
     }
     fclose(f);
+    if (candidate[0] != '\0') {
+        safe_str_copy(out_v6, candidate, max_len);
+    }
 }
 #else
 static void read_ipv6_addr(const char *ifname, char *out_v6, size_t max_len) {
     (void)ifname;
-    safe_str_copy(out_v6, "2a02:cb40:1000:88::50/64", max_len);
+    if (out_v6 && max_len > 0) out_v6[0] = '\0';
 }
 #endif
 
@@ -99,10 +109,10 @@ int net_discovery_get_stats(const char *ifname, uint64_t *rx_bytes, uint64_t *tx
     if (tx_pkts) *tx_pkts = read_sysfs_uint64(ifname, "statistics/tx_packets");
     return 0;
 #else
-    if (rx_bytes) *rx_bytes = 1048576;
-    if (tx_bytes) *tx_bytes = 524288;
-    if (rx_pkts) *rx_pkts = 1500;
-    if (tx_pkts) *tx_pkts = 800;
+    if (rx_bytes) *rx_bytes = 0;
+    if (tx_bytes) *tx_bytes = 0;
+    if (rx_pkts) *rx_pkts = 0;
+    if (tx_pkts) *tx_pkts = 0;
     return 0;
 #endif
 }

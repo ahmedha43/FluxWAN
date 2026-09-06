@@ -359,44 +359,44 @@
                                 <div class="space-y-1.5 text-slate-400">
                                     <div class="flex justify-between">
                                         <span>Assigned IPv4:</span>
-                                        <span class="text-white font-bold" x-text="wan.ip || 'Pending DHCP...'">100.64.12.84</span>
+                                        <span class="text-white font-bold" x-text="wan.ip || 'Pending DHCP...'">-</span>
                                     </div>
                                     <div class="flex justify-between">
                                         <span>Gateway / Peer:</span>
-                                        <span class="text-slate-200" x-text="wan.gateway || '192.168.1.1'">100.64.12.1</span>
+                                        <span class="text-slate-200" x-text="wan.gateway || 'None'">-</span>
                                     </div>
                                     <div class="flex justify-between">
                                         <span>Subnet Netmask:</span>
-                                        <span class="text-slate-300" x-text="wan.netmask || '255.255.255.0'">255.255.255.0</span>
+                                        <span class="text-slate-300" x-text="wan.netmask || 'None'">-</span>
                                     </div>
                                     <div class="flex justify-between">
                                         <span>DNS Servers:</span>
-                                        <span class="text-blue-400 font-bold" x-text="wan.dns || '1.1.1.1, 8.8.8.8'">1.1.1.1, 8.8.8.8</span>
+                                        <span class="text-blue-400 font-bold" x-text="wan.dns || 'None'">-</span>
                                     </div>
                                     <div class="flex justify-between">
                                         <span>Session Duration:</span>
-                                        <span class="text-amber-400 font-bold" x-text="formatUptime(wan.uptime_sec || 14400)">4h 12m 30s</span>
+                                        <span class="text-amber-400 font-bold" x-text="formatUptime(wan.uptime_sec || 0)">0s</span>
                                     </div>
                                     <div class="flex justify-between">
                                         <span>Link MTU / MRU:</span>
-                                        <span class="text-slate-300 font-bold" x-text="(wan.mtu || (wan.type === 'pppoe' ? 1492 : 1500)) + ' Bytes'">1492 Bytes</span>
+                                        <span class="text-slate-300 font-bold" x-text="(wan.mtu || (wan.type === 'pppoe' ? 1492 : 1500)) + ' Bytes'">1500 Bytes</span>
                                     </div>
                                     <template x-if="wan.type === 'pppoe'">
                                         <div class="flex justify-between">
                                             <span>Access Concentrator:</span>
-                                            <span class="text-emerald-400 font-bold" x-text="wan.ac_name || 'ISP-BRAS-CORE-01'">ISP-BRAS-CORE-01</span>
+                                            <span class="text-emerald-400 font-bold" x-text="wan.ac_name || 'N/A'">-</span>
                                         </div>
                                     </template>
                                     <template x-if="wan.type === 'dhcp'">
                                         <div class="flex justify-between">
                                             <span>Lease Remaining:</span>
-                                            <span class="text-emerald-400 font-bold" x-text="formatUptime(wan.lease_remaining_sec || 54320)">15h 05m</span>
+                                            <span class="text-emerald-400 font-bold" x-text="formatUptime(wan.lease_remaining_sec || 0)">0s</span>
                                         </div>
                                     </template>
                                     <div class="flex justify-between pt-1 border-t border-slate-800">
                                         <span>Ping Latency / Loss:</span>
                                         <span class="font-bold" :class="wan.rtt_ms > 100 ? 'text-amber-400' : 'text-emerald-400'"
-                                              x-text="(wan.rtt_ms || 12) + ' ms (' + (wan.packet_loss || 0) + '% loss)'">12 ms (0.0% loss)</span>
+                                              x-text="(wan.rtt_ms !== undefined ? wan.rtt_ms : 0) + ' ms (' + (wan.packet_loss !== undefined ? wan.packet_loss : 0) + '% loss)'">0 ms (0% loss)</span>
                                     </div>
                                 </div>
                             </div>
@@ -697,12 +697,9 @@
                 isEditing: false,
                 interfaces: [],
                 config: {
-                    lan: { interface: 'eth0', ip: '10.10.10.1', netmask: '255.255.255.0', dhcp_enabled: true, dhcp_start: '10.10.10.100', dhcp_end: '10.10.10.200', dhcp_lease_time: 43200, policy_routes: [] },
+                    lan: { interface: '', ip: '', netmask: '', dhcp_enabled: true, dhcp_start: '', dhcp_end: '', dhcp_lease_time: 43200, policy_routes: [] },
                     groups: [],
-                    wans: [
-                        { id: 1, name: 'eth1', label: 'Fiber_Uplink', type: 'static', ip: '192.168.10.2', netmask: '255.255.255.0', gateway: '192.168.10.1', weight: 100, enabled: true, probe_target: '8.8.8.8' },
-                        { id: 2, name: 'eth2', label: 'LTE_Backup', type: 'dhcp', weight: 50, enabled: true, probe_target: '1.1.1.1' }
-                    ]
+                    wans: []
                 },
                 leases: [],
                 systemLogs: [],
@@ -1113,7 +1110,12 @@
                         return r.json();
                     })
                     .then(d => {
-                        if (d.lan && d.lan.interface) this.config.lan.interface = d.lan.interface;
+                        if (d.lan && !this.isEditing) {
+                            if (d.lan.interface) this.config.lan.interface = d.lan.interface;
+                            if (d.lan.ip) this.config.lan.ip = d.lan.ip;
+                            if (d.lan.netmask) this.config.lan.netmask = d.lan.netmask;
+                            if (d.lan.dhcp_enabled !== undefined) this.config.lan.dhcp_enabled = d.lan.dhcp_enabled;
+                        }
                         if (d.groups && !this.isEditing) {
                             this.config.groups = d.groups;
                         }
@@ -1121,30 +1123,30 @@
                             if (!this.config.lan) this.config.lan = {};
                             this.config.lan.policy_routes = d.policy_routes;
                         }
-                        if (d.wans && d.wans.length > 0) {
+                        if (d.wans && d.wans.length > 0 && !this.isEditing) {
                             this.config.wans = d.wans.map((w, idx) => ({
                                 id: w.id || (idx + 1),
-                                name: w.name,
-                                label: w.label || ('WAN_' + (idx + 1)),
+                                name: w.name || '',
+                                label: w.label || w.name,
                                 type: w.type || 'dhcp',
                                 ip: w.ip || '',
                                 ip6: w.ip6 || '',
-                                netmask: w.netmask || '255.255.255.0',
+                                netmask: w.netmask || '',
                                 gateway: w.gateway || '',
-                                dns: w.dns || '1.1.1.1, 8.8.8.8',
-                                session_status: w.session_status || 'CONNECTED',
-                                uptime_sec: w.uptime_sec || 0,
+                                dns: w.dns || '',
+                                session_status: w.session_status || '',
+                                uptime_sec: w.uptime_sec !== undefined ? w.uptime_sec : 0,
                                 ac_name: w.ac_name || '',
-                                lease_remaining_sec: w.lease_remaining_sec || 0,
+                                lease_remaining_sec: w.lease_remaining_sec !== undefined ? w.lease_remaining_sec : 0,
                                 mtu: w.mtu || 1500,
-                                weight: w.config_weight || 100,
-                                dynamic_weight: w.dynamic_weight || 100,
+                                weight: w.config_weight !== undefined ? w.config_weight : 100,
+                                dynamic_weight: w.dynamic_weight !== undefined ? w.dynamic_weight : 100,
                                 enabled: w.enabled !== undefined ? w.enabled : true,
                                 state: w.state || 'HEALTHY',
-                                rtt_ms: w.rtt_ms || 0,
-                                jitter_ms: w.jitter_ms || 0,
-                                packet_loss: w.packet_loss || 0,
-                                probe_target: w.probe_target || '8.8.8.8'
+                                rtt_ms: w.rtt_ms !== undefined ? w.rtt_ms : 0,
+                                jitter_ms: w.jitter_ms !== undefined ? w.jitter_ms : 0,
+                                packet_loss: w.packet_loss !== undefined ? w.packet_loss : 0,
+                                probe_target: w.probe_target || ''
                             }));
                         }
                     })
