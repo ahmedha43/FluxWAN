@@ -67,4 +67,10 @@ int bpf_loader_update_group_maglev_lut(bpf_loader_ctx_t *ctx, uint32_t group_id,
  */
 int bpf_loader_get_global_stats(bpf_loader_ctx_t *ctx, void *out_stats);
 
+/**
+ * Update LPM Subnet Route in BPF (Meta Katran LPM Trie routing)
+ */
+int bpf_loader_update_lpm_route(bpf_loader_ctx_t *ctx, uint32_t subnet_ip, uint32_t prefixlen, uint32_t target_wan_idx);
+
 #endif /* BPF_LOADER_H */
+

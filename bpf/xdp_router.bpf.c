@@ -232,6 +232,20 @@ struct {
     __type(value, uint32_t);
 } maglev_group_map SEC(".maps");
 
+/* 7. Longest Prefix Match (LPM) Trie Map for High-Scale Subnet Routing (from Katran) */
+struct bpf_lpm_key {
+    uint32_t prefixlen; /* Prefix length in bits (0..32) */
+    uint32_t addr;      /* Destination IP in network byte order */
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_LPM_TRIE);
+    __uint(max_entries, 1024);
+    __uint(map_flags, 1); /* BPF_F_NO_PREALLOC */
+    __type(key, struct bpf_lpm_key);
+    __type(value, uint32_t); /* target_wan_idx */
+} lpm_subnet_map SEC(".maps");
+
 /* =========================================================================
  * HASH FUNCTION
  * Katran uses murmurhash3 in userspace for Maglev ring generation.
@@ -257,9 +271,32 @@ static __always_inline uint32_t hash_5tuple(const struct flow_5tuple *key) {
 #if defined(__BPF__) || defined(BPF_HELPERS)
 
 /* =========================================================================
- * KATRAN-INSPIRED CHECKSUM HELPERS (from csum_helpers.h)
- * Used after SNAT to update IP header checksum incrementally.
+ * KATRAN-INSPIRED CHECKSUM HELPERS (RFC 1624 Differential 1's Complement)
+ * Used after SNAT to update IP header checksum incrementally in ~2 cycles.
  * ========================================================================= */
+
+/* RFC 1624 Incremental 32-bit replacement: ~2 CPU cycles */
+static __always_inline void csum_replace4(uint16_t *csum, uint32_t from, uint32_t to) {
+    uint32_t c = ~(*csum) & 0xffff;
+    uint32_t from_hi = from >> 16;
+    uint32_t from_lo = from & 0xffff;
+    uint32_t to_hi = to >> 16;
+    uint32_t to_lo = to & 0xffff;
+    c += ~from_hi & 0xffff;
+    c += ~from_lo & 0xffff;
+    c += to_hi;
+    c += to_lo;
+    c = (c & 0xffff) + (c >> 16);
+    c = (c & 0xffff) + (c >> 16);
+    *csum = ~c;
+}
+
+/* Fast TTL decrement checksum update (from Katran balancer_helpers.h) */
+static __always_inline void csum_replace_ttl(struct iphdr *iph) {
+    uint32_t c = (uint32_t)iph->check + 0x0100;
+    iph->check = (c & 0xffff) + (c >> 16);
+    iph->ttl--;
+}
 
 /* Fold 64-bit accumulator into 16-bit one's complement checksum */
 static __always_inline uint16_t csum_fold_helper(uint64_t csum) {
@@ -384,25 +421,38 @@ static __always_inline int parse_udp(
             if (first_byte & 0x40) {
                 flow->pkt_flags |= PKT_FLAG_QUIC;
                 uint16_t token = 0;
+                uint8_t *dcid = NULL;
+
                 if (first_byte & 0x80) {
                     /* Long Header: [flags 1B][version 4B][dcil 1B][dcid...] */
                     if (quic_data + 6 <= data_end) {
                         uint8_t dcid_len = *(uint8_t *)(quic_data + 5);
                         if (dcid_len >= 4 && quic_data + 6 + 4 <= data_end) {
-                            uint8_t *dcid = (uint8_t *)(quic_data + 6);
-                            token = ((uint16_t)dcid[0] << 8) | (dcid[1] ^ dcid[2]);
-                        } else if (quic_data + 8 <= data_end) {
-                            uint8_t *dcid = (uint8_t *)(quic_data + 6);
-                            token = ((uint16_t)dcid[0] << 8) | dcid[1];
+                            dcid = (uint8_t *)(quic_data + 6);
                         }
                     }
                 } else {
-                    /* Short Header (1-RTT Data): [flags 1B][dcid typically 4-8 bytes] */
+                    /* Short Header (1-RTT Data): [flags 1B][dcid 4-18B] */
                     if (quic_data + 5 <= data_end) {
-                        uint8_t *dcid = (uint8_t *)(quic_data + 1);
+                        dcid = (uint8_t *)(quic_data + 1);
+                    }
+                }
+
+                if (dcid) {
+                    /* Meta Katran QUIC CID version decoding (V1, V2, V3) */
+                    uint8_t cid_ver = dcid[0] >> 6;
+                    if (cid_ver == 0) {
+                        /* V1: packed 16-bit server token across first 18 bits */
+                        token = ((uint16_t)(dcid[0] & 0x3F) << 10) | ((uint16_t)dcid[1] << 2) | (dcid[2] >> 6);
+                    } else if (cid_ver == 1) {
+                        /* V2: direct 16-bit token in bytes 1 and 2 */
+                        token = ((uint16_t)dcid[1] << 8) | dcid[2];
+                    } else {
+                        /* V3 / custom: robust 16-bit XOR mix */
                         token = ((uint16_t)dcid[0] << 8) | (dcid[1] ^ dcid[2]);
                     }
                 }
+
                 if (token != 0) {
                     flow->quic_token = token;
                     /* Normalize src_ip & src_port for mobile QUIC client roaming session preservation */
@@ -477,11 +527,10 @@ static __always_inline int apply_snat(
     if (iph->version != 4 || iph->ihl < 5)
         return -1;
 
-    /* Rewrite source IP → WAN IP */
+    /* Rewrite source IP → WAN IP with RFC 1624 Fast Differential Checksum (~2 cycles) */
+    uint32_t old_src_ip = iph->saddr;
     iph->saddr = new_src_ip;
-
-    /* Recalculate IP header checksum (Katran: ipv4_csum_inline pattern) */
-    update_ip_checksum(iph);
+    csum_replace4(&iph->check, old_src_ip, new_src_ip);
 
     return 0;
 }
@@ -584,6 +633,17 @@ int xdp_router_func(struct xdp_md *ctx) {
 
     /* ── 5. Maglev Consistent Hash Dispatch ────────────────────────────── */
     if (need_dispatch) {
+        /* Meta Katran LPM Trie Destination Subnet Match (Fast-path direct WAN override) */
+        struct bpf_lpm_key lpm_k = {
+            .prefixlen = 32,
+            .addr      = key.dst_ip,
+        };
+        uint32_t *lpm_wan = bpf_map_lookup_elem(&lpm_subnet_map, &lpm_k);
+        if (lpm_wan && *lpm_wan < MAX_EBPF_WANS) {
+            target_wan_idx = *lpm_wan;
+            goto skip_maglev_dispatch;
+        }
+
         /* Policy Route Subnet Lookup (Match client src_ip) */
         uint32_t target_group_id = 0;
         #pragma unroll
@@ -616,6 +676,7 @@ int xdp_router_func(struct xdp_md *ctx) {
         }
         stats_inc_maglev(gstats);
 
+skip_maglev_dispatch:;
         /* Health check — fall back to first healthy WAN (Katran: ch_rings fallback)
          * Notice: Draining WANs (is_draining=1) or weight==0 are NOT eligible for new dispatches! */
         struct bpf_wan_entry *we = bpf_map_lookup_elem(&wan_table_map, &target_wan_idx);

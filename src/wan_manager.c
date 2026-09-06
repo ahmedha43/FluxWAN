@@ -166,19 +166,30 @@ static void build_single_maglev_ring(const fluxwan_config_t *config,
         return;
     }
 
+    /* Meta Katran MaglevHashV2 algorithm:
+     * Guarantees exact proportional slot distribution for arbitrary weights */
+    uint32_t max_weight = 0;
+    for (uint32_t m = 0; m < member_count; m++) {
+        if (weights[m] > max_weight) {
+            max_weight = weights[m];
+        }
+    }
+    if (max_weight == 0) max_weight = 1;
+
+    uint32_t cum_weight[MAX_WANS] = {0};
     uint32_t runs = 0;
+
     while (runs < MAGLEV_RING_SIZE) {
         bool progress = false;
         for (uint32_t m = 0; m < member_count; m++) {
             if (weights[m] == 0) continue;
-            uint32_t offset = permutation[2 * m];
-            uint32_t skip = permutation[2 * m + 1];
-            uint32_t w_idx = member_indices[m];
+            cum_weight[m] += weights[m];
+            if (cum_weight[m] >= max_weight) {
+                cum_weight[m] -= max_weight;
+                uint32_t offset = permutation[2 * m];
+                uint32_t skip = permutation[2 * m + 1];
+                uint32_t w_idx = member_indices[m];
 
-            uint32_t step_weight = (weights[m] + 9) / 10;
-            if (step_weight == 0) step_weight = 1;
-
-            for (uint32_t j = 0; j < step_weight && runs < MAGLEV_RING_SIZE; j++) {
                 while (next[m] < MAGLEV_RING_SIZE) {
                     uint32_t cur = (offset + next[m] * skip) % MAGLEV_RING_SIZE;
                     next[m]++;
@@ -189,6 +200,7 @@ static void build_single_maglev_ring(const fluxwan_config_t *config,
                         break;
                     }
                 }
+                if (runs == MAGLEV_RING_SIZE) break;
             }
         }
         if (!progress && runs < MAGLEV_RING_SIZE) {

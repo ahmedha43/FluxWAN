@@ -61,6 +61,7 @@ struct bpf_loader_ctx {
     int fd_global_stats;   /* global_stats_map  PERCPU_ARRAY */
     int fd_policy_route;   /* policy_route_map  ARRAY[16]    */
     int fd_maglev_group;   /* maglev_group_map  ARRAY[8*65537] */
+    int fd_lpm_subnet;     /* lpm_subnet_map    LPM_TRIE[1024] */
 
     /* State */
     bool    is_attached;
@@ -109,6 +110,7 @@ bpf_loader_ctx_t *bpf_loader_init(const char *bpf_obj_path) {
     ctx->fd_global_stats = -1;
     ctx->fd_policy_route = -1;
     ctx->fd_maglev_group = -1;
+    ctx->fd_lpm_subnet   = -1;
     ctx->num_cpus = get_num_cpus();
 
     const char *candidates[] = {
@@ -193,10 +195,13 @@ bpf_loader_ctx_t *bpf_loader_init(const char *bpf_obj_path) {
     m = bpf_object__find_map_by_name(ctx->obj, "maglev_group_map");
     ctx->fd_maglev_group = m ? bpf_map__fd(m) : -1;
 
-    LOG_INFO("[BPF Loader] XDP object loaded. Maps: maglev(%d) wan(%d) local_lru(%d) sticky(%d) stats(%d) ctrl(%d) policy(%d) grp(%d)",
+    m = bpf_object__find_map_by_name(ctx->obj, "lpm_subnet_map");
+    ctx->fd_lpm_subnet = m ? bpf_map__fd(m) : -1;
+
+    LOG_INFO("[BPF Loader] XDP object loaded. Maps: maglev(%d) wan(%d) local_lru(%d) sticky(%d) stats(%d) ctrl(%d) policy(%d) grp(%d) lpm(%d)",
              ctx->fd_maglev_lut, ctx->fd_wan_table, ctx->fd_local_lru,
              ctx->fd_sticky_flow, ctx->fd_percpu_stats,
-             ctx->fd_ctrl_map, ctx->fd_policy_route, ctx->fd_maglev_group);
+             ctx->fd_ctrl_map, ctx->fd_policy_route, ctx->fd_maglev_group, ctx->fd_lpm_subnet);
 
     LOG_INFO("[BPF Loader] Initialized. CPUs=%d, Object=%s",
              ctx->num_cpus, ctx->bpf_obj_path);
@@ -564,6 +569,38 @@ int bpf_loader_update_group_maglev_lut(bpf_loader_ctx_t *ctx, uint32_t group_id,
     }
 #endif
     (void)ring_size;
+    return 0;
+}
+
+/* =========================================================================
+ * BPF MAP UPDATE: LPM SUBNET TRIE (from Meta Katran LPM design)
+ * Inserts longest-prefix match subnet destination routes.
+ * ========================================================================= */
+struct bpf_lpm_key_user {
+    uint32_t prefixlen;
+    uint32_t addr;
+};
+
+int bpf_loader_update_lpm_route(bpf_loader_ctx_t *ctx, uint32_t subnet_ip,
+                                uint32_t prefixlen, uint32_t target_wan_idx) {
+    if (!ctx) return -1;
+
+#ifdef HAVE_LIBBPF
+    if (ctx->fd_lpm_subnet >= 0) {
+        struct bpf_lpm_key_user key = {
+            .prefixlen = prefixlen,
+            .addr      = subnet_ip,
+        };
+        int err = bpf_map_update_elem(ctx->fd_lpm_subnet, &key, &target_wan_idx, BPF_ANY);
+        if (err) {
+            LOG_WARN("[BPF Loader] Failed to update LPM subnet route: %d (%s)", err, strerror(-err));
+            return err;
+        }
+        LOG_INFO("[BPF Loader] LPM Subnet route updated: prefixlen=%u, target_wan=%u", prefixlen, target_wan_idx);
+        return 0;
+    }
+#endif
+    (void)subnet_ip; (void)prefixlen; (void)target_wan_idx;
     return 0;
 }
 
