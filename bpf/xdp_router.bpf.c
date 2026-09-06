@@ -536,7 +536,7 @@ int xdp_router_func(struct xdp_md *ctx) {
     /* Read control map config & global statistics */
     struct router_ctrl *ctrl = ctrl_map_get();
     uint32_t debug_enabled = ctrl ? ctrl->debug_enabled : 0;
-    uint32_t snat_enabled = ctrl ? ctrl->snat_enabled : 1;
+    uint32_t snat_enabled = ctrl ? ctrl->snat_enabled : 0;
     struct router_global_stats *gstats = global_stats_get();
     uint64_t pkt_len = (uint64_t)((char *)data_end - (char *)data);
     stats_inc_rx(gstats, pkt_len);

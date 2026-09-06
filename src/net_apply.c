@@ -98,6 +98,11 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
 
     /* Apply Secondary LAN Subnet Gateways and Kernel Rules for Policy Routes */
     net_apply_policy_routes(config);
+
+    /* Ensure all locally connected LAN traffic bypasses fwmark tables to allow reply packets back to LAN */
+    char lan_bypass[256];
+    snprintf(lan_bypass, sizeof(lan_bypass), "ip rule add to %s/24 table main prio 100 2>/dev/null", lan_ip);
+    safe_system(lan_bypass);
 #endif
 
     /* 3. Configure Multi-WAN Interfaces & Policy Tables */
