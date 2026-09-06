@@ -96,8 +96,40 @@ cat <<EOF > config/fluxwan.json
     "dhcp_enabled": true,
     "dhcp_start": "10.10.10.100",
     "dhcp_end": "10.10.10.200",
-    "dhcp_lease_time": 43200
+    "dhcp_lease_time": 43200,
+    "policy_routes": [
+      {
+        "subnet": "10.10.20.0/24",
+        "gateway_ip": "10.10.20.1",
+        "target_group": "Starlink_Fleet",
+        "description": "Starlink Dedicated VIP Subscribers",
+        "enabled": true
+      },
+      {
+        "subnet": "10.10.30.0/24",
+        "gateway_ip": "10.10.30.1",
+        "target_group": "Iraq_Local",
+        "description": "Local Low-Latency Gaming & Iraqi Services",
+        "enabled": true
+      }
+    ]
   },
+  "groups": [
+    {
+      "id": 1,
+      "name": "Iraq_Local",
+      "description": "Local Iraqi Fiber & LTE Lines",
+      "wans": ["WAN1_Fiber_ISP1", "WAN3_LTE_ISP3"],
+      "enabled": true
+    },
+    {
+      "id": 2,
+      "name": "Starlink_Fleet",
+      "description": "Starlink Satellite Constellation Fleet",
+      "wans": ["WAN2_Starlink_ISP2"],
+      "enabled": true
+    }
+  ],
   "wans": [
     {
       "id": 1,
@@ -160,12 +192,13 @@ cat <<EOF > config/fluxwan.json
 }
 EOF
 
-# 6. Build and Start FluxWAN Core Server
-echo "[+] Step 5: Compiling and Launching FluxWAN Engine..."
-mkdir -p bin
-gcc -O2 -Wall -Iinclude -Ibpf -D_GNU_SOURCE src/*.c -o bin/fluxwan-server -lpthread -lm
+# 6. Launch FluxWAN Core Server
+echo "[+] Step 5: Launching FluxWAN Engine..."
+if [ ! -f "fluxwan" ]; then
+    gcc -O2 -Wall -Iinclude -D_GNU_SOURCE src/*.c -o fluxwan -lpthread -lm
+fi
 
 echo "======================================================================"
 echo "   🎉 LIVE LAB READY: Open http://localhost:8080 in your browser!    "
 echo "======================================================================"
-exec /workspace/bin/fluxwan-server config/fluxwan.json
+exec ./fluxwan config/fluxwan.json

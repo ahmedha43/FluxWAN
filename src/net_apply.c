@@ -107,22 +107,38 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
         ip_to_str(w->ip_addr, wan_ip, sizeof(wan_ip));
         ip_to_str(w->gateway, wan_gw, sizeof(wan_gw));
 
-        LOG_INFO("[Kernel Netlink] Setting WAN %u (%s) -> Type: %d, IP: %s, GW: %s, Table: %u",
-                 w->id, w->name, w->type, wan_ip, wan_gw, w->table_id);
+        int w_ifidx = if_nametoindex(w->name);
+        if (w_ifidx <= 0) w_ifidx = w->ifindex;
 
         if (nl) {
-            netlink_set_interface_state(nl, w->ifindex, true);
-            if (w->type == WAN_TYPE_STATIC && w->ip_addr != 0) {
-                netlink_set_interface_ip(nl, w->ifindex, w->ip_addr, w->netmask);
+            if (w_ifidx > 0) netlink_set_interface_state(nl, w_ifidx, true);
+            if (w->type == WAN_TYPE_STATIC && w->ip_addr != 0 && w_ifidx > 0) {
+                netlink_set_interface_ip(nl, w_ifidx, w->ip_addr, w->netmask);
             }
 
             /* Create Policy Route Table & Rule */
             uint32_t fwmark = 0x100 + i + 1;
             netlink_add_ip_rule(nl, fwmark, w->table_id, 1000 + i);
             if (w->gateway != 0) {
-                netlink_add_default_route(nl, w->table_id, w->gateway, w->ifindex);
+                netlink_add_default_route(nl, w->table_id, w->gateway, w_ifidx);
             }
         }
+
+#if defined(__linux__)
+        if (w->gateway != 0) {
+            char route_cmd[512];
+            snprintf(route_cmd, sizeof(route_cmd),
+                     "ip route replace default via %s dev %s table %u proto static 2>/dev/null || true",
+                     wan_gw, w->name, w->table_id);
+            safe_system(route_cmd);
+
+            char rp_cmd[256];
+            snprintf(rp_cmd, sizeof(rp_cmd),
+                     "sysctl -w net.ipv4.conf.%s.rp_filter=2 >/dev/null 2>&1 || true",
+                     w->name);
+            safe_system(rp_cmd);
+        }
+#endif
 
         /* Enable NAT Masquerade for this WAN */
         net_apply_wan_nat(w->name, true);
@@ -140,6 +156,12 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
     /* 4. Configure Linux Kernel Mangle Rules with Conntrack Sticky Marks */
     safe_system("iptables -t mangle -F PREROUTING 2>/dev/null || true");
     safe_system("iptables -t mangle -A PREROUTING -j CONNMARK --restore-mark 2>/dev/null || true");
+
+    /* Bypass Multi-WAN load balancing for local, broadcast and directly-connected subnets */
+    safe_system("iptables -t mangle -A PREROUTING -m addrtype --dst-type LOCAL -j RETURN 2>/dev/null || true");
+    safe_system("iptables -t mangle -A PREROUTING -d 10.10.0.0/16 -j RETURN 2>/dev/null || true");
+    safe_system("iptables -t mangle -A PREROUTING -d 192.168.0.0/16 -j RETURN 2>/dev/null || true");
+    safe_system("iptables -t mangle -A PREROUTING -d 172.16.0.0/12 -j RETURN 2>/dev/null || true");
 
     /* Calculate total active dynamic weight */
     uint32_t total_active_weight = 0;

@@ -28,7 +28,7 @@
     {
       "id": 1,
       "name": "Iraq_Local",
-      "description": "Local Iraqi PPPoE & Fiber Lines",
+      "description": "Local Iraqi Fiber & LTE Lines",
       "wans": ["WAN1_Fiber_ISP1", "WAN3_LTE_ISP3"],
       "enabled": true
     },
@@ -50,6 +50,7 @@
       "netmask": "255.255.255.0",
       "gateway": "10.10.1.1",
       "weight": 100,
+      "enabled": true,
       "probe_target": "10.10.1.1",
       "table_id": 101
     },
@@ -62,6 +63,7 @@
       "netmask": "255.255.255.0",
       "gateway": "10.10.2.1",
       "weight": 50,
+      "enabled": true,
       "probe_target": "10.10.2.1",
       "table_id": 102
     },
@@ -74,6 +76,7 @@
       "netmask": "255.255.255.0",
       "gateway": "10.10.3.1",
       "weight": 75,
+      "enabled": true,
       "probe_target": "10.10.3.1",
       "table_id": 103
     }

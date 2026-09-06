@@ -185,12 +185,22 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
         }
     }
 
-    /* Parse WANS array */
-    const char *wans_pos = strstr(json, "\"wans\"");
-    if (wans_pos) {
-        const char *array_start = strchr(wans_pos, '[');
-        const char *array_end = find_matching_bracket(array_start);
+    /* Parse WANS array (find top-level array containing objects) */
+    const char *wans_pos = json;
+    const char *array_start = NULL;
+    const char *array_end = NULL;
+    while ((wans_pos = strstr(wans_pos, "\"wans\"")) != NULL) {
+        array_start = strchr(wans_pos, '[');
+        array_end = find_matching_bracket(array_start);
         if (array_start && array_end) {
+            const char *obj_check = strchr(array_start, '{');
+            if (obj_check && obj_check < array_end) {
+                break; /* Found top-level wans array of objects */
+            }
+        }
+        wans_pos += 6;
+    }
+    if (wans_pos && array_start && array_end) {
             const char *p = array_start;
             uint32_t idx = 0;
             while (p < array_end && idx < MAX_WANS) {
@@ -260,7 +270,6 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
                 p = obj_end + 1;
             }
             out_config->wan_count = idx;
-        }
     }
 
     /* Parse Prober block */
