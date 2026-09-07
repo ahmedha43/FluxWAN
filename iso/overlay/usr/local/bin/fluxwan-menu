@@ -1,0 +1,76 @@
+#!/bin/sh
+# ==============================================================================
+# FluxWAN Interactive Console Menu (Live Appliance Shell)
+# ==============================================================================
+while true; do
+    /usr/local/bin/fluxwan-banner
+    echo ""
+    echo " [1] Launch Professional OS Installer (Install to Disk/NVMe/VM)"
+    echo " [2] View Physical Network Adapters & Live Link Speeds"
+    echo " [3] Restart FluxWAN Multi-WAN Router Engine"
+    echo " [4] View Real-Time Multi-WAN Traffic & Logs"
+    echo " [5] Network Ping & Connectivity Diagnostics"
+    echo " [6] Open Linux Root Shell"
+    echo " [7] Reboot Router Appliance"
+    echo " [8] Power Off System"
+    echo -n " Enter option [1-8]: "
+    read -r opt
+    case "$opt" in
+        1)
+            /usr/local/bin/fluxwan-install
+            echo ""
+            printf "Press Enter to return to menu..."
+            read -r _
+            ;;
+        2)
+            echo ""
+            echo "--- Physical Network Adapters ---"
+            for iface in $(ls /sys/class/net 2>/dev/null | grep -v "lo"); do
+                state=$(cat "/sys/class/net/$iface/operstate" 2>/dev/null || echo "unknown")
+                mac=$(cat "/sys/class/net/$iface/address" 2>/dev/null || echo "")
+                speed=$(cat "/sys/class/net/$iface/speed" 2>/dev/null || echo "N/A")
+                echo "  * Interface: $iface | State: $state | Speed: ${speed}Mbps | MAC: $mac"
+            done
+            echo ""
+            printf "Press Enter to return to menu..."
+            read -r _
+            ;;
+        3)
+            echo "[*] Restarting FluxWAN Router Daemon..."
+            pkill -f "fluxwan" || true
+            /opt/fluxwan/fluxwan /opt/fluxwan/config/fluxwan.json > /var/log/fluxwan.log 2>&1 &
+            sleep 1
+            echo "[✓] Router engine active."
+            printf "Press Enter to return to menu..."
+            read -r _
+            ;;
+        4)
+            echo "--- Live System Logs (Press Ctrl+C to exit) ---"
+            tail -f /var/log/fluxwan.log 2>/dev/null || tail -f /tmp/fluxwan.log 2>/dev/null || echo "No logs yet."
+            printf "Press Enter to return to menu..."
+            read -r _
+            ;;
+        5)
+            printf "Enter IP/Host to ping (default: 8.8.8.8): "
+            read -r target
+            target=${target:-8.8.8.8}
+            ping -c 4 "$target"
+            printf "Press Enter to return to menu..."
+            read -r _
+            ;;
+        6)
+            echo "Dropping to root shell. Type 'exit' to return to menu."
+            /bin/sh
+            ;;
+        7)
+            reboot
+            ;;
+        8)
+            poweroff
+            ;;
+        *)
+            echo "Invalid option."
+            sleep 1
+            ;;
+    esac
+done

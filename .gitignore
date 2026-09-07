@@ -25,10 +25,10 @@
 /test_katran_nextgen
 
 # Cache & Temporary Directories
-.cache/
-build/
-bin/
-obj/
+/.cache/
+/build/
+/bin/
+/obj/
 *.tmp
 *.bak
 *.log

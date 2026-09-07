@@ -1,0 +1,30 @@
+#!/bin/sh
+clear
+echo "======================================================================"
+echo "    ███████╗██╗     ██╗   ██╗██╗  ██╗██╗    ██╗ █████╗ ███╗   ██╗     "
+echo "    ██╔════╝██║     ██║   ██║╚██╗██╔╝██║    ██║██╔══██╗████╗  ██║     "
+echo "    █████╗  ██║     ██║   ██║ ╚███╔╝ ██║ █╗ ██║███████║██╔██╗ ██║     "
+echo "    ██╔══╝  ██║     ██║   ██║ ██╔██╗ ██║███╗██║██╔══██║██║╚██╗██║     "
+echo "    ██║     ███████╗╚██████╔╝██╔╝ ██╗╚███╔███╔╝██║  ██║██║ ╚████║     "
+echo "    ╚═╝     ╚══════╝ ╚═════╝ ╚═╝  ╚═╝ ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═══╝     "
+echo "             High-Performance Multi-WAN Router Appliance              "
+echo "======================================================================"
+
+LAN_IP=$(ip -4 addr show veth-lan-r 2>/dev/null | grep inet | awk '{print $2}' | cut -d/ -f1)
+if [ -z "$LAN_IP" ]; then
+    LAN_IP=$(ip -4 addr show eth0 2>/dev/null | grep inet | awk '{print $2}' | cut -d/ -f1)
+fi
+if [ -z "$LAN_IP" ]; then
+    LAN_IP="10.10.10.1"
+fi
+
+echo " [*] LAN Gateway IP      : http://$LAN_IP:8080 (or http://$LAN_IP)"
+echo " [*] SSH Access          : ssh root@$LAN_IP (Password: admin)"
+echo " [*] Web UI Credentials  : Username: admin | Password: admin"
+echo " [*] Interface Status    :"
+for iface in $(ls /sys/class/net 2>/dev/null | grep -v "lo"); do
+    state=$(cat "/sys/class/net/$iface/operstate" 2>/dev/null || echo "unknown")
+    mac=$(cat "/sys/class/net/$iface/address" 2>/dev/null || echo "")
+    echo "     - $iface [$state] MAC: $mac"
+done
+echo "======================================================================"
