@@ -199,6 +199,14 @@ dns64_ctx_t *dns64_init(fluxwan_config_t *config, int v4_map_fd, int v6_map_fd, 
     ctx->upstream_addr.sin_port = htons(53);
     ctx->upstream_addr.sin_addr.s_addr = inet_addr("1.1.1.1");
 
+    struct timeval tv = { .tv_sec = 0, .tv_usec = 500000 };
+#if defined(_WIN32) || defined(_WIN64)
+    DWORD timeout_ms = 500;
+    setsockopt(ctx->server_fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout_ms, sizeof(timeout_ms));
+#else
+    setsockopt(ctx->server_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+#endif
+
     pthread_create(&ctx->thread, NULL, dns64_worker, ctx);
     return ctx;
 }
@@ -206,6 +214,14 @@ dns64_ctx_t *dns64_init(fluxwan_config_t *config, int v4_map_fd, int v6_map_fd, 
 void dns64_destroy(dns64_ctx_t *ctx) {
     if (!ctx) return;
     ctx->running = false;
+#if !defined(_WIN32) && !defined(_WIN64)
+    if (IS_VALID_SOCK(ctx->server_fd)) {
+        shutdown(ctx->server_fd, SHUT_RDWR);
+    }
+    if (IS_VALID_SOCK(ctx->upstream_fd)) {
+        shutdown(ctx->upstream_fd, SHUT_RDWR);
+    }
+#endif
     if (IS_VALID_SOCK(ctx->server_fd)) {
         CLOSE_SOCK(ctx->server_fd);
     }
