@@ -42,6 +42,12 @@ if [ ! -f "$CACHE_DIR/linux-lts.apk" ]; then
 test -s "$CACHE_DIR/linux-lts.apk"
 fi
 
+if [ ! -f "$CACHE_DIR/dropbear.apk" ]; then
+    echo "    * Downloading Dropbear SSH (aarch64)..."
+    curl -fL --retry 3 -sS "$ALPINE_MIRROR/dropbear-2023.83-r0.apk" -o "$CACHE_DIR/dropbear.apk" || \
+    curl -fL --retry 3 -sS "$ALPINE_MIRROR/dropbear-2024.85-r0.apk" -o "$CACHE_DIR/dropbear.apk" || true
+fi
+
 # Extract Kernel vmlinuz-lts (Image.gz)
 mkdir -p "$BUILD_DIR/kernel_extract"
 tar -xzf "$CACHE_DIR/linux-lts.apk" -C "$BUILD_DIR/kernel_extract" 2>/dev/null || true
@@ -106,6 +112,19 @@ cp -f "$BUILD_DIR/fluxwan" "$ROOTFS_DIR/opt/fluxwan/"
 cp -f "$PROJECT_ROOT/config/fluxwan.json" "$ROOTFS_DIR/opt/fluxwan/config/"
 [ -f "$BUILD_DIR/bpf/xdp_router.bpf.o" ] && cp -f "$BUILD_DIR/bpf/xdp_router.bpf.o" "$ROOTFS_DIR/opt/fluxwan/bpf/"
 
+# Install Dropbear ARM64 SSH Server
+if [ -f "$CACHE_DIR/dropbear.apk" ]; then
+    mkdir -p "$BUILD_DIR/db_extract"
+    tar -xzf "$CACHE_DIR/dropbear.apk" -C "$BUILD_DIR/db_extract" 2>/dev/null || true
+    if [ -f "$BUILD_DIR/db_extract/usr/sbin/dropbear" ]; then
+        cp -f "$BUILD_DIR/db_extract/usr/sbin/dropbear" "$ROOTFS_DIR/usr/sbin/"
+        [ -f "$BUILD_DIR/db_extract/usr/bin/dropbearkey" ] && cp -f "$BUILD_DIR/db_extract/usr/bin/dropbearkey" "$ROOTFS_DIR/usr/bin/"
+        chmod +x "$ROOTFS_DIR/usr/sbin/dropbear"
+        [ -f "$ROOTFS_DIR/usr/bin/dropbearkey" ] && chmod +x "$ROOTFS_DIR/usr/bin/dropbearkey"
+        echo "    * Installed Dropbear SSH Server in RootFS"
+    fi
+fi
+
 if [ -f "$TARGET_DIR/installer/rb5009-install" ]; then
     cp -f "$TARGET_DIR/installer/rb5009-install" "$ROOTFS_DIR/usr/local/bin/"
     chmod +x "$ROOTFS_DIR/usr/local/bin/rb5009-install"
@@ -162,6 +181,16 @@ echo "======================================================================"
 if [ -x /opt/fluxwan/fluxwan ]; then
     /opt/fluxwan/fluxwan /opt/fluxwan/config/fluxwan.json >/var/log/fluxwan.log 2>&1 &
     echo " [✓] FluxWAN Reactor Engine started."
+fi
+
+# Start Dropbear SSH Daemon
+if [ -x /usr/sbin/dropbear ]; then
+    mkdir -p /etc/dropbear /root/.ssh
+    if [ -x /usr/bin/dropbearkey ] && [ ! -f /etc/dropbear/dropbear_ed25519_host_key ]; then
+        /usr/bin/dropbearkey -t ed25519 -f /etc/dropbear/dropbear_ed25519_host_key >/dev/null 2>&1 || true
+    fi
+    /usr/sbin/dropbear -R -B -p 22
+    echo " [✓] Dropbear SSH Daemon listening on port 22 (User: root)."
 fi
 
 echo ""
