@@ -255,6 +255,8 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
                     w->dynamic_weight = weight;
                     w->table_id = (uint32_t)extract_json_int(obj_str, "table_id", 100 + idx + 1);
                     w->mss_clamping = (uint16_t)extract_json_int(obj_str, "mss_clamping", 1452);
+                    w->mtu = (uint32_t)extract_json_int(obj_str, "mtu", 1500);
+                    w->link_mtu = (uint16_t)w->mtu;
 
                     if (extract_json_string(obj_str, "probe_target", val, sizeof(val))) {
                         safe_str_copy(w->probe_target, val, sizeof(w->probe_target));

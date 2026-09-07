@@ -313,6 +313,7 @@ int bpf_loader_update_wan_map(bpf_loader_ctx_t *ctx, uint32_t wan_idx,
         .table_id    = wan->table_id,
         .fwmark      = 0x100 + wan_idx + 1, /* 0x101 .. 0x108 */
         .is_draining = (wan->state == WAN_STATE_DRAINING) ? 1 : 0,
+        .mtu         = wan->mtu ? wan->mtu : 1500,
     };
 
 #ifdef HAVE_LIBBPF

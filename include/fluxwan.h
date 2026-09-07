@@ -80,6 +80,7 @@ struct bpf_wan_entry {
     uint32_t table_id;
     uint32_t fwmark;
     uint32_t is_draining; /* Meta Katran Graceful Draining state */
+    uint32_t mtu;         /* WAN MTU (PPPoE 1492, Starlink 1420, Fiber 1500) */
 };
 
 /* BPF WAN Telemetry Counters */
@@ -95,7 +96,8 @@ struct bpf_wan_stats {
 struct bpf_session_val {
     uint32_t wan_idx;
     uint32_t wan_id;
-    uint64_t last_seen_sec;
+    uint32_t orig_src_ip;    /* Store original LAN IP before SNAT */
+    uint64_t last_seen_ns;   /* bpf_ktime_get_ns() timestamp */
 };
 
 /* Katran-inspired packet flags (mirrors F_SYN_SET, F_RST_SET, F_ICMP, F_QUIC) */
@@ -180,6 +182,7 @@ typedef struct {
     char ac_name[64];             /* PPPoE Access Concentrator Name */
     char session_status[32];      /* e.g. "CONNECTED", "BOUND", "ONLINE" */
     uint16_t link_mtu;            /* e.g. 1500, 1492 */
+    uint32_t mtu;                 /* WAN MTU (PPPoE 1492, Starlink 1420, Fiber 1500) */
     char dns_servers[64];         /* e.g. "1.1.1.1, 8.8.8.8" */
 } wan_config_t;
 

@@ -330,6 +330,11 @@ wan_manager_ctx_t *wan_manager_init(fluxwan_config_t *config, netlink_ctx_t *nl,
         pppoe_manager_start_all(ctx->pppoe, config);
     }
 
+    /* Sync router control data (LAN IP, WAN count) to eBPF */
+    if (ctx->bpf) {
+        bpf_loader_update_ctrl_map(ctx->bpf, config->lan.ip_addr, config->wan_count, 1, 0);
+    }
+
     /* Compute initial Maglev lookup ring */
     wan_manager_generate_maglev_lut(ctx);
 
@@ -403,6 +408,17 @@ int wan_manager_rebalance(wan_manager_ctx_t *ctx) {
 
     /* Recalculate Maglev Consistent Hash LUT Map */
     wan_manager_generate_maglev_lut(ctx);
+
+    /* Sync active WAN count to eBPF control map */
+    if (ctx->bpf) {
+        uint32_t active_count = 0;
+        for (uint32_t i = 0; i < ctx->config->wan_count; i++) {
+            if (ctx->config->wans[i].enabled && ctx->config->wans[i].state != WAN_STATE_DOWN) {
+                active_count++;
+            }
+        }
+        bpf_loader_update_ctrl_map(ctx->bpf, ctx->config->lan.ip_addr, active_count, 1, 0);
+    }
 
     /* Re-apply Kernel Netfilter Mangle Marks & Netlink Routing */
     net_apply_configuration(ctx->config, ctx->nl);
