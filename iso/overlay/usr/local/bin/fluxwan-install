@@ -285,7 +285,22 @@ mkdir -p "$MOUNT_DIR/bin" "$MOUNT_DIR/sbin" "$MOUNT_DIR/lib" "$MOUNT_DIR/etc" \
          "$MOUNT_DIR/usr/bin" "$MOUNT_DIR/usr/sbin" "$MOUNT_DIR/usr/lib" \
          "$MOUNT_DIR/usr/local/bin" "$MOUNT_DIR/opt/fluxwan/config" "$MOUNT_DIR/opt/fluxwan/bpf" \
          "$MOUNT_DIR/boot" "$MOUNT_DIR/root" "$MOUNT_DIR/dev" "$MOUNT_DIR/proc" \
-         "$MOUNT_DIR/sys" "$MOUNT_DIR/tmp" "$MOUNT_DIR/run" "$MOUNT_DIR/var/log" "$MOUNT_DIR/var/run"
+         "$MOUNT_DIR/sys" "$MOUNT_DIR/tmp" "$MOUNT_DIR/run" "$MOUNT_DIR/var/log" "$MOUNT_DIR/var/run" \
+         "$MOUNT_DIR/dev/pts" "$MOUNT_DIR/dev/shm"
+
+# CRITICAL FIX: Pre-seed essential static device nodes on target rootfs
+# switch_root and early init require real device nodes before devtmpfs/mdev is mounted
+mknod -m 600 "$MOUNT_DIR/dev/console" c 5 1 2>/dev/null || true
+mknod -m 666 "$MOUNT_DIR/dev/null" c 1 3 2>/dev/null || true
+mknod -m 666 "$MOUNT_DIR/dev/zero" c 1 5 2>/dev/null || true
+mknod -m 666 "$MOUNT_DIR/dev/tty" c 5 0 2>/dev/null || true
+mknod -m 620 "$MOUNT_DIR/dev/tty0" c 4 0 2>/dev/null || true
+mknod -m 620 "$MOUNT_DIR/dev/tty1" c 4 1 2>/dev/null || true
+mknod -m 620 "$MOUNT_DIR/dev/tty2" c 4 2 2>/dev/null || true
+mknod -m 620 "$MOUNT_DIR/dev/tty3" c 4 3 2>/dev/null || true
+mknod -m 660 "$MOUNT_DIR/dev/ttyS0" c 4 64 2>/dev/null || true
+mknod -m 666 "$MOUNT_DIR/dev/ptmx" c 5 2 2>/dev/null || true
+mknod -m 660 "$MOUNT_DIR/dev/kmsg" c 1 11 2>/dev/null || true
 
 echo -e "    * Copying core system binaries and libraries..."
 cp -a /bin/* "$MOUNT_DIR/bin/" 2>/dev/null || true
@@ -298,6 +313,11 @@ cp -a /usr/lib/* "$MOUNT_DIR/usr/lib/" 2>/dev/null || true
 cp -a /usr/local/bin/* "$MOUNT_DIR/usr/local/bin/" 2>/dev/null || true
 chmod +x "$MOUNT_DIR/usr/local/bin/"* 2>/dev/null || true
 
+# Setup 64-bit library compatibility links
+ln -sf lib "$MOUNT_DIR/lib64" 2>/dev/null || true
+ln -sf lib "$MOUNT_DIR/usr/lib64" 2>/dev/null || true
+[ -f "$MOUNT_DIR/lib/ld-musl-x86_64.so.1" ] || cp -a /lib/ld-musl* "$MOUNT_DIR/lib/" 2>/dev/null || true
+
 # Explicitly write correct inittab using Busybox init (no openrc dependency)
 mkdir -p "$MOUNT_DIR/etc/init.d"
 cat > "$MOUNT_DIR/etc/inittab" << 'INITTAB_EOF'
@@ -306,9 +326,9 @@ cat > "$MOUNT_DIR/etc/inittab" << 'INITTAB_EOF'
 # System Initialization
 ::sysinit:/etc/init.d/rcS
 
-# Management Console (Automatic console detection + TTYs)
-::respawn:/usr/local/bin/fluxwan-menu
+# Management Console (TTY1 = Monitor/VGA, ttyS0 = Serial)
 tty1::respawn:/usr/local/bin/fluxwan-menu
+ttyS0::respawn:/usr/local/bin/fluxwan-menu
 tty2::respawn:/bin/ash
 tty3::respawn:/bin/ash
 
@@ -383,12 +403,13 @@ RCK_EOF
 chmod 755 "$MOUNT_DIR/etc/init.d/rcK" 2>/dev/null || true
 sed -i 's/\r$//' "$MOUNT_DIR/etc/init.d/rcK" 2>/dev/null || true
 
-# CRITICAL FIX: Explicitly link /sbin/init, /bin/init, and /init to busybox
+# CRITICAL FIX: Explicitly link /sbin/init, /bin/init, /init, and /bin/sh to busybox
 # (Replaces openrc-init which exits with error 1 if OpenRC runlevels are absent)
-rm -f "$MOUNT_DIR/sbin/init" "$MOUNT_DIR/bin/init" "$MOUNT_DIR/init"
+rm -f "$MOUNT_DIR/sbin/init" "$MOUNT_DIR/bin/init" "$MOUNT_DIR/init" "$MOUNT_DIR/bin/sh"
 ln -sf /bin/busybox "$MOUNT_DIR/sbin/init"
 ln -sf /bin/busybox "$MOUNT_DIR/bin/init"
 ln -sf /bin/busybox "$MOUNT_DIR/init"
+ln -sf /bin/busybox "$MOUNT_DIR/bin/sh"
 chmod +x "$MOUNT_DIR/bin/busybox" 2>/dev/null || true
 
 
@@ -569,15 +590,15 @@ set default=0
 set timeout=3
 set timeout_style=menu
 menuentry "FluxWAN Multi-WAN Router Appliance" {
-    linux /boot/vmlinuz-lts root=$ROOT_SPEC rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw console=tty0 console=ttyS0,115200
+    linux /boot/vmlinuz-lts root=$ROOT_SPEC rootflags=rw rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw console=ttyS0,115200 console=tty0
     initrd /boot/initramfs-lts
 }
 menuentry "FluxWAN (Safe Mode / Verbose)" {
-    linux /boot/vmlinuz-lts root=$ROOT_SPEC rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw debug verbose console=tty0 console=ttyS0,115200
+    linux /boot/vmlinuz-lts root=$ROOT_SPEC rootflags=rw rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw debug verbose console=ttyS0,115200 console=tty0
     initrd /boot/initramfs-lts
 }
 menuentry "FluxWAN (Direct $ROOT_PART Boot)" {
-    linux /boot/vmlinuz-lts root=$ROOT_PART rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw console=tty0 console=ttyS0,115200
+    linux /boot/vmlinuz-lts root=$ROOT_PART rootflags=rw rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw console=ttyS0,115200 console=tty0
     initrd /boot/initramfs-lts
 }
 EOF
@@ -606,15 +627,15 @@ set default=0
 set timeout=3
 set timeout_style=menu
 menuentry "FluxWAN Multi-WAN Router Appliance" {
-    linux /boot/vmlinuz-lts root=$ROOT_SPEC rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw console=tty0 console=ttyS0,115200
+    linux /boot/vmlinuz-lts root=$ROOT_SPEC rootflags=rw rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw console=ttyS0,115200 console=tty0
     initrd /boot/initramfs-lts
 }
 menuentry "FluxWAN (Safe Mode / Verbose)" {
-    linux /boot/vmlinuz-lts root=$ROOT_SPEC rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw debug verbose console=tty0 console=ttyS0,115200
+    linux /boot/vmlinuz-lts root=$ROOT_SPEC rootflags=rw rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw debug verbose console=ttyS0,115200 console=tty0
     initrd /boot/initramfs-lts
 }
 menuentry "FluxWAN (Direct $ROOT_PART Boot)" {
-    linux /boot/vmlinuz-lts root=$ROOT_PART rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw console=tty0 console=ttyS0,115200
+    linux /boot/vmlinuz-lts root=$ROOT_PART rootflags=rw rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw console=ttyS0,115200 console=tty0
     initrd /boot/initramfs-lts
 }
 EOF
@@ -669,25 +690,25 @@ LABEL fluxwan
   MENU LABEL FluxWAN Multi-WAN Router Appliance
   LINUX /boot/vmlinuz-lts
   INITRD /boot/initramfs-lts
-  APPEND root=$ROOT_SPEC rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw console=tty0 console=ttyS0,115200
+  APPEND root=$ROOT_SPEC rootflags=rw rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw console=ttyS0,115200 console=tty0
 
 LABEL fluxwan-rel
   MENU LABEL FluxWAN (Relative Boot)
   LINUX vmlinuz-lts
   INITRD initramfs-lts
-  APPEND root=$ROOT_SPEC rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw console=tty0 console=ttyS0,115200
+  APPEND root=$ROOT_SPEC rootflags=rw rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw console=ttyS0,115200 console=tty0
 
 LABEL fluxwan-dev
   MENU LABEL FluxWAN (Direct $ROOT_PART Boot)
   LINUX /boot/vmlinuz-lts
   INITRD /boot/initramfs-lts
-  APPEND root=$ROOT_PART rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw console=tty0 console=ttyS0,115200
+  APPEND root=$ROOT_PART rootflags=rw rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw console=ttyS0,115200 console=tty0
 
 LABEL fluxwan-safe
   MENU LABEL FluxWAN (Safe Mode / Verbose)
   LINUX /boot/vmlinuz-lts
   INITRD /boot/initramfs-lts
-  APPEND root=$ROOT_SPEC rootfstype=ext4 modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw debug verbose console=tty0 console=ttyS0,115200
+  APPEND root=$ROOT_SPEC rootflags=rw rootfstype=ext4 modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw debug verbose console=ttyS0,115200 console=tty0
 "
 
         # Write configuration to all possible locations and filenames expected by Extlinux/Syslinux

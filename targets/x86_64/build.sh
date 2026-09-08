@@ -276,7 +276,7 @@ LABEL fluxwan
   MENU LABEL FluxWAN Embedded Network Appliance
   KERNEL /boot/vmlinuz-lts
   INITRD /boot/initramfs-lts
-  APPEND modules=loop,squashfs,sd-mod,usb-storage,sr-mod,cdrom,isofs,ext4 console=tty0 console=ttyS0,115200
+  APPEND modules=loop,squashfs,sd-mod,usb-storage,sr-mod,cdrom,isofs,ext4 console=ttyS0,115200 console=tty0
 EOF
 
 # Ensure isolinux.cfg also points to the same configuration
@@ -288,7 +288,7 @@ set timeout=2
 set default=0
 
 menuentry "FluxWAN Embedded Network Appliance" {
-    linux /boot/vmlinuz-lts modules=loop,squashfs,sd-mod,usb-storage,sr-mod,cdrom,isofs,ext4 console=tty0 console=ttyS0,115200
+    linux /boot/vmlinuz-lts modules=loop,squashfs,sd-mod,usb-storage,sr-mod,cdrom,isofs,ext4 console=ttyS0,115200 console=tty0
     initrd /boot/initramfs-lts
 }
 EOF
