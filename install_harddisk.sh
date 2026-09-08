@@ -373,6 +373,17 @@ sysctl -w net.ipv4.conf.all.arp_ignore=1 >/dev/null 2>&1 || true
 sysctl -w net.ipv4.conf.all.arp_announce=2 >/dev/null 2>&1 || true
 
 # 4. Autoload Essential Storage & Network Modules
+# Ensure /lib/modules is populated by mounting modloop if not present
+if [ ! -d "/lib/modules/$(uname -r)" ]; then
+    mkdir -p /lib/modules
+    for ml in /boot/modloop-lts /boot/*/modloop-lts /media/*/boot/modloop-lts /media/cdrom/boot/modloop-lts /media/sr0/boot/modloop-lts; do
+        if [ -f "$ml" ]; then
+            mount -t squashfs -o loop,ro "$ml" /lib/modules 2>/dev/null || mount -o loop,ro "$ml" /lib/modules 2>/dev/null || true
+            break
+        fi
+    done
+fi
+
 for mod in af_packet packet loop ext4 jbd2 crc32c sd_mod ahci nvme usb_storage virtio_net e1000 e1000e igb igc ixgbe i40e ice mlx4_core mlx4_en mlx5_core bnx2x tg3 bnx2 sfc atlantic vmxnet3 r8169 tun tap macvlan ppp_generic ppp_async pppox pppoe xt_conntrack xt_nat xt_MASQUERADE xt_mark xt_statistic xt_TCPMSS sch_cake; do
     modprobe "$mod" >/dev/null 2>&1 || true
 done
@@ -574,6 +585,8 @@ if [ -z "$(ls -A "$MOUNT_DIR/lib/modules" 2>/dev/null)" ]; then
             fi
             if [ -d /tmp/ml_extract/modules ]; then
                 cp -a /tmp/ml_extract/modules/* "$MOUNT_DIR/lib/modules/" 2>/dev/null || true
+            else
+                cp -a /tmp/ml_extract/* "$MOUNT_DIR/lib/modules/" 2>/dev/null || true
             fi
             umount /tmp/ml_extract 2>/dev/null || true
             rm -rf /tmp/ml_extract
