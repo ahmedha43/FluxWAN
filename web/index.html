@@ -453,7 +453,7 @@
         </section>
 
         <!-- ================= TAB 2: WAN (إدارة شبكات WAN) ================= -->
-        <section x-show="currentTab === 'wan'" class="space-y-6" @change="isEditing = true" @input="isEditing = true">
+        <section x-show="currentTab === 'wan'" class="space-y-6">
             <div class="flex items-center justify-between">
                 <div>
                     <h2 class="text-xl font-bold text-white">Multi-WAN Uplink Configuration & Health Prober</h2>
@@ -678,7 +678,7 @@
         </section>
 
         <!-- ================= TAB 3: WAN GROUPS & POLICY ROUTING ================= -->
-        <section x-show="currentTab === 'groups'" class="space-y-8" @change="isEditing = true" @input="isEditing = true">
+        <section x-show="currentTab === 'groups'" class="space-y-8">
             <!-- Header & Overview Banner -->
             <div class="glass-card p-6 rounded-2xl border border-slate-700 bg-gradient-to-r from-blue-950/40 via-indigo-950/30 to-purple-950/20 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                 <div class="space-y-1">
@@ -842,7 +842,7 @@
         </section>
 
         <!-- ================= TAB 4: LAN (الشبكة المحلية وتوزيع الـ IP) ================= -->
-        <section x-show="currentTab === 'lan'" class="space-y-6" @change="isEditing = true" @input="isEditing = true">
+        <section x-show="currentTab === 'lan'" class="space-y-6">
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <!-- LAN Subnet & Interface Config -->
                 <div class="glass-card p-6 rounded-2xl border border-slate-700 space-y-4">
@@ -936,9 +936,10 @@
             return {
                 currentTab: 'interfaces',
                 isEditing: false,
+                hasLoadedInitialConfig: false,
                 interfaces: [],
                 config: {
-                    lan: { interface: '', ip: '', netmask: '', dhcp_enabled: true, dhcp_start: '', dhcp_end: '', dhcp_lease_time: 43200, policy_routes: [] },
+                    lan: { interface: 'eth0', ip: '192.168.1.1', netmask: '255.255.255.0', dhcp_enabled: true, dhcp_start: '192.168.1.100', dhcp_end: '192.168.1.200', dhcp_lease_time: 43200, policy_routes: [] },
                     groups: [],
                     wans: []
                 },
@@ -1369,20 +1370,23 @@
                         return r.json();
                     })
                     .then(d => {
-                        if (d.lan && !this.isEditing) {
+                        const isFirst = !this.hasLoadedInitialConfig;
+                        if (d.lan && (isFirst || !this.isEditing)) {
                             if (d.lan.interface) this.config.lan.interface = d.lan.interface;
-                            if (d.lan.ip) this.config.lan.ip = d.lan.ip;
-                            if (d.lan.netmask) this.config.lan.netmask = d.lan.netmask;
+                            if (d.lan.ip && d.lan.ip !== '0.0.0.0') this.config.lan.ip = d.lan.ip;
+                            else if (!this.config.lan.ip || this.config.lan.ip === '0.0.0.0') this.config.lan.ip = '192.168.1.1';
+                            if (d.lan.netmask && d.lan.netmask !== '0.0.0.0') this.config.lan.netmask = d.lan.netmask;
+                            else if (!this.config.lan.netmask || this.config.lan.netmask === '0.0.0.0') this.config.lan.netmask = '255.255.255.0';
                             if (d.lan.dhcp_enabled !== undefined) this.config.lan.dhcp_enabled = d.lan.dhcp_enabled;
                         }
-                        if (d.groups && !this.isEditing) {
+                        if (d.groups && (isFirst || !this.isEditing)) {
                             this.config.groups = d.groups;
                         }
-                        if (d.policy_routes && !this.isEditing) {
+                        if (d.policy_routes && (isFirst || !this.isEditing)) {
                             if (!this.config.lan) this.config.lan = {};
                             this.config.lan.policy_routes = d.policy_routes;
                         }
-                        if (d.wans && d.wans.length > 0 && !this.isEditing) {
+                        if (d.wans && (isFirst || (!this.isEditing && d.wans.length > 0) || this.config.wans.length === 0)) {
                             this.config.wans = d.wans.map((w, idx) => ({
                                 id: w.id || (idx + 1),
                                 name: w.name || '',
@@ -1408,6 +1412,7 @@
                                 probe_target: w.probe_target || ''
                             }));
                         }
+                        this.hasLoadedInitialConfig = true;
                     })
                     .catch(() => {});
                 },
@@ -1425,6 +1430,12 @@
                 },
 
                 saveAndApply() {
+                    // Sanitize LAN configuration before sending to prevent 0.0.0.0
+                    if (!this.config.lan) this.config.lan = {};
+                    if (!this.config.lan.interface) this.config.lan.interface = 'eth0';
+                    if (!this.config.lan.ip || this.config.lan.ip === '0.0.0.0') this.config.lan.ip = '192.168.1.1';
+                    if (!this.config.lan.netmask || this.config.lan.netmask === '0.0.0.0') this.config.lan.netmask = '255.255.255.0';
+
                     fetch('/api/v1/apply', {
                         method: 'POST',
                         headers: {

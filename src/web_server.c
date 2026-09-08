@@ -1364,6 +1364,23 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
                     fclose(f_tmp);
                 }
                 if (config_load("/tmp/fluxwan_test_cfg.json", &test_cfg) == 0) {
+                    /* Protect existing WANs if client payload sent empty WAN list */
+                    if (test_cfg.wan_count == 0 && ctx->config->wan_count > 0) {
+                        LOG_WARN("[Web] Incoming apply payload had 0 WANs. Preserving existing %u WAN uplinks.", ctx->config->wan_count);
+                        test_cfg.wan_count = ctx->config->wan_count;
+                        memcpy(test_cfg.wans, ctx->config->wans, sizeof(wan_config_t) * ctx->config->wan_count);
+                    }
+                    /* Ensure LAN settings are valid */
+                    if (test_cfg.lan.ip_addr == 0) {
+                        test_cfg.lan.ip_addr = ctx->config->lan.ip_addr ? ctx->config->lan.ip_addr : str_to_ip("192.168.1.1");
+                    }
+                    if (test_cfg.lan.netmask == 0) {
+                        test_cfg.lan.netmask = ctx->config->lan.netmask ? ctx->config->lan.netmask : str_to_ip("255.255.255.0");
+                    }
+                    if (test_cfg.lan.name[0] == '\0') {
+                        safe_str_copy(test_cfg.lan.name, ctx->config->lan.name[0] ? ctx->config->lan.name : "eth0", sizeof(test_cfg.lan.name));
+                    }
+
                     char err_msg[256] = {0};
                     if (!config_validate_wan_attachments(&test_cfg, err_msg, sizeof(err_msg))) {
                         LOG_WARN("[Web] Configuration rejected: %s", err_msg);
@@ -1384,28 +1401,17 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
                         close_client_socket(client_fd);
                         return 0;
                     }
-                }
 
-                /* Validation passed: save to real config/fluxwan.json */
-                const char *save_path = get_config_target_path(ctx);
-                FILE *f = fopen(save_path, "w");
-                if (!f && strcmp(save_path, "/opt/fluxwan/config/fluxwan.json") != 0) {
-                    f = fopen("/opt/fluxwan/config/fluxwan.json", "w");
-                    if (f) save_path = "/opt/fluxwan/config/fluxwan.json";
-                }
-                if (!f && strcmp(save_path, "config/fluxwan.json") != 0) {
-                    f = fopen("config/fluxwan.json", "w");
-                    if (f) save_path = "config/fluxwan.json";
-                }
-                if (f) {
-                    fputs(body, f);
-                    fclose(f);
+                    /* Validation passed: save cleanly using config_save */
+                    const char *save_path = get_config_target_path(ctx);
+                    if (config_save(save_path, &test_cfg) < 0) {
+                        save_path = "/opt/fluxwan/config/fluxwan.json";
+                        config_save(save_path, &test_cfg);
+                    }
                     LOG_INFO("[Web] Updated %s with new validated settings from UI", save_path);
                     wan_manager_add_log("INFO", "Configuration validated and saved to %s", save_path);
-                } else {
-                    LOG_ERROR("[Web] Failed to open configuration file %s for saving!", save_path);
+                    config_load(save_path, ctx->config);
                 }
-                config_load(save_path, ctx->config);
             }
         }
 

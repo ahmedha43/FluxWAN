@@ -116,24 +116,33 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
     const char *lan_pos = strstr(json, "\"lan\"");
     if (lan_pos) {
         char val[64];
-        if (extract_json_string(lan_pos, "interface", val, sizeof(val))) {
+        if (extract_json_string(lan_pos, "interface", val, sizeof(val)) && val[0] != '\0') {
             safe_str_copy(out_config->lan.name, val, sizeof(out_config->lan.name));
         } else {
             safe_str_copy(out_config->lan.name, "eth0", sizeof(out_config->lan.name));
         }
 
-        if (extract_json_string(lan_pos, "ip", val, sizeof(val))) {
+        if (extract_json_string(lan_pos, "ip", val, sizeof(val)) && val[0] != '\0' && strcmp(val, "0.0.0.0") != 0) {
             out_config->lan.ip_addr = str_to_ip(val);
+        } else {
+            out_config->lan.ip_addr = str_to_ip("192.168.1.1");
         }
-        if (extract_json_string(lan_pos, "netmask", val, sizeof(val))) {
+
+        if (extract_json_string(lan_pos, "netmask", val, sizeof(val)) && val[0] != '\0' && strcmp(val, "0.0.0.0") != 0) {
             out_config->lan.netmask = str_to_ip(val);
+        } else {
+            out_config->lan.netmask = str_to_ip("255.255.255.0");
         }
         out_config->lan.dhcp_enabled = extract_json_bool(lan_pos, "dhcp_enabled", true);
-        if (extract_json_string(lan_pos, "dhcp_start", val, sizeof(val))) {
+        if (extract_json_string(lan_pos, "dhcp_start", val, sizeof(val)) && val[0] != '\0' && strcmp(val, "0.0.0.0") != 0) {
             out_config->lan.dhcp_start = str_to_ip(val);
+        } else {
+            out_config->lan.dhcp_start = str_to_ip("192.168.1.100");
         }
-        if (extract_json_string(lan_pos, "dhcp_end", val, sizeof(val))) {
+        if (extract_json_string(lan_pos, "dhcp_end", val, sizeof(val)) && val[0] != '\0' && strcmp(val, "0.0.0.0") != 0) {
             out_config->lan.dhcp_end = str_to_ip(val);
+        } else {
+            out_config->lan.dhcp_end = str_to_ip("192.168.1.200");
         }
         out_config->lan.dhcp_lease_time = extract_json_int(lan_pos, "dhcp_lease_time", 43200);
 
@@ -501,15 +510,23 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
         return -1;
     }
 
+    char lan_name[MAX_IFNAME_LEN];
+    safe_str_copy(lan_name, config->lan.name[0] ? config->lan.name : "eth0", sizeof(lan_name));
+
+    uint32_t lan_ip_bin = config->lan.ip_addr ? config->lan.ip_addr : str_to_ip("192.168.1.1");
+    uint32_t lan_mask_bin = config->lan.netmask ? config->lan.netmask : str_to_ip("255.255.255.0");
+    uint32_t dhcp_start_bin = config->lan.dhcp_start ? config->lan.dhcp_start : str_to_ip("192.168.1.100");
+    uint32_t dhcp_end_bin = config->lan.dhcp_end ? config->lan.dhcp_end : str_to_ip("192.168.1.200");
+
     char lan_ip[32], lan_mask[32], dhcp_start[32], dhcp_end[32];
-    ip_to_str(config->lan.ip_addr, lan_ip, sizeof(lan_ip));
-    ip_to_str(config->lan.netmask, lan_mask, sizeof(lan_mask));
-    ip_to_str(config->lan.dhcp_start, dhcp_start, sizeof(dhcp_start));
-    ip_to_str(config->lan.dhcp_end, dhcp_end, sizeof(dhcp_end));
+    ip_to_str(lan_ip_bin, lan_ip, sizeof(lan_ip));
+    ip_to_str(lan_mask_bin, lan_mask, sizeof(lan_mask));
+    ip_to_str(dhcp_start_bin, dhcp_start, sizeof(dhcp_start));
+    ip_to_str(dhcp_end_bin, dhcp_end, sizeof(dhcp_end));
 
     fprintf(f, "{\n");
     fprintf(f, "  \"lan\": {\n");
-    fprintf(f, "    \"interface\": \"%s\",\n", config->lan.name);
+    fprintf(f, "    \"interface\": \"%s\",\n", lan_name);
     fprintf(f, "    \"ip\": \"%s\",\n", lan_ip);
     fprintf(f, "    \"netmask\": \"%s\",\n", lan_mask);
     fprintf(f, "    \"dhcp_enabled\": %s,\n", config->lan.dhcp_enabled ? "true" : "false");
