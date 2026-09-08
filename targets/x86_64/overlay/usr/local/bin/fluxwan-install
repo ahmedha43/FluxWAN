@@ -380,10 +380,27 @@ done
 # 5. Bring up Loopback Interface
 ip link set lo up 2>/dev/null || ifconfig lo 127.0.0.1 up 2>/dev/null || true
 
-# 6. Web Management Port 80 -> 8080 Redirection
+# 6. Auto-configure LAN Interface (eth0 or first physical NIC)
+LAN_IFACE="eth0"
+for iface in $(ls /sys/class/net 2>/dev/null); do
+    if [ "$iface" != "lo" ] && [ -d "/sys/class/net/$iface" ]; then
+        LAN_IFACE="$iface"
+        break
+    fi
+done
+
+ip link set "$LAN_IFACE" up 2>/dev/null || ifconfig "$LAN_IFACE" up 2>/dev/null || true
+ip addr add 10.10.10.1/24 dev "$LAN_IFACE" 2>/dev/null || ifconfig "$LAN_IFACE" 10.10.10.1 netmask 255.255.255.0 up 2>/dev/null || true
+
+# In Bridged/VM/LAN networks, also fetch dynamic IP via DHCP so host PC can access Web UI immediately
+if [ -x /sbin/udhcpc ]; then
+    udhcpc -i "$LAN_IFACE" -b -q -s /usr/share/udhcpc/default.script 2>/dev/null || udhcpc -i "$LAN_IFACE" -b -q 2>/dev/null || true
+fi
+
+# 7. Web Management Port 80 -> 8080 Redirection
 iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 8080 2>/dev/null || true
 
-# 7. Start FluxWAN Core Reactor Daemon
+# 8. Start FluxWAN Core Reactor Daemon
 if [ -x /opt/fluxwan/fluxwan ] && [ -f /opt/fluxwan/config/fluxwan.json ]; then
     /opt/fluxwan/fluxwan /opt/fluxwan/config/fluxwan.json > /var/log/fluxwan.log 2>&1 &
 fi
