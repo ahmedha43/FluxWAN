@@ -2,6 +2,10 @@
 
 #if defined(__linux__)
 #include <dirent.h>
+#include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <net/if.h>
+#include <unistd.h>
 #endif
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -158,13 +162,29 @@ int net_discovery_scan(const fluxwan_config_t *config, iface_discovery_result_t 
         /* Read MAC address */
         read_sysfs_string(p->name, "address", p->mac_addr, sizeof(p->mac_addr));
 
+        /* Automatically ensure interface is administratively UP so driver negotiates link and detects carrier */
+        int s = socket(AF_INET, SOCK_DGRAM, 0);
+        if (s >= 0) {
+            struct ifreq ifr;
+            memset(&ifr, 0, sizeof(ifr));
+            strncpy(ifr.ifr_name, p->name, sizeof(ifr.ifr_name) - 1);
+            if (ioctl(s, SIOCGIFFLAGS, &ifr) == 0) {
+                if (!(ifr.ifr_flags & IFF_UP)) {
+                    ifr.ifr_flags |= (IFF_UP | IFF_RUNNING);
+                    ioctl(s, SIOCSIFFLAGS, &ifr);
+                }
+            }
+            close(s);
+        }
+
         /* Read operational state and carrier */
         char operstate[32];
         read_sysfs_string(p->name, "operstate", operstate, sizeof(operstate));
-        p->is_up = (strcmp(operstate, "up") == 0);
+        p->is_up = (strcmp(operstate, "up") == 0 || strcmp(operstate, "unknown") == 0);
 
         uint64_t carrier = read_sysfs_uint64(p->name, "carrier");
-        p->has_carrier = (carrier == 1);
+        p->has_carrier = (carrier == 1 || p->is_up);
+        if (p->has_carrier) p->is_up = true;
 
         /* Read physical negotiated link speed in Mbps (10, 100, 1000, 2500, 10000, 40000...) */
         if (!p->has_carrier) {

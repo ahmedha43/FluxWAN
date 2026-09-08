@@ -2,19 +2,6 @@
 #include <fcntl.h>
 #include <net/if.h>
 
-#if defined(__linux__)
-static inline int safe_system(const char *cmd) {
-    if (!cmd || cmd[0] == '\0') return -1;
-    int rc = system(cmd);
-    (void)rc; /* Acknowledged exit code */
-    return rc;
-}
-#else
-static inline int safe_system(const char *cmd) {
-    (void)cmd;
-    return 0;
-}
-#endif
 
 int net_apply_set_ip_forward(bool enable) {
 #if defined(__linux__)
@@ -114,6 +101,26 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
 
         int w_ifidx = if_nametoindex(w->name);
         if (w_ifidx <= 0) w_ifidx = w->ifindex;
+
+        /* Ensure WAN interface is administratively UP */
+#if defined(__linux__)
+        char wan_up[128];
+        snprintf(wan_up, sizeof(wan_up), "ip link set %s up 2>/dev/null || true", w->name);
+        safe_system(wan_up);
+
+        char tbl_f[64];
+        snprintf(tbl_f, sizeof(tbl_f), "/run/fluxwan_table_%s", w->name);
+        FILE *tf = fopen(tbl_f, "w");
+        if (tf) { fprintf(tf, "%u\n", w->table_id); fclose(tf); }
+
+        if (!w->enabled || w->type != WAN_TYPE_DHCP) {
+            char stop_dhcp[256];
+            snprintf(stop_dhcp, sizeof(stop_dhcp),
+                     "if [ -f /run/udhcpc_%s.pid ]; then kill $(cat /run/udhcpc_%s.pid 2>/dev/null) 2>/dev/null || true; rm -f /run/udhcpc_%s.pid /run/fluxwan_wan_%s.lease; fi",
+                     w->name, w->name, w->name, w->name);
+            safe_system(stop_dhcp);
+        }
+#endif
 
         if (nl) {
             if (w_ifidx > 0) netlink_set_interface_state(nl, w_ifidx, true);

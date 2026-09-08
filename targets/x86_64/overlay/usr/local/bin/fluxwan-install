@@ -377,8 +377,13 @@ for mod in af_packet packet loop ext4 jbd2 crc32c sd_mod ahci nvme usb_storage v
     modprobe "$mod" >/dev/null 2>&1 || true
 done
 
-# 5. Bring up Loopback Interface
+# 5. Bring up Loopback & Physical Network Interfaces
 ip link set lo up 2>/dev/null || ifconfig lo 127.0.0.1 up 2>/dev/null || true
+for iface in $(ls /sys/class/net 2>/dev/null); do
+    if [ "$iface" != "lo" ] && [ -d "/sys/class/net/$iface" ]; then
+        ip link set "$iface" up 2>/dev/null || true
+    fi
+done
 
 # 6. Auto-configure LAN Interface (eth0 or first physical NIC)
 LAN_IFACE="eth0"

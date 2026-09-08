@@ -7,6 +7,9 @@
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
 #include <linux/fib_rules.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <unistd.h>
 #endif
 
 #ifndef FRA_FWMARK
@@ -293,9 +296,33 @@ int netlink_set_interface_ip(netlink_ctx_t *ctx, int ifindex, uint32_t ip_addr, 
 
 int netlink_set_interface_state(netlink_ctx_t *ctx, int ifindex, bool up) {
     if (!ctx) return -1;
-    LOG_INFO("[Netlink] Setting interface index %d state: %s", ifindex, up ? "UP" : "DOWN");
+    char ifname[IF_NAMESIZE];
+    if (!if_indextoname(ifindex, ifname)) {
+        snprintf(ifname, sizeof(ifname), "if%d", ifindex);
+    }
+    LOG_INFO("[Netlink] Setting interface %s (index %d) state: %s", ifname, ifindex, up ? "UP" : "DOWN");
 
-    if (ctx->fd < 0) return 0;
+#if defined(__linux__)
+    /* 1. Fast kernel ioctl to toggle IFF_UP */
+    int s = socket(AF_INET, SOCK_DGRAM, 0);
+    if (s >= 0) {
+        struct ifreq ifr;
+        memset(&ifr, 0, sizeof(ifr));
+        strncpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name) - 1);
+        if (ioctl(s, SIOCGIFFLAGS, &ifr) == 0) {
+            if (up) ifr.ifr_flags |= (IFF_UP | IFF_RUNNING);
+            else ifr.ifr_flags &= ~IFF_UP;
+            ioctl(s, SIOCSIFFLAGS, &ifr);
+        }
+        close(s);
+    }
+
+    /* 2. Fallback using system utility */
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "ip link set %s %s 2>/dev/null || true", ifname, up ? "up" : "down");
+    safe_system(cmd);
+#endif
+
     return 0;
 }
 

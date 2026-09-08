@@ -3,6 +3,17 @@
 #include "pppoe_manager.h"
 #include <stdarg.h>
 
+#if defined(__linux__)
+#include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <net/if.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <sys/stat.h>
+#include <signal.h>
+#include <unistd.h>
+#endif
+
 static system_log_entry_t g_logs[MAX_SYSTEM_LOGS];
 static uint32_t g_log_count = 0;
 
@@ -425,6 +436,70 @@ int wan_manager_rebalance(wan_manager_ctx_t *ctx) {
     return 0;
 }
 
+static void ensure_dhcp_hook_script(void) {
+#if defined(__linux__)
+    const char *path = "/run/fluxwan_wan_dhcp.sh";
+    if (access(path, X_OK) == 0) return;
+
+    FILE *f = fopen(path, "w");
+    if (!f) return;
+
+    fprintf(f,
+        "#!/bin/sh\n"
+        "# FluxWAN Multi-WAN udhcpc Hook Script\n"
+        "[ -z \"$1\" ] && exit 1\n"
+        "case \"$1\" in\n"
+        "    deconfig)\n"
+        "        ip addr flush dev \"$interface\" 2>/dev/null || true\n"
+        "        ip link set \"$interface\" up 2>/dev/null || true\n"
+        "        rm -f \"/run/fluxwan_wan_${interface}.lease\"\n"
+        "        ;;\n"
+        "    bound|renew)\n"
+        "        PREFIX=24\n"
+        "        if [ -n \"$mask\" ]; then\n"
+        "            case \"$mask\" in\n"
+        "                255.255.255.255) PREFIX=32 ;;\n"
+        "                255.255.255.254) PREFIX=31 ;;\n"
+        "                255.255.255.252) PREFIX=30 ;;\n"
+        "                255.255.255.248) PREFIX=29 ;;\n"
+        "                255.255.255.240) PREFIX=28 ;;\n"
+        "                255.255.255.224) PREFIX=27 ;;\n"
+        "                255.255.255.192) PREFIX=26 ;;\n"
+        "                255.255.255.128) PREFIX=25 ;;\n"
+        "                255.255.255.0)   PREFIX=24 ;;\n"
+        "                255.255.254.0)   PREFIX=23 ;;\n"
+        "                255.255.252.0)   PREFIX=22 ;;\n"
+        "                255.255.248.0)   PREFIX=21 ;;\n"
+        "                255.255.240.0)   PREFIX=20 ;;\n"
+        "                255.255.0.0)     PREFIX=16 ;;\n"
+        "                255.0.0.0)       PREFIX=8  ;;\n"
+        "                *)               PREFIX=24 ;;\n"
+        "            esac\n"
+        "        fi\n"
+        "        ip addr add \"$ip/$PREFIX\" dev \"$interface\" 2>/dev/null || ip addr replace \"$ip/$PREFIX\" dev \"$interface\" 2>/dev/null || true\n"
+        "        ip link set \"$interface\" up 2>/dev/null || true\n"
+        "        cat > \"/run/fluxwan_wan_${interface}.lease\" << EOF\n"
+        "IP=$ip\n"
+        "NETMASK=${mask:-$subnet}\n"
+        "GATEWAY=$router\n"
+        "DNS=$dns\n"
+        "TIMESTAMP=$(date +%%s)\n"
+        "EOF\n"
+        "        TABLE_ID=$(cat \"/run/fluxwan_table_${interface}\" 2>/dev/null)\n"
+        "        [ -z \"$TABLE_ID\" ] && TABLE_ID=101\n"
+        "        if [ -n \"$router\" ]; then\n"
+        "            ip route replace default via \"$router\" dev \"$interface\" table \"$TABLE_ID\" proto static 2>/dev/null || true\n"
+        "        fi\n"
+        "        sysctl -w net.ipv4.conf.${interface}.rp_filter=2 >/dev/null 2>&1 || true\n"
+        "        ;;\n"
+        "esac\n"
+        "exit 0\n"
+    );
+    fclose(f);
+    chmod(path, 0755);
+#endif
+}
+
 void wan_manager_periodic_tick(wan_manager_ctx_t *ctx, uint64_t now_ms) {
     if (!ctx) return;
 
@@ -436,10 +511,118 @@ void wan_manager_periodic_tick(wan_manager_ctx_t *ctx, uint64_t now_ms) {
     for (uint32_t i = 0; i < ctx->config->wan_count; i++) {
         wan_config_t *w = &ctx->config->wans[i];
 
-        /* WAN DHCP Lease Renewal verification */
-        if (w->type == WAN_TYPE_DHCP) {
-            if (now_ms - ctx->last_dhcp_renew_ms[i] >= 60000) { /* Check every 60s */
+        /* WAN DHCP Client Engine */
+        if (w->type == WAN_TYPE_DHCP && w->enabled) {
+            if (now_ms - ctx->last_dhcp_renew_ms[i] >= 2000) { /* Check every 2s */
                 ctx->last_dhcp_renew_ms[i] = now_ms;
+                ensure_dhcp_hook_script();
+
+#if defined(__linux__)
+                /* 1. Ensure table ID mapping file is current */
+                char tbl_path[64];
+                snprintf(tbl_path, sizeof(tbl_path), "/run/fluxwan_table_%s", w->name);
+                FILE *tf = fopen(tbl_path, "w");
+                if (tf) {
+                    fprintf(tf, "%u\n", w->table_id);
+                    fclose(tf);
+                }
+
+                /* 2. Ensure interface is administratively UP */
+                char up_cmd[128];
+                snprintf(up_cmd, sizeof(up_cmd), "ip link set %s up 2>/dev/null || true", w->name);
+                safe_system(up_cmd);
+
+                /* 3. Check if udhcpc is actively running */
+                char pid_path[64];
+                snprintf(pid_path, sizeof(pid_path), "/run/udhcpc_%s.pid", w->name);
+                bool running = false;
+                FILE *pf = fopen(pid_path, "r");
+                if (pf) {
+                    int pid = 0;
+                    if (fscanf(pf, "%d", &pid) == 1 && pid > 1) {
+                        if (kill(pid, 0) == 0) running = true;
+                    }
+                    fclose(pf);
+                }
+
+                if (!running) {
+                    const char *script = (access("/usr/local/bin/fluxwan_wan_dhcp.sh", X_OK) == 0)
+                                         ? "/usr/local/bin/fluxwan_wan_dhcp.sh"
+                                         : "/run/fluxwan_wan_dhcp.sh";
+                    LOG_INFO("[WAN DHCP] Spawning udhcpc on %s (Table %u, Script: %s)", w->name, w->table_id, script);
+                    wan_manager_add_log("INFO", "[DHCP Client] Starting DHCP client on %s (Table %u)", w->name, w->table_id);
+                    char dhcp_cmd[512];
+                    snprintf(dhcp_cmd, sizeof(dhcp_cmd),
+                             "udhcpc -i %s -p %s -s %s -b -R -O 33 -x hostname:FluxWAN >/dev/null 2>&1 &",
+                             w->name, pid_path, script);
+                    safe_system(dhcp_cmd);
+                }
+
+                /* 4. Read lease file if written by hook script */
+                char lease_path[64];
+                snprintf(lease_path, sizeof(lease_path), "/run/fluxwan_wan_%s.lease", w->name);
+                FILE *lf = fopen(lease_path, "r");
+                if (lf) {
+                    char line[256];
+                    char ip_str[32] = {0}, gw_str[32] = {0}, mask_str[32] = {0};
+                    while (fgets(line, sizeof(line), lf)) {
+                        if (strncmp(line, "IP=", 3) == 0) {
+                            sscanf(line + 3, "%31s", ip_str);
+                        } else if (strncmp(line, "GATEWAY=", 8) == 0) {
+                            sscanf(line + 8, "%31s", gw_str);
+                        } else if (strncmp(line, "NETMASK=", 8) == 0) {
+                            sscanf(line + 8, "%31s", mask_str);
+                        }
+                    }
+                    fclose(lf);
+
+                    uint32_t new_ip = str_to_ip(ip_str);
+                    uint32_t new_gw = str_to_ip(gw_str);
+                    uint32_t new_mask = str_to_ip(mask_str);
+                    if (new_mask == 0) new_mask = str_to_ip("255.255.255.0");
+
+                    if (new_ip != 0 && (new_ip != w->ip_addr || new_gw != w->gateway)) {
+                        LOG_INFO("[WAN DHCP] Bound on %s: IP=%s, GW=%s, Table=%u",
+                                 w->name, ip_str, gw_str, w->table_id);
+                        wan_manager_add_log("INFO", "[DHCP WAN%u] Bound IP %s, Gateway %s on %s",
+                                            w->id, ip_str, gw_str, w->name);
+                        w->ip_addr = new_ip;
+                        w->gateway = new_gw;
+                        w->netmask = new_mask;
+                        w->state = WAN_STATE_HEALTHY;
+
+                        if (new_gw != 0) {
+                            char rc[256];
+                            snprintf(rc, sizeof(rc),
+                                     "ip route replace default via %s dev %s table %u proto static 2>/dev/null || true",
+                                     gw_str, w->name, w->table_id);
+                            safe_system(rc);
+                        }
+
+                        net_apply_wan_nat(w->name, true);
+                        wan_manager_rebalance(ctx);
+                    }
+                } else if (w->ip_addr == 0) {
+                    /* Fallback: Query live interface IP via ioctl SIOCGIFADDR */
+                    int s = socket(AF_INET, SOCK_DGRAM, 0);
+                    if (s >= 0) {
+                        struct ifreq ifr;
+                        memset(&ifr, 0, sizeof(ifr));
+                        strncpy(ifr.ifr_name, w->name, sizeof(ifr.ifr_name) - 1);
+                        if (ioctl(s, SIOCGIFADDR, &ifr) == 0) {
+                            struct sockaddr_in *sin = (struct sockaddr_in *)&ifr.ifr_addr;
+                            if (sin->sin_addr.s_addr != 0 && sin->sin_addr.s_addr != str_to_ip("127.0.0.1")) {
+                                w->ip_addr = sin->sin_addr.s_addr;
+                                w->state = WAN_STATE_HEALTHY;
+                                LOG_INFO("[WAN DHCP] Detected existing IP on %s via ioctl: %s",
+                                         w->name, inet_ntoa(sin->sin_addr));
+                                wan_manager_rebalance(ctx);
+                            }
+                        }
+                        close(s);
+                    }
+                }
+#endif
             }
         }
     }

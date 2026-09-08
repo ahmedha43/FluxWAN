@@ -30,12 +30,17 @@ sysctl -w net.ipv4.conf.all.arp_ignore=1 >/dev/null 2>&1 || true
 sysctl -w net.ipv4.conf.all.arp_announce=2 >/dev/null 2>&1 || true
 
 # 4. Autoload Essential Network & Driver Modules
-for mod in loop squashfs ext4 jbd2 crc32c sd_mod ahci nvme usb_storage virtio_net e1000 e1000e igb igc ixgbe i40e ice mlx4_core mlx4_en mlx5_core bnx2x tg3 bnx2 sfc atlantic vmxnet3 r8169 tun tap macvlan ppp_generic ppp_async pppox pppoe xt_conntrack xt_nat xt_MASQUERADE xt_mark xt_statistic xt_TCPMSS xt_LOG sch_cake sch_fq_codel; do
+for mod in af_packet packet loop squashfs ext4 jbd2 crc32c sd_mod ahci nvme usb_storage virtio_net e1000 e1000e igb igc ixgbe i40e ice mlx4_core mlx4_en mlx5_core bnx2x tg3 bnx2 sfc atlantic vmxnet3 r8169 tun tap macvlan ppp_generic ppp_async pppox pppoe xt_conntrack xt_nat xt_MASQUERADE xt_mark xt_statistic xt_TCPMSS xt_LOG sch_cake sch_fq_codel; do
     modprobe "$mod" >/dev/null 2>&1 || true
 done
 
-# 5. Loopback Interface
+# 5. Loopback & Physical Network Interfaces
 ip link set lo up 2>/dev/null || ifconfig lo 127.0.0.1 up 2>/dev/null || true
+for iface in $(ls /sys/class/net 2>/dev/null); do
+    if [ "$iface" != "lo" ] && [ -d "/sys/class/net/$iface" ]; then
+        ip link set "$iface" up 2>/dev/null || true
+    fi
+done
 
 # 6. Dedicated LAN Interface (Auto-Detect first ethernet interface or eth0)
 LAN_IFACE="eth0"

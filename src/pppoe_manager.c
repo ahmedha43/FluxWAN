@@ -33,14 +33,6 @@ static inline void safe_str_copy(char *dst, const char *src, size_t max_len) {
     dst[slen] = '\0';
 }
 
-#if defined(__linux__)
-static inline int safe_system(const char *cmd) {
-    if (!cmd || cmd[0] == '\0') return -1;
-    int rc = system(cmd);
-    (void)rc;
-    return rc;
-}
-#endif
 
 static uint64_t get_now_ms(void) {
     struct timespec ts;

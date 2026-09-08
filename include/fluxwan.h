@@ -333,4 +333,16 @@ static inline void parse_cidr_subnet(const char *cidr, uint32_t *out_ip, uint32_
     }
 }
 
+static inline int safe_system(const char *cmd) {
+    if (!cmd || cmd[0] == '\0') return -1;
+#if defined(__linux__)
+    int rc = system(cmd);
+    (void)rc;
+    return rc;
+#else
+    (void)cmd;
+    return 0;
+#endif
+}
+
 #endif /* FLUXWAN_H */
