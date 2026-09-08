@@ -46,6 +46,9 @@ int main(int argc, char *argv[]) {
 #if defined(_WIN32) || defined(_WIN64)
     WSADATA wsa;
     WSAStartup(MAKEWORD(2, 2), &wsa);
+#else
+    safe_system("modprobe af_packet 2>/dev/null || modprobe packet 2>/dev/null || true");
+    safe_system("modprobe nf_nat 2>/dev/null || true");
 #endif
 
     /* 1. Load Configuration */
