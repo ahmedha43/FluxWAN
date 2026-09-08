@@ -538,7 +538,14 @@ for kdir in "$MOUNT_DIR/lib/modules/"*; do
 done
 
 # Generate /etc/fstab with UUIDs
-ROOT_UUID=$(blkid -s UUID -o value "$ROOT_PART" 2>/dev/null || echo "")
+RAW_ROOT_BLKID=$(blkid "$ROOT_PART" 2>/dev/null || echo "")
+ROOT_UUID=$(echo "$RAW_ROOT_BLKID" | grep -o 'UUID="[^"]*"' | sed 's/UUID="//;s/"//')
+if [ -z "$ROOT_UUID" ]; then
+    case "$RAW_ROOT_BLKID" in
+        *-*-*-*-*) ROOT_UUID="$RAW_ROOT_BLKID" ;;
+    esac
+fi
+
 if [ -n "$ROOT_UUID" ]; then
     ROOT_SPEC="UUID=$ROOT_UUID"
 else
@@ -546,7 +553,13 @@ else
 fi
 
 if [ "$IS_UEFI" -eq 1 ] && [ -n "$EFI_PART" ]; then
-    EFI_UUID=$(blkid -s UUID -o value "$EFI_PART" 2>/dev/null || echo "")
+    RAW_EFI_BLKID=$(blkid "$EFI_PART" 2>/dev/null || echo "")
+    EFI_UUID=$(echo "$RAW_EFI_BLKID" | grep -o 'UUID="[^"]*"' | sed 's/UUID="//;s/"//')
+    if [ -z "$EFI_UUID" ]; then
+        case "$RAW_EFI_BLKID" in
+            *-*-*-*-*|*-*) EFI_UUID="$RAW_EFI_BLKID" ;;
+        esac
+    fi
     if [ -n "$EFI_UUID" ]; then
         EFI_SPEC="UUID=$EFI_UUID"
     else
@@ -590,15 +603,15 @@ set default=0
 set timeout=3
 set timeout_style=menu
 menuentry "FluxWAN Multi-WAN Router Appliance" {
+    linux /boot/vmlinuz-lts root=$ROOT_PART rootflags=rw rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw console=ttyS0,115200 console=tty0
+    initrd /boot/initramfs-lts
+}
+menuentry "FluxWAN (UUID: $ROOT_SPEC)" {
     linux /boot/vmlinuz-lts root=$ROOT_SPEC rootflags=rw rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw console=ttyS0,115200 console=tty0
     initrd /boot/initramfs-lts
 }
 menuentry "FluxWAN (Safe Mode / Verbose)" {
-    linux /boot/vmlinuz-lts root=$ROOT_SPEC rootflags=rw rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw debug verbose console=ttyS0,115200 console=tty0
-    initrd /boot/initramfs-lts
-}
-menuentry "FluxWAN (Direct $ROOT_PART Boot)" {
-    linux /boot/vmlinuz-lts root=$ROOT_PART rootflags=rw rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw console=ttyS0,115200 console=tty0
+    linux /boot/vmlinuz-lts root=$ROOT_PART rootflags=rw rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw debug verbose console=ttyS0,115200 console=tty0
     initrd /boot/initramfs-lts
 }
 EOF
@@ -627,15 +640,15 @@ set default=0
 set timeout=3
 set timeout_style=menu
 menuentry "FluxWAN Multi-WAN Router Appliance" {
+    linux /boot/vmlinuz-lts root=$ROOT_PART rootflags=rw rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw console=ttyS0,115200 console=tty0
+    initrd /boot/initramfs-lts
+}
+menuentry "FluxWAN (UUID: $ROOT_SPEC)" {
     linux /boot/vmlinuz-lts root=$ROOT_SPEC rootflags=rw rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw console=ttyS0,115200 console=tty0
     initrd /boot/initramfs-lts
 }
 menuentry "FluxWAN (Safe Mode / Verbose)" {
-    linux /boot/vmlinuz-lts root=$ROOT_SPEC rootflags=rw rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw debug verbose console=ttyS0,115200 console=tty0
-    initrd /boot/initramfs-lts
-}
-menuentry "FluxWAN (Direct $ROOT_PART Boot)" {
-    linux /boot/vmlinuz-lts root=$ROOT_PART rootflags=rw rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw console=ttyS0,115200 console=tty0
+    linux /boot/vmlinuz-lts root=$ROOT_PART rootflags=rw rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw debug verbose console=ttyS0,115200 console=tty0
     initrd /boot/initramfs-lts
 }
 EOF
@@ -690,25 +703,25 @@ LABEL fluxwan
   MENU LABEL FluxWAN Multi-WAN Router Appliance
   LINUX /boot/vmlinuz-lts
   INITRD /boot/initramfs-lts
+  APPEND root=$ROOT_PART rootflags=rw rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw console=ttyS0,115200 console=tty0
+
+LABEL fluxwan-uuid
+  MENU LABEL FluxWAN (UUID: $ROOT_SPEC)
+  LINUX /boot/vmlinuz-lts
+  INITRD /boot/initramfs-lts
   APPEND root=$ROOT_SPEC rootflags=rw rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw console=ttyS0,115200 console=tty0
 
 LABEL fluxwan-rel
   MENU LABEL FluxWAN (Relative Boot)
   LINUX vmlinuz-lts
   INITRD initramfs-lts
-  APPEND root=$ROOT_SPEC rootflags=rw rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw console=ttyS0,115200 console=tty0
-
-LABEL fluxwan-dev
-  MENU LABEL FluxWAN (Direct $ROOT_PART Boot)
-  LINUX /boot/vmlinuz-lts
-  INITRD /boot/initramfs-lts
   APPEND root=$ROOT_PART rootflags=rw rootfstype=ext4 init=/sbin/init modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw console=ttyS0,115200 console=tty0
 
 LABEL fluxwan-safe
   MENU LABEL FluxWAN (Safe Mode / Verbose)
   LINUX /boot/vmlinuz-lts
   INITRD /boot/initramfs-lts
-  APPEND root=$ROOT_SPEC rootflags=rw rootfstype=ext4 modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw debug verbose console=ttyS0,115200 console=tty0
+  APPEND root=$ROOT_PART rootflags=rw rootfstype=ext4 modules=sd-mod,usb-storage,ext4,nvme,ahci,ata_piix,mptspi,vmw_pvscsi,virtio-blk,virtio-scsi rw debug verbose console=ttyS0,115200 console=tty0
 "
 
         # Write configuration to all possible locations and filenames expected by Extlinux/Syslinux
