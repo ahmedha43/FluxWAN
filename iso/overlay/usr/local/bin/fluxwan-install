@@ -373,7 +373,7 @@ sysctl -w net.ipv4.conf.all.arp_ignore=1 >/dev/null 2>&1 || true
 sysctl -w net.ipv4.conf.all.arp_announce=2 >/dev/null 2>&1 || true
 
 # 4. Autoload Essential Storage & Network Modules
-for mod in loop ext4 jbd2 crc32c sd_mod ahci nvme usb_storage virtio_net e1000 e1000e igb igc ixgbe i40e ice mlx4_core mlx4_en mlx5_core bnx2x tg3 bnx2 sfc atlantic vmxnet3 r8169 tun tap macvlan ppp_generic ppp_async pppox pppoe xt_conntrack xt_nat xt_MASQUERADE xt_mark xt_statistic xt_TCPMSS sch_cake; do
+for mod in af_packet packet loop ext4 jbd2 crc32c sd_mod ahci nvme usb_storage virtio_net e1000 e1000e igb igc ixgbe i40e ice mlx4_core mlx4_en mlx5_core bnx2x tg3 bnx2 sfc atlantic vmxnet3 r8169 tun tap macvlan ppp_generic ppp_async pppox pppoe xt_conntrack xt_nat xt_MASQUERADE xt_mark xt_statistic xt_TCPMSS sch_cake; do
     modprobe "$mod" >/dev/null 2>&1 || true
 done
 
@@ -390,7 +390,12 @@ for iface in $(ls /sys/class/net 2>/dev/null); do
 done
 
 ip link set "$LAN_IFACE" up 2>/dev/null || ifconfig "$LAN_IFACE" up 2>/dev/null || true
-ip addr add 10.10.10.1/24 dev "$LAN_IFACE" 2>/dev/null || ifconfig "$LAN_IFACE" 10.10.10.1 netmask 255.255.255.0 up 2>/dev/null || true
+# Standard OpenWrt/TP-Link Primary Static LAN Gateway
+ip addr add 192.168.1.1/24 dev "$LAN_IFACE" 2>/dev/null || true
+# Multi-environment aliases for immediate zero-config access:
+ip addr add 192.168.155.100/24 dev "$LAN_IFACE" 2>/dev/null || true
+ip addr add 192.168.88.200/24 dev "$LAN_IFACE" 2>/dev/null || true
+ip addr add 10.10.10.1/24 dev "$LAN_IFACE" 2>/dev/null || true
 
 # In Bridged/VM/LAN networks, also fetch dynamic IP via DHCP so host PC can access Web UI immediately
 if [ -x /sbin/udhcpc ]; then
@@ -400,9 +405,12 @@ fi
 # 7. Web Management Port 80 -> 8080 Redirection
 iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 8080 2>/dev/null || true
 
-# 8. Start FluxWAN Core Reactor Daemon
+# 8. Start FluxWAN Core Reactor Daemon from /opt/fluxwan with persistent config symlinks
+mkdir -p /root/config /config
+ln -sf /opt/fluxwan/config/fluxwan.json /root/config/fluxwan.json 2>/dev/null || true
+ln -sf /opt/fluxwan/config/fluxwan.json /config/fluxwan.json 2>/dev/null || true
 if [ -x /opt/fluxwan/fluxwan ] && [ -f /opt/fluxwan/config/fluxwan.json ]; then
-    /opt/fluxwan/fluxwan /opt/fluxwan/config/fluxwan.json > /var/log/fluxwan.log 2>&1 &
+    (cd /opt/fluxwan && ./fluxwan /opt/fluxwan/config/fluxwan.json > /var/log/fluxwan.log 2>&1 &)
 fi
 RCS_EOF
 chmod 755 "$MOUNT_DIR/etc/init.d/rcS" 2>/dev/null || true
@@ -542,12 +550,34 @@ echo -e "    * Initramfs verified: $(ls -lh "$MOUNT_DIR/boot/initramfs-lts" 2>/d
 
 # Ensure kernel modules are unpacked in /lib/modules
 mkdir -p "$MOUNT_DIR/lib/modules"
-if [ -d /lib/modules ]; then
+if [ -d /lib/modules ] && [ -n "$(ls -A /lib/modules 2>/dev/null)" ]; then
     cp -aL /lib/modules/* "$MOUNT_DIR/lib/modules/" 2>/dev/null || true
 fi
 if [ -d /.modloop/modules ]; then
     cp -aL /.modloop/modules/* "$MOUNT_DIR/lib/modules/" 2>/dev/null || true
 fi
+
+# If target disk /lib/modules is still empty, directly extract modloop-lts
+if [ -z "$(ls -A "$MOUNT_DIR/lib/modules" 2>/dev/null)" ]; then
+    for ml in "$MOUNT_DIR/boot/modloop-lts" /media/*/boot/modloop-lts /boot/modloop-lts; do
+        if [ -f "$ml" ]; then
+            echo -e "    * Extracting kernel modules from $(basename "$ml")..."
+            mkdir -p /tmp/ml_extract
+            if command -v unsquashfs >/dev/null 2>&1; then
+                unsquashfs -f -d /tmp/ml_extract "$ml" >/dev/null 2>&1 || true
+            else
+                mount -t squashfs -o loop,ro "$ml" /tmp/ml_extract 2>/dev/null || true
+            fi
+            if [ -d /tmp/ml_extract/modules ]; then
+                cp -a /tmp/ml_extract/modules/* "$MOUNT_DIR/lib/modules/" 2>/dev/null || true
+            fi
+            umount /tmp/ml_extract 2>/dev/null || true
+            rm -rf /tmp/ml_extract
+            break
+        fi
+    done
+fi
+
 for kdir in "$MOUNT_DIR/lib/modules/"*; do
     if [ -d "$kdir" ]; then
         depmod -b "$MOUNT_DIR" "$(basename "$kdir")" 2>/dev/null || true

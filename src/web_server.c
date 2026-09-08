@@ -52,6 +52,19 @@ static inline void safe_str_copy(char *dst, const char *src, size_t max_len) {
     dst[slen] = '\0';
 }
 
+static const char *get_config_target_path(const web_server_ctx_t *ctx) {
+    if (ctx && ctx->config && ctx->config->config_file_path[0]) {
+        return ctx->config->config_file_path;
+    }
+#if defined(__linux__)
+    if (access("/opt/fluxwan/config/fluxwan.json", W_OK) == 0 ||
+        access("/opt/fluxwan/config", W_OK) == 0) {
+        return "/opt/fluxwan/config/fluxwan.json";
+    }
+#endif
+    return "config/fluxwan.json";
+}
+
 static void get_real_ipv6_str(const char *ifname, char *out_v6, size_t max_len) {
     out_v6[0] = '\0';
 #if defined(__linux__)
@@ -1141,8 +1154,8 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
                     ctx->config->groups[i] = ctx->config->groups[i + 1];
                 }
                 ctx->config->group_count--;
-                config_save("config/fluxwan.json", ctx->config);
-                config_load("config/fluxwan.json", ctx->config);
+                config_save(get_config_target_path(ctx), ctx->config);
+                config_load(get_config_target_path(ctx), ctx->config);
                 if (ctx->wan_mgr) wan_manager_rebalance(ctx->wan_mgr);
             }
         }
@@ -1195,8 +1208,8 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
                         strncpy(grp->wan_names[w], wans[w], sizeof(grp->wan_names[w]) - 1);
                         grp->wan_names[w][sizeof(grp->wan_names[w]) - 1] = '\0';
                     }
-                    config_save("config/fluxwan.json", ctx->config);
-                    config_load("config/fluxwan.json", ctx->config);
+                    config_save(get_config_target_path(ctx), ctx->config);
+                    config_load(get_config_target_path(ctx), ctx->config);
                     if (ctx->wan_mgr) wan_manager_rebalance(ctx->wan_mgr);
                 }
             }
@@ -1253,8 +1266,8 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
                     ctx->config->lan.policy_routes[i] = ctx->config->lan.policy_routes[i + 1];
                 }
                 ctx->config->lan.policy_route_count--;
-                config_save("config/fluxwan.json", ctx->config);
-                config_load("config/fluxwan.json", ctx->config);
+                config_save(get_config_target_path(ctx), ctx->config);
+                config_load(get_config_target_path(ctx), ctx->config);
                 if (ctx->wan_mgr) wan_manager_rebalance(ctx->wan_mgr);
                 net_apply_policy_routes(ctx->config);
             }
@@ -1308,8 +1321,8 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
                     pr->description[sizeof(pr->description) - 1] = '\0';
                     pr->enabled = penabled;
 
-                    config_save("config/fluxwan.json", ctx->config);
-                    config_load("config/fluxwan.json", ctx->config);
+                    config_save(get_config_target_path(ctx), ctx->config);
+                    config_load(get_config_target_path(ctx), ctx->config);
                     if (ctx->wan_mgr) wan_manager_rebalance(ctx->wan_mgr);
                     net_apply_policy_routes(ctx->config);
                 }
@@ -1374,14 +1387,25 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
                 }
 
                 /* Validation passed: save to real config/fluxwan.json */
-                FILE *f = fopen("config/fluxwan.json", "w");
+                const char *save_path = get_config_target_path(ctx);
+                FILE *f = fopen(save_path, "w");
+                if (!f && strcmp(save_path, "/opt/fluxwan/config/fluxwan.json") != 0) {
+                    f = fopen("/opt/fluxwan/config/fluxwan.json", "w");
+                    if (f) save_path = "/opt/fluxwan/config/fluxwan.json";
+                }
+                if (!f && strcmp(save_path, "config/fluxwan.json") != 0) {
+                    f = fopen("config/fluxwan.json", "w");
+                    if (f) save_path = "config/fluxwan.json";
+                }
                 if (f) {
                     fputs(body, f);
                     fclose(f);
-                    LOG_INFO("[Web] Updated config/fluxwan.json with new validated settings from UI");
-                    wan_manager_add_log("INFO", "Configuration validated and applied via Web Management");
+                    LOG_INFO("[Web] Updated %s with new validated settings from UI", save_path);
+                    wan_manager_add_log("INFO", "Configuration validated and saved to %s", save_path);
+                } else {
+                    LOG_ERROR("[Web] Failed to open configuration file %s for saving!", save_path);
                 }
-                config_load("config/fluxwan.json", ctx->config);
+                config_load(save_path, ctx->config);
             }
         }
 

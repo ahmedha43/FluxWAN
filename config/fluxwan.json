@@ -1,11 +1,11 @@
 {
   "lan": {
-    "interface": "veth_lan",
-    "ip": "10.10.10.1",
+    "interface": "eth0",
+    "ip": "192.168.1.1",
     "netmask": "255.255.255.0",
     "dhcp_enabled": true,
-    "dhcp_start": "10.10.10.100",
-    "dhcp_end": "10.10.10.200",
+    "dhcp_start": "192.168.1.100",
+    "dhcp_end": "192.168.1.200",
     "dhcp_lease_time": 43200,
     "policy_routes": [
       {
@@ -18,8 +18,8 @@
       {
         "subnet": "10.10.30.0/24",
         "gateway_ip": "10.10.30.1",
-        "target_group": "Iraq_Local",
-        "description": "Local Low-Latency Gaming & Iraqi Services",
+        "target_group": "Default_Balance",
+        "description": "General Multi-WAN Subscribers",
         "enabled": true
       }
     ]
@@ -27,55 +27,43 @@
   "groups": [
     {
       "id": 1,
-      "name": "Iraq_Local",
-      "description": "Local Iraqi Fiber & LTE Lines",
-      "wans": ["WAN1_Fiber_ISP1", "WAN3_LTE_ISP3"],
+      "name": "Default_Balance",
+      "description": "Multi-WAN Load Balancing Pool",
+      "wans": ["WAN1_Primary", "WAN2_Secondary"],
       "enabled": true
     },
     {
       "id": 2,
       "name": "Starlink_Fleet",
-      "description": "Starlink Satellite Constellation Fleet",
-      "wans": ["WAN2_Starlink_ISP2"],
+      "description": "High-Speed Priority WAN",
+      "wans": ["WAN2_Secondary"],
       "enabled": true
     }
   ],
   "wans": [
     {
       "id": 1,
-      "name": "veth_wan1",
-      "label": "WAN1_Fiber_ISP1",
+      "name": "eth1",
+      "label": "WAN1_Primary",
       "type": "dhcp",
-      "ip": "10.10.1.50",
+      "ip": "0.0.0.0",
       "netmask": "255.255.255.0",
-      "gateway": "10.10.1.1",
+      "gateway": "0.0.0.0",
       "weight": 100,
-      "probe_target": "10.10.1.1",
+      "probe_target": "8.8.8.8",
       "table_id": 101
     },
     {
       "id": 2,
-      "name": "veth_wan2",
-      "label": "WAN2_Starlink_ISP2",
+      "name": "eth2",
+      "label": "WAN2_Secondary",
       "type": "dhcp",
-      "ip": "10.10.2.50",
+      "ip": "0.0.0.0",
       "netmask": "255.255.255.0",
-      "gateway": "10.10.2.1",
-      "weight": 50,
-      "probe_target": "10.10.2.1",
+      "gateway": "0.0.0.0",
+      "weight": 100,
+      "probe_target": "1.1.1.1",
       "table_id": 102
-    },
-    {
-      "id": 3,
-      "name": "veth_wan3",
-      "label": "WAN3_LTE_ISP3",
-      "type": "dhcp",
-      "ip": "10.10.3.50",
-      "netmask": "255.255.255.0",
-      "gateway": "10.10.3.1",
-      "weight": 75,
-      "probe_target": "10.10.3.1",
-      "table_id": 103
     }
   ],
   "prober": {

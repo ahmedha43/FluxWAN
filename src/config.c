@@ -104,6 +104,7 @@ static const char *find_matching_bracket(const char *start) {
 int config_load(const char *config_path, fluxwan_config_t *out_config) {
     if (!config_path || !out_config) return -1;
     memset(out_config, 0, sizeof(fluxwan_config_t));
+    safe_str_copy(out_config->config_file_path, config_path, sizeof(out_config->config_file_path));
 
     char *json = read_file_to_string(config_path);
     if (!json) {
@@ -480,9 +481,25 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
 }
 
 int config_save(const char *config_path, const fluxwan_config_t *config) {
-    if (!config_path || !config) return -1;
-    FILE *f = fopen(config_path, "w");
-    if (!f) return -1;
+    if (!config) return -1;
+    const char *path = config_path;
+    if (!path || !path[0]) {
+        if (config->config_file_path[0]) path = config->config_file_path;
+        else path = "/opt/fluxwan/config/fluxwan.json";
+    }
+    FILE *f = fopen(path, "w");
+    if (!f && strcmp(path, "/opt/fluxwan/config/fluxwan.json") != 0) {
+        f = fopen("/opt/fluxwan/config/fluxwan.json", "w");
+        if (f) path = "/opt/fluxwan/config/fluxwan.json";
+    }
+    if (!f && strcmp(path, "config/fluxwan.json") != 0) {
+        f = fopen("config/fluxwan.json", "w");
+        if (f) path = "config/fluxwan.json";
+    }
+    if (!f) {
+        LOG_ERROR("Failed to open config file for saving: %s", path ? path : "(null)");
+        return -1;
+    }
 
     char lan_ip[32], lan_mask[32], dhcp_start[32], dhcp_end[32];
     ip_to_str(config->lan.ip_addr, lan_ip, sizeof(lan_ip));

@@ -289,6 +289,7 @@ typedef struct {
     web_config_t web;
     auth_config_t auth;
     nat46_config_t nat46;
+    char config_file_path[MAX_PATH_LEN];
 } fluxwan_config_t;
 
 /* Helper function prototypes */

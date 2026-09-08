@@ -93,7 +93,7 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
     }
 #if defined(__linux__)
     char ip_cmd[512];
-    snprintf(ip_cmd, sizeof(ip_cmd), "ip addr replace %s/24 dev %s 2>/dev/null || ip addr add %s/24 dev %s 2>/dev/null; ip link set %s up 2>/dev/null", lan_ip, config->lan.name, lan_ip, config->lan.name, config->lan.name);
+    snprintf(ip_cmd, sizeof(ip_cmd), "ip addr add %s/24 dev %s 2>/dev/null || true; ip link set %s up 2>/dev/null", lan_ip, config->lan.name, config->lan.name);
     safe_system(ip_cmd);
 
     /* Apply Secondary LAN Subnet Gateways and Kernel Rules for Policy Routes */

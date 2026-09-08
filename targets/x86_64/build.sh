@@ -123,6 +123,9 @@ EOF
 # Copy FluxWAN binaries, BPF objects, configs and scripts into apkovl
 cp -f "$PROJECT_ROOT/fluxwan" "$APKOVL_DIR/opt/fluxwan/"
 cp -f "$PROJECT_ROOT/config/fluxwan.json" "$APKOVL_DIR/opt/fluxwan/config/"
+mkdir -p "$APKOVL_DIR/root/config" "$APKOVL_DIR/config"
+ln -sf /opt/fluxwan/config/fluxwan.json "$APKOVL_DIR/root/config/fluxwan.json" 2>/dev/null || true
+ln -sf /opt/fluxwan/config/fluxwan.json "$APKOVL_DIR/config/fluxwan.json" 2>/dev/null || true
 cp -f "$PROJECT_ROOT"/bpf/*.bpf.o "$APKOVL_DIR/opt/fluxwan/bpf/" 2>/dev/null || true
 cp -f "$PROJECT_ROOT/targets/x86_64/overlay/usr/local/bin/"* "$APKOVL_DIR/usr/local/bin/" 2>/dev/null || true
 cp -f "$PROJECT_ROOT/iso/overlay/usr/local/bin/"* "$APKOVL_DIR/usr/local/bin/" 2>/dev/null || true

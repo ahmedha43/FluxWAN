@@ -38,7 +38,10 @@ while true; do
         3)
             echo "[*] Restarting FluxWAN Router Daemon..."
             pkill -f "fluxwan" || true
-            /opt/fluxwan/fluxwan /opt/fluxwan/config/fluxwan.json > /var/log/fluxwan.log 2>&1 &
+            mkdir -p /root/config /config
+            ln -sf /opt/fluxwan/config/fluxwan.json /root/config/fluxwan.json 2>/dev/null || true
+            ln -sf /opt/fluxwan/config/fluxwan.json /config/fluxwan.json 2>/dev/null || true
+            (cd /opt/fluxwan && ./fluxwan /opt/fluxwan/config/fluxwan.json > /var/log/fluxwan.log 2>&1 &)
             sleep 1
             echo "[✓] Router engine active."
             printf "Press Enter to return to menu..."
