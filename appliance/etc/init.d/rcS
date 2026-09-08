@@ -47,14 +47,19 @@ for iface in $(ls /sys/class/net 2>/dev/null); do
 done
 
 ip link set "$LAN_IFACE" up 2>/dev/null || true
-ip addr add 10.10.10.1/24 dev "$LAN_IFACE" 2>/dev/null || ifconfig "$LAN_IFACE" 10.10.10.1 netmask 255.255.255.0 up 2>/dev/null || true
+ip addr add 192.168.1.1/24 dev "$LAN_IFACE" 2>/dev/null || ifconfig "$LAN_IFACE" 192.168.1.1 netmask 255.255.255.0 up 2>/dev/null || true
+ip addr add 192.168.155.100/24 dev "$LAN_IFACE" 2>/dev/null || true
+ip addr add 192.168.88.200/24 dev "$LAN_IFACE" 2>/dev/null || true
 
 # 7. Web Management Port 80 -> 8080 Redirection
 iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 8080 2>/dev/null || true
 
 # 8. Start FluxWAN Core Reactor Daemon
+mkdir -p /root/config /config
+ln -sf /opt/fluxwan/config/fluxwan.json /root/config/fluxwan.json 2>/dev/null || true
+ln -sf /opt/fluxwan/config/fluxwan.json /config/fluxwan.json 2>/dev/null || true
 if [ -x /opt/fluxwan/fluxwan ] && [ -f /opt/fluxwan/config/fluxwan.json ]; then
-    /opt/fluxwan/fluxwan /opt/fluxwan/config/fluxwan.json > /var/log/fluxwan.log 2>&1 &
+    (cd /opt/fluxwan && ./fluxwan /opt/fluxwan/config/fluxwan.json > /var/log/fluxwan.log 2>&1 &)
 fi
 
 # 9. Print Welcome Splash Banner to Console

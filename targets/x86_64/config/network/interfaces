@@ -4,5 +4,7 @@ iface lo inet loopback
 
 auto eth0
 iface eth0 inet static
-    address 10.10.10.1
+    address 192.168.1.1
     netmask 255.255.255.0
+    post-up ip addr add 192.168.155.100/24 dev eth0 2>/dev/null || true
+    post-up ip addr add 192.168.88.200/24 dev eth0 2>/dev/null || true

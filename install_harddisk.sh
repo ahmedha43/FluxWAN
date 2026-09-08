@@ -395,7 +395,6 @@ ip addr add 192.168.1.1/24 dev "$LAN_IFACE" 2>/dev/null || true
 # Multi-environment aliases for immediate zero-config access:
 ip addr add 192.168.155.100/24 dev "$LAN_IFACE" 2>/dev/null || true
 ip addr add 192.168.88.200/24 dev "$LAN_IFACE" 2>/dev/null || true
-ip addr add 10.10.10.1/24 dev "$LAN_IFACE" 2>/dev/null || true
 
 # In Bridged/VM/LAN networks, also fetch dynamic IP via DHCP so host PC can access Web UI immediately
 if [ -x /sbin/udhcpc ]; then

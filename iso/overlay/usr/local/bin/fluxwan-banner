@@ -10,16 +10,18 @@ echo "    ╚═╝     ╚══════╝ ╚═════╝ ╚═╝
 echo "             High-Performance Multi-WAN Router Appliance              "
 echo "======================================================================"
 
-LAN_IP=$(ip -4 addr show veth-lan-r 2>/dev/null | grep inet | awk '{print $2}' | cut -d/ -f1)
-if [ -z "$LAN_IP" ]; then
-    LAN_IP=$(ip -4 addr show eth0 2>/dev/null | grep inet | awk '{print $2}' | cut -d/ -f1)
-fi
-if [ -z "$LAN_IP" ]; then
-    LAN_IP="10.10.10.1"
+LAN_IPS=$(ip -4 addr show eth0 2>/dev/null | grep inet | awk '{print $2}' | cut -d/ -f1 | tr '\n' ' ')
+if [ -z "$LAN_IPS" ]; then
+    LAN_IPS="192.168.1.1 192.168.155.100 192.168.88.200"
 fi
 
-echo " [*] LAN Gateway IP      : http://$LAN_IP:8080 (or http://$LAN_IP)"
-echo " [*] SSH Access          : ssh root@$LAN_IP (Password: admin)"
+PRIMARY_IP=$(echo "$LAN_IPS" | awk '{print $1}')
+echo " [*] Primary Web UI      : http://$PRIMARY_IP:8080 (or http://$PRIMARY_IP)"
+echo " [*] All Reachable URLs  :"
+for tip in $LAN_IPS; do
+    echo "     -> http://$tip:8080"
+done
+echo " [*] SSH Access          : ssh root@$PRIMARY_IP (Password: admin)"
 echo " [*] Web UI Credentials  : Username: admin | Password: admin"
 echo " [*] Interface Status    :"
 for iface in $(ls /sys/class/net 2>/dev/null | grep -v "lo"); do

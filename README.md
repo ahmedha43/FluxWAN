@@ -165,10 +165,10 @@ FluxWAN utilizes isolated, reproducible Docker cross-compilation environments fo
 ## 🌐 Web Dashboard & Access
 
 Once booted, FluxWAN is accessible via browser:
-- **Default IP**: `http://192.168.88.1:8080` (or `http://10.10.10.1:8080`)
+- **Default IP**: `http://192.168.1.1:8080` (or `http://192.168.155.100:8080` / `http://192.168.88.200:8080`)
 - **Default User**: `admin`
 - **Default Password**: `admin`
-- **SSH Console**: `ssh root@192.168.88.1` (Password: `fluxwan`)
+- **SSH Console**: `ssh root@192.168.1.1` (Password: `admin`)
 
 ---
 
