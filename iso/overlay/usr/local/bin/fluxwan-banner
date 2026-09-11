@@ -12,7 +12,7 @@ echo "======================================================================"
 
 LAN_IPS=$(ip -4 addr show eth0 2>/dev/null | grep inet | awk '{print $2}' | cut -d/ -f1 | tr '\n' ' ')
 if [ -z "$LAN_IPS" ]; then
-    LAN_IPS="192.168.1.1 192.168.155.100 192.168.88.200"
+    LAN_IPS="192.168.90.1 192.168.155.100 192.168.88.200"
 fi
 
 PRIMARY_IP=$(echo "$LAN_IPS" | awk '{print $1}')

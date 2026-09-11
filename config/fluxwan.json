@@ -1,11 +1,11 @@
 {
   "lan": {
     "interface": "eth0",
-    "ip": "192.168.1.1",
+    "ip": "192.168.90.1",
     "netmask": "255.255.255.0",
     "dhcp_enabled": true,
-    "dhcp_start": "192.168.1.100",
-    "dhcp_end": "192.168.1.200",
+    "dhcp_start": "192.168.90.100",
+    "dhcp_end": "192.168.90.200",
     "dhcp_lease_time": 43200,
     "policy_routes": [
       {

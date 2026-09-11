@@ -125,7 +125,7 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
         if (extract_json_string(lan_pos, "ip", val, sizeof(val)) && val[0] != '\0' && strcmp(val, "0.0.0.0") != 0) {
             out_config->lan.ip_addr = str_to_ip(val);
         } else {
-            out_config->lan.ip_addr = str_to_ip("192.168.1.1");
+            out_config->lan.ip_addr = str_to_ip("192.168.90.1");
         }
 
         if (extract_json_string(lan_pos, "netmask", val, sizeof(val)) && val[0] != '\0' && strcmp(val, "0.0.0.0") != 0) {
@@ -137,12 +137,12 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
         if (extract_json_string(lan_pos, "dhcp_start", val, sizeof(val)) && val[0] != '\0' && strcmp(val, "0.0.0.0") != 0) {
             out_config->lan.dhcp_start = str_to_ip(val);
         } else {
-            out_config->lan.dhcp_start = str_to_ip("192.168.1.100");
+            out_config->lan.dhcp_start = str_to_ip("192.168.90.100");
         }
         if (extract_json_string(lan_pos, "dhcp_end", val, sizeof(val)) && val[0] != '\0' && strcmp(val, "0.0.0.0") != 0) {
             out_config->lan.dhcp_end = str_to_ip(val);
         } else {
-            out_config->lan.dhcp_end = str_to_ip("192.168.1.200");
+            out_config->lan.dhcp_end = str_to_ip("192.168.90.200");
         }
         out_config->lan.dhcp_lease_time = extract_json_int(lan_pos, "dhcp_lease_time", 43200);
 
@@ -513,10 +513,10 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
     char lan_name[MAX_IFNAME_LEN];
     safe_str_copy(lan_name, config->lan.name[0] ? config->lan.name : "eth0", sizeof(lan_name));
 
-    uint32_t lan_ip_bin = config->lan.ip_addr ? config->lan.ip_addr : str_to_ip("192.168.1.1");
+    uint32_t lan_ip_bin = config->lan.ip_addr ? config->lan.ip_addr : str_to_ip("192.168.90.1");
     uint32_t lan_mask_bin = config->lan.netmask ? config->lan.netmask : str_to_ip("255.255.255.0");
-    uint32_t dhcp_start_bin = config->lan.dhcp_start ? config->lan.dhcp_start : str_to_ip("192.168.1.100");
-    uint32_t dhcp_end_bin = config->lan.dhcp_end ? config->lan.dhcp_end : str_to_ip("192.168.1.200");
+    uint32_t dhcp_start_bin = config->lan.dhcp_start ? config->lan.dhcp_start : str_to_ip("192.168.90.100");
+    uint32_t dhcp_end_bin = config->lan.dhcp_end ? config->lan.dhcp_end : str_to_ip("192.168.90.200");
 
     char lan_ip[32], lan_mask[32], dhcp_start[32], dhcp_end[32];
     ip_to_str(lan_ip_bin, lan_ip, sizeof(lan_ip));

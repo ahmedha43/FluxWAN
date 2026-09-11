@@ -422,8 +422,8 @@ for iface in $(ls /sys/class/net 2>/dev/null); do
 done
 
 ip link set "$LAN_IFACE" up 2>/dev/null || ifconfig "$LAN_IFACE" up 2>/dev/null || true
-# Standard OpenWrt/TP-Link Primary Static LAN Gateway
-ip addr add 192.168.1.1/24 dev "$LAN_IFACE" 2>/dev/null || true
+# Standard Primary Static LAN Gateway (192.168.90.1 - Avoids clash with ISP/Modem 192.168.1.1)
+ip addr add 192.168.90.1/24 dev "$LAN_IFACE" 2>/dev/null || true
 # Multi-environment aliases for immediate zero-config access:
 ip addr add 192.168.155.100/24 dev "$LAN_IFACE" 2>/dev/null || true
 ip addr add 192.168.88.200/24 dev "$LAN_IFACE" 2>/dev/null || true

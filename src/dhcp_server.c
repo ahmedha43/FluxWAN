@@ -115,8 +115,8 @@ static uint32_t allocate_next_ip(dhcp_server_ctx_t *ctx, const uint8_t *mac) {
     uint32_t end_h   = ntohl(ctx->config.lan.dhcp_end);
 
     if (start_h == 0 || end_h == 0 || end_h < start_h) {
-        start_h = ntohl(str_to_ip("192.168.1.100"));
-        end_h   = ntohl(str_to_ip("192.168.1.200"));
+        start_h = ntohl(str_to_ip("192.168.90.100"));
+        end_h   = ntohl(str_to_ip("192.168.90.200"));
     }
 
     for (uint32_t ip_h = start_h; ip_h <= end_h; ip_h++) {
@@ -197,7 +197,7 @@ dhcp_server_ctx_t *dhcp_server_init(const fluxwan_config_t *config) {
 
     /* Seed default active LAN device for demonstration */
     uint8_t def_mac[6] = {0xd8, 0x3a, 0xdd, 0x12, 0x34, 0x56};
-    uint32_t def_ip = config->lan.dhcp_start != 0 ? config->lan.dhcp_start : str_to_ip("192.168.1.105");
+    uint32_t def_ip = config->lan.dhcp_start != 0 ? config->lan.dhcp_start : str_to_ip("192.168.90.105");
     update_lease_record(ctx, def_mac, def_ip, "Workstation-Office");
 
     return ctx;

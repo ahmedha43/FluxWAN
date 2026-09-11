@@ -1586,7 +1586,7 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
                     }
                     /* Ensure LAN settings are valid */
                     if (test_cfg.lan.ip_addr == 0) {
-                        test_cfg.lan.ip_addr = ctx->config->lan.ip_addr ? ctx->config->lan.ip_addr : str_to_ip("192.168.1.1");
+                        test_cfg.lan.ip_addr = ctx->config->lan.ip_addr ? ctx->config->lan.ip_addr : str_to_ip("192.168.90.1");
                     }
                     if (test_cfg.lan.netmask == 0) {
                         test_cfg.lan.netmask = ctx->config->lan.netmask ? ctx->config->lan.netmask : str_to_ip("255.255.255.0");
