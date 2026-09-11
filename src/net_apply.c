@@ -102,10 +102,14 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
         int w_ifidx = if_nametoindex(w->name);
         if (w_ifidx <= 0) w_ifidx = w->ifindex;
 
-        /* Ensure WAN interface is administratively UP */
+        /* Set WAN interface administratively UP or DOWN based on enabled state */
 #if defined(__linux__)
         char wan_up[128];
-        snprintf(wan_up, sizeof(wan_up), "ip link set %s up 2>/dev/null || true", w->name);
+        if (w->enabled) {
+            snprintf(wan_up, sizeof(wan_up), "ip link set %s up 2>/dev/null || true", w->name);
+        } else {
+            snprintf(wan_up, sizeof(wan_up), "ip link set %s down 2>/dev/null || true", w->name);
+        }
         safe_system(wan_up);
 
         char tbl_f[64];
@@ -123,7 +127,7 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
 #endif
 
         if (nl) {
-            if (w_ifidx > 0) netlink_set_interface_state(nl, w_ifidx, true);
+            if (w_ifidx > 0) netlink_set_interface_state(nl, w_ifidx, w->enabled);
             if (w->type == WAN_TYPE_STATIC && w->ip_addr != 0 && w_ifidx > 0) {
                 netlink_set_interface_ip(nl, w_ifidx, w->ip_addr, w->netmask);
             }

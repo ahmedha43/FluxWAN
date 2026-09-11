@@ -1033,13 +1033,13 @@ static void handle_terminal_exec(web_server_ctx_t *ctx, socket_t client_fd, cons
     } else {
         char full_cmd[2048];
 #if defined(__linux__)
-        snprintf(full_cmd, sizeof(full_cmd), "cd \"%s\" 2>/dev/null; (%s) 2>&1", g_terminal_cwd, p_cmd);
+        snprintf(full_cmd, sizeof(full_cmd), "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH; cd \"%s\" 2>/dev/null; (%s) 2>&1", g_terminal_cwd, p_cmd);
         FILE *fp = popen(full_cmd, "r");
 #elif defined(_WIN32) || defined(_WIN64)
         snprintf(full_cmd, sizeof(full_cmd), "%s 2>&1", p_cmd);
         FILE *fp = _popen(full_cmd, "r");
 #else
-        snprintf(full_cmd, sizeof(full_cmd), "cd \"%s\" 2>/dev/null; (%s) 2>&1", g_terminal_cwd, p_cmd);
+        snprintf(full_cmd, sizeof(full_cmd), "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH; cd \"%s\" 2>/dev/null; (%s) 2>&1", g_terminal_cwd, p_cmd);
         FILE *fp = popen(full_cmd, "r");
 #endif
         if (fp) {
