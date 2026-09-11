@@ -61,8 +61,8 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
     /* Multi-WAN ARP Isolation & RP Filter for overlapping subnets/identical gateways (e.g. Starlink 192.168.1.1) */
     safe_system("sysctl -w net.ipv4.conf.all.arp_ignore=1 >/dev/null 2>&1");
     safe_system("sysctl -w net.ipv4.conf.all.arp_announce=2 >/dev/null 2>&1");
-    safe_system("sysctl -w net.ipv4.conf.all.rp_filter=2 >/dev/null 2>&1");
-    safe_system("sysctl -w net.ipv4.conf.default.rp_filter=2 >/dev/null 2>&1");
+    safe_system("sysctl -w net.ipv4.conf.all.rp_filter=0 >/dev/null 2>&1");
+    safe_system("sysctl -w net.ipv4.conf.default.rp_filter=0 >/dev/null 2>&1");
 #endif
 
     /* 2. Configure Dedicated LAN Interface */
@@ -143,17 +143,19 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
                      "ip route replace default via %s dev %s table %u proto static 2>/dev/null || true; "
                      "ip rule del oif %s table %u 2>/dev/null || true; "
                      "ip rule add oif %s table %u pref 100 2>/dev/null || true; "
-                     "ip route replace default via %s dev %s 2>/dev/null || true",
+                     "ip route replace default via %s dev %s metric %u 2>/dev/null || true",
                      wan_gw, w->name, w->table_id,
                      w->name, w->table_id,
                      w->name, w->table_id,
-                     wan_gw, w->name);
+                     wan_gw, w->name, 100 + i + 1);
             safe_system(route_cmd);
 
             char rp_cmd[256];
             snprintf(rp_cmd, sizeof(rp_cmd),
-                     "sysctl -w net.ipv4.conf.%s.rp_filter=2 >/dev/null 2>&1 || true",
-                     w->name);
+                     "sysctl -w net.ipv4.conf.%s.rp_filter=0 >/dev/null 2>&1 || true; "
+                     "sysctl -w net.ipv4.conf.%s.arp_ignore=1 >/dev/null 2>&1 || true; "
+                     "sysctl -w net.ipv4.conf.%s.arp_announce=2 >/dev/null 2>&1 || true",
+                     w->name, w->name, w->name);
             safe_system(rp_cmd);
         }
 #endif

@@ -1,5 +1,8 @@
 #include "prober.h"
 #include <math.h>
+#if !defined(_WIN32) && !defined(_WIN64)
+#include <fcntl.h>
+#endif
 
 #ifndef MSG_DONTWAIT
 #define MSG_DONTWAIT 0
@@ -42,7 +45,8 @@ typedef struct {
 } wan_probe_state_t;
 
 struct prober_ctx {
-    int raw_fd;
+    int raw_fd;                  /* Global listening raw ICMP socket */
+    int wan_send_fds[MAX_WANS];  /* Interface-bound dedicated sockets */
     fluxwan_config_t *config;
     wan_health_callback_t callback;
     void *user_data;
@@ -76,12 +80,20 @@ prober_ctx_t *prober_init(fluxwan_config_t *config, wan_health_callback_t cb, vo
     ctx->user_data = user_data;
     ctx->pid = (uint16_t)(getpid() & 0xFFFF);
 
+    for (uint32_t i = 0; i < MAX_WANS; i++) {
+        ctx->wan_send_fds[i] = -1;
+    }
+
     ctx->raw_fd = (int)socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
     if (ctx->raw_fd < 0) {
         LOG_WARN("RAW ICMP Socket creation failed (Root required for real ICMP). Running Prober in active simulation mode.");
         ctx->raw_fd = -1;
     } else {
-        LOG_INFO("RAW ICMP Prober Engine initialized (fd: %d)", ctx->raw_fd);
+#if !defined(_WIN32) && !defined(_WIN64)
+        int flags = fcntl(ctx->raw_fd, F_GETFL, 0);
+        if (flags >= 0) fcntl(ctx->raw_fd, F_SETFL, flags | O_NONBLOCK);
+#endif
+        LOG_INFO("RAW ICMP Global Prober Engine initialized (fd: %d)", ctx->raw_fd);
     }
 
     for (uint32_t i = 0; i < config->wan_count; i++) {
@@ -96,6 +108,12 @@ prober_ctx_t *prober_init(fluxwan_config_t *config, wan_health_callback_t cb, vo
 void prober_close(prober_ctx_t *ctx) {
     if (!ctx) return;
     if (ctx->raw_fd >= 0) close(ctx->raw_fd);
+    for (uint32_t i = 0; i < MAX_WANS; i++) {
+        if (ctx->wan_send_fds[i] >= 0) {
+            close(ctx->wan_send_fds[i]);
+            ctx->wan_send_fds[i] = -1;
+        }
+    }
     free(ctx);
 }
 
@@ -128,7 +146,24 @@ int prober_send_probes(prober_ctx_t *ctx) {
         ps->pending_probes[slot].send_time_us = now_us;
         ps->pending_probes[slot].received = false;
 
-        if (ctx->raw_fd >= 0 && w->probe_target_ip != 0) {
+        /* Ensure dedicated socket bound to this interface exists */
+        if (ctx->wan_send_fds[i] < 0 && w->name[0]) {
+            ctx->wan_send_fds[i] = (int)socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+            if (ctx->wan_send_fds[i] >= 0) {
+#if !defined(_WIN32) && !defined(_WIN64)
+                int flags = fcntl(ctx->wan_send_fds[i], F_GETFL, 0);
+                if (flags >= 0) fcntl(ctx->wan_send_fds[i], F_SETFL, flags | O_NONBLOCK);
+#if defined(SO_BINDTODEVICE)
+                setsockopt(ctx->wan_send_fds[i], SOL_SOCKET, SO_BINDTODEVICE,
+                           w->name, (socklen_t)strlen(w->name));
+#endif
+#endif
+            }
+        }
+
+        int send_fd = (ctx->wan_send_fds[i] >= 0) ? ctx->wan_send_fds[i] : ctx->raw_fd;
+
+        if (send_fd >= 0 && w->probe_target_ip != 0) {
             char packet[64];
             memset(packet, 0, sizeof(packet));
 
@@ -149,13 +184,7 @@ int prober_send_probes(prober_ctx_t *ctx) {
             dest.sin_family = AF_INET;
             dest.sin_addr.s_addr = w->probe_target_ip;
 
-            /* Bind socket to WAN interface name so ICMP exits strictly via that WAN */
-#if defined(SO_BINDTODEVICE)
-            if (w->name[0]) {
-                setsockopt(ctx->raw_fd, SOL_SOCKET, SO_BINDTODEVICE, w->name, (socklen_t)strlen(w->name));
-            }
-#endif
-            sendto(ctx->raw_fd, packet, sizeof(packet), 0, (struct sockaddr *)&dest, sizeof(dest));
+            sendto(send_fd, packet, sizeof(packet), 0, (struct sockaddr *)&dest, sizeof(dest));
         }
 
         /* Calculate moving average RTT, Jitter, and Loss from real packet history */
@@ -196,58 +225,73 @@ int prober_send_probes(prober_ctx_t *ctx) {
     return 0;
 }
 
+static void prober_handle_packet(prober_ctx_t *ctx, const uint8_t *buf, ssize_t len) {
+    if (len < 28) return;
+
+    int ip_hl = (buf[0] & 0x0F) * 4;
+    if (len < ip_hl + 8) return;
+
+    struct icmphdr *icmp = (struct icmphdr *)(buf + ip_hl);
+    if (icmp->type != ICMP_ECHOREPLY) return;
+
+    uint16_t id = ntohs(icmp->un.echo.id);
+    uint16_t seq = ntohs(icmp->un.echo.sequence);
+
+    if (id < ctx->pid || id >= ctx->pid + ctx->config->wan_count) return;
+
+    uint32_t wan_idx = id - ctx->pid;
+    wan_config_t *w = &ctx->config->wans[wan_idx];
+    wan_probe_state_t *ps = &ctx->wan_states[wan_idx];
+
+    uint64_t now_us = get_time_us();
+    uint64_t send_time_us = 0;
+
+    /* Extract embedded timestamp from ICMP payload */
+    if (len >= ip_hl + (int)sizeof(struct icmphdr) + (int)sizeof(uint64_t)) {
+        uint64_t *ts_ptr = (uint64_t *)(buf + ip_hl + sizeof(struct icmphdr));
+        send_time_us = *ts_ptr;
+    } else {
+        send_time_us = ps->pending_probes[seq % 16].send_time_us;
+    }
+
+    uint32_t measured_rtt_ms = 1;
+    if (send_time_us > 0 && now_us >= send_time_us) {
+        uint64_t diff_us = now_us - send_time_us;
+        measured_rtt_ms = (uint32_t)(diff_us / 1000ULL);
+        if (measured_rtt_ms == 0) measured_rtt_ms = 1; /* Sub-millisecond local latency */
+    }
+
+    /* Record real RTT in moving history */
+    ps->rtt_history[ps->history_idx % PROBE_WINDOW_SIZE] = measured_rtt_ms;
+    ps->loss_history[ps->history_idx % PROBE_WINDOW_SIZE] = false;
+    ps->history_idx++;
+
+    w->metrics.rtt_ms = measured_rtt_ms;
+    w->metrics.last_probe_time = now_us / 1000ULL;
+    ps->pending_probes[seq % 16].received = true;
+}
+
 int prober_process_responses(prober_ctx_t *ctx) {
-    if (!ctx || ctx->raw_fd < 0) return 0;
+    if (!ctx) return 0;
     uint8_t buf[512];
     struct sockaddr_in from;
     socklen_t fromlen = sizeof(from);
-
     ssize_t len;
-    while ((len = recvfrom(ctx->raw_fd, buf, sizeof(buf), MSG_DONTWAIT, (struct sockaddr *)&from, &fromlen)) > 0) {
-        /* Minimum IPv4 header (20 bytes) + ICMP header (8 bytes) */
-        if (len < 28) continue;
 
-        int ip_hl = (buf[0] & 0x0F) * 4;
-        if (len < ip_hl + 8) continue;
-
-        struct icmphdr *icmp = (struct icmphdr *)(buf + ip_hl);
-        if (icmp->type != ICMP_ECHOREPLY) continue;
-
-        uint16_t id = ntohs(icmp->un.echo.id);
-        uint16_t seq = ntohs(icmp->un.echo.sequence);
-
-        if (id < ctx->pid || id >= ctx->pid + ctx->config->wan_count) continue;
-
-        uint32_t wan_idx = id - ctx->pid;
-        wan_config_t *w = &ctx->config->wans[wan_idx];
-        wan_probe_state_t *ps = &ctx->wan_states[wan_idx];
-
-        uint64_t now_us = get_time_us();
-        uint64_t send_time_us = 0;
-
-        /* Extract embedded timestamp from ICMP payload */
-        if (len >= ip_hl + (int)sizeof(struct icmphdr) + (int)sizeof(uint64_t)) {
-            uint64_t *ts_ptr = (uint64_t *)(buf + ip_hl + sizeof(struct icmphdr));
-            send_time_us = *ts_ptr;
-        } else {
-            send_time_us = ps->pending_probes[seq % 16].send_time_us;
+    /* Drain global listening socket */
+    if (ctx->raw_fd >= 0) {
+        while ((len = recvfrom(ctx->raw_fd, buf, sizeof(buf), MSG_DONTWAIT, (struct sockaddr *)&from, &fromlen)) > 0) {
+            prober_handle_packet(ctx, buf, len);
         }
+    }
 
-        uint32_t measured_rtt_ms = 1;
-        if (send_time_us > 0 && now_us >= send_time_us) {
-            uint64_t diff_us = now_us - send_time_us;
-            measured_rtt_ms = (uint32_t)(diff_us / 1000ULL);
-            if (measured_rtt_ms == 0) measured_rtt_ms = 1; /* Sub-millisecond local latency */
+    /* Drain each interface-bound socket */
+    for (uint32_t i = 0; i < ctx->config->wan_count; i++) {
+        if (ctx->wan_send_fds[i] >= 0) {
+            while ((len = recvfrom(ctx->wan_send_fds[i], buf, sizeof(buf), MSG_DONTWAIT, (struct sockaddr *)&from, &fromlen)) > 0) {
+                prober_handle_packet(ctx, buf, len);
+            }
         }
-
-        /* Record real RTT in moving history */
-        ps->rtt_history[ps->history_idx % PROBE_WINDOW_SIZE] = measured_rtt_ms;
-        ps->loss_history[ps->history_idx % PROBE_WINDOW_SIZE] = false;
-        ps->history_idx++;
-
-        w->metrics.rtt_ms = measured_rtt_ms;
-        w->metrics.last_probe_time = now_us / 1000ULL;
-        ps->pending_probes[seq % 16].received = true;
     }
     return 0;
 }

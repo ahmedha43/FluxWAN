@@ -46,7 +46,7 @@ typedef int socket_t;
 #define INVALID_SOCKET (-1)
 #endif
 
-#define FLUXWAN_VERSION "1.1.8"
+#define FLUXWAN_VERSION "1.2.3"
 #define MAX_WANS 8
 #define MAX_IFNAME_LEN 32
 #define MAX_LABEL_LEN 64

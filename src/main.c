@@ -156,6 +156,9 @@ int main(int argc, char *argv[]) {
             }
         }
 
+        /* Drain any pending ICMP prober responses across all WAN sockets */
+        prober_process_responses(prober);
+
         /* Periodic Timer: Dynamic Prober Trigger */
         struct timespec ts;
         clock_gettime(CLOCK_MONOTONIC, &ts);
