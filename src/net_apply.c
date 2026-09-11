@@ -140,8 +140,14 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
         if (w->gateway != 0) {
             char route_cmd[512];
             snprintf(route_cmd, sizeof(route_cmd),
-                     "ip route replace default via %s dev %s table %u proto static 2>/dev/null || true",
-                     wan_gw, w->name, w->table_id);
+                     "ip route replace default via %s dev %s table %u proto static 2>/dev/null || true; "
+                     "ip rule del oif %s table %u 2>/dev/null || true; "
+                     "ip rule add oif %s table %u pref 100 2>/dev/null || true; "
+                     "ip route replace default via %s dev %s 2>/dev/null || true",
+                     wan_gw, w->name, w->table_id,
+                     w->name, w->table_id,
+                     w->name, w->table_id,
+                     wan_gw, w->name);
             safe_system(route_cmd);
 
             char rp_cmd[256];

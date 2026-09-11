@@ -489,6 +489,11 @@ static void ensure_dhcp_hook_script(void) {
         "        [ -z \"$TABLE_ID\" ] && TABLE_ID=101\n"
         "        if [ -n \"$router\" ]; then\n"
         "            ip route replace default via \"$router\" dev \"$interface\" table \"$TABLE_ID\" proto static 2>/dev/null || true\n"
+        "            ip rule del oif \"$interface\" table \"$TABLE_ID\" 2>/dev/null || true\n"
+        "            ip rule add oif \"$interface\" table \"$TABLE_ID\" pref 100 2>/dev/null || true\n"
+        "            ip rule del from \"$ip\" table \"$TABLE_ID\" 2>/dev/null || true\n"
+        "            ip rule add from \"$ip\" table \"$TABLE_ID\" pref 100 2>/dev/null || true\n"
+        "            ip route replace default via \"$router\" dev \"$interface\" 2>/dev/null || true\n"
         "        fi\n"
         "        sysctl -w net.ipv4.conf.${interface}.rp_filter=2 >/dev/null 2>&1 || true\n"
         "        ;;\n"
@@ -592,10 +597,20 @@ void wan_manager_periodic_tick(wan_manager_ctx_t *ctx, uint64_t now_ms) {
                         w->state = WAN_STATE_HEALTHY;
 
                         if (new_gw != 0) {
-                            char rc[256];
+                            char rc[512];
                             snprintf(rc, sizeof(rc),
-                                     "ip route replace default via %s dev %s table %u proto static 2>/dev/null || true",
-                                     gw_str, w->name, w->table_id);
+                                     "ip route replace default via %s dev %s table %u proto static 2>/dev/null || true; "
+                                     "ip rule del oif %s table %u 2>/dev/null || true; "
+                                     "ip rule add oif %s table %u pref 100 2>/dev/null || true; "
+                                     "ip rule del from %s table %u 2>/dev/null || true; "
+                                     "ip rule add from %s table %u pref 100 2>/dev/null || true; "
+                                     "ip route replace default via %s dev %s 2>/dev/null || true",
+                                     gw_str, w->name, w->table_id,
+                                     w->name, w->table_id,
+                                     w->name, w->table_id,
+                                     ip_str, w->table_id,
+                                     ip_str, w->table_id,
+                                     gw_str, w->name);
                             safe_system(rc);
                         }
 

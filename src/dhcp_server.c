@@ -170,6 +170,16 @@ dhcp_server_ctx_t *dhcp_server_init(const fluxwan_config_t *config) {
         setsockopt(ctx->sock_fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt));
         setsockopt(ctx->sock_fd, SOL_SOCKET, SO_BROADCAST, (const char *)&opt, sizeof(opt));
 
+#if defined(__linux__) && defined(SO_BINDTODEVICE)
+        if (config->lan.name[0]) {
+            if (setsockopt(ctx->sock_fd, SOL_SOCKET, SO_BINDTODEVICE, config->lan.name, (socklen_t)strlen(config->lan.name)) < 0) {
+                LOG_WARN("[DHCP] Could not bind exclusively to %s: %s", config->lan.name, strerror(errno));
+            } else {
+                LOG_INFO("[DHCP] Bound DHCP socket exclusively to LAN interface '%s'", config->lan.name);
+            }
+        }
+#endif
+
         struct sockaddr_in addr;
         memset(&addr, 0, sizeof(addr));
         addr.sin_family = AF_INET;
@@ -227,6 +237,11 @@ int dhcp_server_process(dhcp_server_ctx_t *ctx) {
         size_t copy_len = hlen < sizeof(hostname) - 1 ? hlen : sizeof(hostname) - 1;
         memcpy(hostname, hptr, copy_len);
         hostname[copy_len] = '\0';
+    }
+
+    /* NEVER answer DHCP requests from our own WAN interfaces */
+    if (strcmp(hostname, "FluxWAN") == 0) {
+        return 0;
     }
 
     LOG_INFO("[DHCP] MsgType %u from MAC %02x:%02x:%02x:%02x:%02x:%02x (Hostname: '%s')",
