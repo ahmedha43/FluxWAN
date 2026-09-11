@@ -11,6 +11,8 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <net/if.h>
+#include <unistd.h>
+#include <sys/wait.h>
 #if defined(__linux__)
 #include <linux/if_packet.h>
 #include <net/ethernet.h>
@@ -906,6 +908,218 @@ static void handle_pcap_export(web_server_ctx_t *ctx, socket_t client_fd, const 
     close_client_socket(client_fd);
 }
 
+static char g_terminal_cwd[512] = "";
+
+static void escape_terminal_json(const char *src, char *dst, size_t dst_max) {
+    size_t j = 0;
+    for (size_t i = 0; src[i] != '\0' && j + 6 < dst_max; i++) {
+        unsigned char c = (unsigned char)src[i];
+        if (c == '"') {
+            dst[j++] = '\\'; dst[j++] = '"';
+        } else if (c == '\\') {
+            dst[j++] = '\\'; dst[j++] = '\\';
+        } else if (c == '\n') {
+            dst[j++] = '\\'; dst[j++] = 'n';
+        } else if (c == '\r') {
+            dst[j++] = '\\'; dst[j++] = 'r';
+        } else if (c == '\t') {
+            dst[j++] = '\\'; dst[j++] = 't';
+        } else if (c < 32 && c != '\033') {
+            /* ignore raw control chars */
+        } else {
+            dst[j++] = src[i];
+        }
+    }
+    dst[j] = '\0';
+}
+
+static void handle_terminal_exec(web_server_ctx_t *ctx, socket_t client_fd, const char *req) {
+    if (!is_request_authorized(ctx->config, req)) {
+        const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized. Admin login required.\"}";
+        char resp[512];
+        int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 401 Unauthorized\r\n"
+            "Content-Type: application/json\r\n"
+            "Access-Control-Allow-Origin: *\r\n"
+            "Content-Length: %zu\r\n"
+            "Connection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0);
+        close_client_socket(client_fd);
+        return;
+    }
+
+    if (g_terminal_cwd[0] == '\0') {
+#if defined(_WIN32) || defined(_WIN64)
+        if (_getcwd(g_terminal_cwd, sizeof(g_terminal_cwd)) == NULL) {
+            safe_str_copy(g_terminal_cwd, "C:\\", sizeof(g_terminal_cwd));
+        }
+#else
+        if (getcwd(g_terminal_cwd, sizeof(g_terminal_cwd)) == NULL) {
+            safe_str_copy(g_terminal_cwd, "/root", sizeof(g_terminal_cwd));
+        }
+#endif
+    }
+
+    char cmd[1024] = {0};
+    const char *body = strstr(req, "\r\n\r\n");
+    if (body) {
+        body += 4;
+        extract_json_string(body, "cmd", cmd, sizeof(cmd));
+    }
+
+    /* Trim leading and trailing whitespace */
+    char *p_cmd = cmd;
+    while (*p_cmd == ' ' || *p_cmd == '\t' || *p_cmd == '\r' || *p_cmd == '\n') p_cmd++;
+    size_t cmd_len = strlen(p_cmd);
+    while (cmd_len > 0 && (p_cmd[cmd_len - 1] == ' ' || p_cmd[cmd_len - 1] == '\t' ||
+                           p_cmd[cmd_len - 1] == '\r' || p_cmd[cmd_len - 1] == '\n')) {
+        p_cmd[--cmd_len] = '\0';
+    }
+
+    size_t max_out = 65536;
+    char *raw_output = malloc(max_out);
+    if (!raw_output) {
+        close_client_socket(client_fd);
+        return;
+    }
+    raw_output[0] = '\0';
+    int exit_code = 0;
+
+    if (cmd_len == 0) {
+        /* Empty command */
+    } else if (strcmp(p_cmd, "cd") == 0 || strcmp(p_cmd, "cd ~") == 0) {
+#if defined(_WIN32) || defined(_WIN64)
+        _chdir("\\");
+        _getcwd(g_terminal_cwd, sizeof(g_terminal_cwd));
+#else
+        if (chdir("/root") != 0) {
+            chdir("/");
+        }
+        if (getcwd(g_terminal_cwd, sizeof(g_terminal_cwd)) == NULL) {
+            safe_str_copy(g_terminal_cwd, "/root", sizeof(g_terminal_cwd));
+        }
+#endif
+    } else if (strncmp(p_cmd, "cd ", 3) == 0) {
+        const char *t_dir = p_cmd + 3;
+        while (*t_dir == ' ' || *t_dir == '\t') t_dir++;
+        char target_dir[512];
+        safe_str_copy(target_dir, t_dir, sizeof(target_dir));
+        size_t tlen = strlen(target_dir);
+        if (tlen > 0 && (target_dir[0] == '"' || target_dir[0] == '\'')) {
+            memmove(target_dir, target_dir + 1, tlen);
+            tlen--;
+            if (tlen > 0 && (target_dir[tlen - 1] == '"' || target_dir[tlen - 1] == '\'')) {
+                target_dir[--tlen] = '\0';
+            }
+        }
+#if defined(_WIN32) || defined(_WIN64)
+        if (_chdir(target_dir) == 0) {
+            _getcwd(g_terminal_cwd, sizeof(g_terminal_cwd));
+        } else {
+            snprintf(raw_output, max_out, "cd: %s: No such directory\n", target_dir);
+            exit_code = 1;
+        }
+#else
+        if (chdir(target_dir) == 0) {
+            if (getcwd(g_terminal_cwd, sizeof(g_terminal_cwd)) == NULL) {
+                safe_str_copy(g_terminal_cwd, target_dir, sizeof(g_terminal_cwd));
+            }
+        } else {
+            snprintf(raw_output, max_out, "cd: %s: No such file or directory\n", target_dir);
+            exit_code = 1;
+        }
+#endif
+    } else {
+        char full_cmd[2048];
+#if defined(__linux__)
+        snprintf(full_cmd, sizeof(full_cmd), "cd \"%s\" 2>/dev/null; (%s) 2>&1", g_terminal_cwd, p_cmd);
+        FILE *fp = popen(full_cmd, "r");
+#elif defined(_WIN32) || defined(_WIN64)
+        snprintf(full_cmd, sizeof(full_cmd), "%s 2>&1", p_cmd);
+        FILE *fp = _popen(full_cmd, "r");
+#else
+        snprintf(full_cmd, sizeof(full_cmd), "cd \"%s\" 2>/dev/null; (%s) 2>&1", g_terminal_cwd, p_cmd);
+        FILE *fp = popen(full_cmd, "r");
+#endif
+        if (fp) {
+            size_t total_bytes = 0;
+            char chunk[1024];
+            while (fgets(chunk, sizeof(chunk), fp)) {
+                size_t chunk_len = strlen(chunk);
+                if (total_bytes + chunk_len < max_out - 64) {
+                    memcpy(raw_output + total_bytes, chunk, chunk_len);
+                    total_bytes += chunk_len;
+                } else {
+                    const char *trunc = "\n[... Output truncated at 64KB ...]\n";
+                    size_t tr_len = strlen(trunc);
+                    if (total_bytes + tr_len < max_out - 1) {
+                        memcpy(raw_output + total_bytes, trunc, tr_len);
+                        total_bytes += tr_len;
+                    }
+                    break;
+                }
+            }
+            raw_output[total_bytes] = '\0';
+#if defined(_WIN32) || defined(_WIN64)
+            int st = _pclose(fp);
+            exit_code = st;
+#else
+            int st = pclose(fp);
+            exit_code = (st == -1) ? -1 : (WIFEXITED(st) ? WEXITSTATUS(st) : st);
+#endif
+        } else {
+            snprintf(raw_output, max_out, "Failed to execute: %s\n", strerror(errno));
+            exit_code = 127;
+        }
+    }
+
+    size_t esc_max = max_out * 2 + 1024;
+    char *escaped_out = malloc(esc_max);
+    char *resp_body = malloc(esc_max + 2048);
+    char *http_resp = malloc(esc_max + 4096);
+
+    if (escaped_out && resp_body && http_resp) {
+        escape_terminal_json(raw_output, escaped_out, esc_max);
+        char esc_cwd[1024] = {0};
+        escape_terminal_json(g_terminal_cwd, esc_cwd, sizeof(esc_cwd));
+        char esc_cmd[2048] = {0};
+        escape_terminal_json(p_cmd, esc_cmd, sizeof(esc_cmd));
+
+        snprintf(resp_body, esc_max + 2048,
+            "{\n"
+            "  \"status\": \"%s\",\n"
+            "  \"cmd\": \"%s\",\n"
+            "  \"output\": \"%s\",\n"
+            "  \"exit_code\": %d,\n"
+            "  \"cwd\": \"%s\"\n"
+            "}",
+            exit_code == 0 ? "ok" : "error",
+            esc_cmd,
+            escaped_out,
+            exit_code,
+            esc_cwd);
+
+        size_t blen = strlen(resp_body);
+        int hlen = snprintf(http_resp, esc_max + 4096,
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: application/json\r\n"
+            "Access-Control-Allow-Origin: *\r\n"
+            "Content-Length: %zu\r\n"
+            "Connection: close\r\n\r\n%s",
+            blen, resp_body);
+
+        send(client_fd, http_resp, hlen, 0);
+    }
+
+    free(raw_output);
+    if (escaped_out) free(escaped_out);
+    if (resp_body) free(resp_body);
+    if (http_resp) free(http_resp);
+
+    close_client_socket(client_fd);
+}
+
 int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
 
     if (!ctx || !IS_VALID_SOCK(client_fd)) return -1;
@@ -1433,6 +1647,8 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
 
         send(client_fd, resp, len, 0);
         close_client_socket(client_fd);
+    } else if (strstr(req, "POST /api/v1/terminal") != NULL || strstr(req, "POST /api/v1/exec") != NULL) {
+        handle_terminal_exec(ctx, client_fd, req);
     } else if (strstr(req, "GET /api/v1/diagnostics/pcap") != NULL) {
         handle_pcap_export(ctx, client_fd, req);
     } else if (strstr(req, "GET /api/v1/telemetry") != NULL) {

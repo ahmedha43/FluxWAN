@@ -55,6 +55,10 @@
                 <span>🐞</span>
                 <span>Debug</span>
             </button>
+            <button @click="openTerminalModal()" class="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-semibold px-3.5 py-2 rounded-xl border border-emerald-500/30 flex items-center space-x-1.5 transition shadow-sm hover:shadow-emerald-500/10" title="موجّه أوامر لينكس المباشر (Terminal Shell)">
+                <span>💻</span>
+                <span>Terminal</span>
+            </button>
             <button @click="showLogsModal = true; fetchLogs()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold px-3.5 py-2 rounded-xl border border-slate-700 flex items-center space-x-1.5 transition">
                 <span>📜</span>
                 <span>Logs</span>
@@ -334,6 +338,116 @@
                         <pre class="p-4 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 text-3xs font-mono overflow-x-auto whitespace-pre leading-relaxed select-all max-h-[60vh]" x-text="debugText"></pre>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- ================= Linux Web Terminal / Command Prompt Modal (موجّه أوامر لينكس) ================= -->
+        <div x-show="showTerminalModal" x-transition class="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 md:p-6" style="display: none;">
+            <div class="glass-card max-w-5xl w-full p-5 rounded-2xl border border-slate-700 space-y-3 shadow-2xl flex flex-col max-h-[92vh] h-[680px] bg-slate-950/90">
+                <!-- Terminal Header -->
+                <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <div class="flex items-center space-x-3">
+                        <span class="text-xl p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">💻</span>
+                        <div>
+                            <div class="flex items-center space-x-2">
+                                <h3 class="text-base font-bold text-white">FluxWAN Linux Terminal</h3>
+                                <span class="text-3xs font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center space-x-1">
+                                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                                    <span>ROOT SHELL</span>
+                                </span>
+                            </div>
+                            <p class="text-slate-400 text-3xs">موجّه أوامر لينكس المباشر لتنفيذ الأوامر وفحص الشبكة والنواة دون الحاجة لـ SSH</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <span class="text-3xs text-slate-400 font-mono hidden md:inline-block bg-slate-900/80 px-2.5 py-1 rounded-lg border border-slate-800">
+                            Dir: <span class="text-cyan-400 font-semibold" x-text="terminalCwd || '/root'">/root</span>
+                        </span>
+                        <button @click="clearTerminal()" class="text-2xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-xl border border-slate-700 transition flex items-center space-x-1" title="مسح شاشة الموجّه">
+                            <span>🧹</span>
+                            <span>مسح الشاشة</span>
+                        </button>
+                        <button @click="showTerminalModal = false" class="text-slate-400 hover:text-white text-sm px-2.5 py-1.5 rounded-xl hover:bg-slate-800 transition">✕</button>
+                    </div>
+                </div>
+
+                <!-- Quick Action Toolbar -->
+                <div class="flex items-center gap-1.5 overflow-x-auto pb-1.5 pt-0.5 text-3xs scrollbar-thin">
+                    <span class="text-slate-500 font-semibold shrink-0 uppercase tracking-wider pl-1">أوامر سريعة:</span>
+                    <button @click="runTerminalCommand('ip a')" class="shrink-0 bg-slate-900 hover:bg-slate-800 text-emerald-400 hover:text-emerald-300 px-2.5 py-1 rounded-lg border border-slate-800 hover:border-emerald-500/40 font-mono font-semibold transition">ip a</button>
+                    <button @click="runTerminalCommand('ip route')" class="shrink-0 bg-slate-900 hover:bg-slate-800 text-cyan-400 hover:text-cyan-300 px-2.5 py-1 rounded-lg border border-slate-800 hover:border-cyan-500/40 font-mono font-semibold transition">ip route</button>
+                    <button @click="runTerminalCommand('modprobe af_packet')" class="shrink-0 bg-slate-900 hover:bg-slate-800 text-amber-400 hover:text-amber-300 px-2.5 py-1 rounded-lg border border-slate-800 hover:border-amber-500/40 font-mono font-semibold transition">modprobe af_packet</button>
+                    <button @click="runTerminalCommand('udhcpc -i eth1 -n -q')" class="shrink-0 bg-slate-900 hover:bg-slate-800 text-blue-400 hover:text-blue-300 px-2.5 py-1 rounded-lg border border-slate-800 hover:border-blue-500/40 font-mono font-semibold transition">udhcpc -i eth1</button>
+                    <button @click="runTerminalCommand('ping -c 3 8.8.8.8')" class="shrink-0 bg-slate-900 hover:bg-slate-800 text-purple-400 hover:text-purple-300 px-2.5 py-1 rounded-lg border border-slate-800 hover:border-purple-500/40 font-mono font-semibold transition">ping 8.8.8.8</button>
+                    <button @click="runTerminalCommand('ps | grep fluxwan')" class="shrink-0 bg-slate-900 hover:bg-slate-800 text-teal-400 hover:text-teal-300 px-2.5 py-1 rounded-lg border border-slate-800 hover:border-teal-500/40 font-mono font-semibold transition">ps | grep fluxwan</button>
+                    <button @click="runTerminalCommand('cat /opt/fluxwan/config/fluxwan.json')" class="shrink-0 bg-slate-900 hover:bg-slate-800 text-indigo-400 hover:text-indigo-300 px-2.5 py-1 rounded-lg border border-slate-800 hover:border-indigo-500/40 font-mono font-semibold transition">cat config.json</button>
+                    <button @click="runTerminalCommand('dmesg | tail -n 20')" class="shrink-0 bg-slate-900 hover:bg-slate-800 text-rose-400 hover:text-rose-300 px-2.5 py-1 rounded-lg border border-slate-800 hover:border-rose-500/40 font-mono font-semibold transition">dmesg | tail</button>
+                    <button @click="runTerminalCommand('uname -a')" class="shrink-0 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white px-2.5 py-1 rounded-lg border border-slate-800 hover:border-slate-600 font-mono font-semibold transition">uname -a</button>
+                </div>
+
+                <!-- Terminal Output Display Box -->
+                <div id="terminalScreen" class="flex-1 overflow-y-auto bg-black/95 border border-slate-800/90 rounded-xl p-4 font-mono text-xs text-slate-300 space-y-2 select-text shadow-inner">
+                    <template x-for="(entry, index) in terminalHistoryLog" :key="index">
+                        <div class="leading-relaxed">
+                            <!-- Command Prompt Line -->
+                            <template x-if="entry.type === 'cmd'">
+                                <div class="flex items-center space-x-2 text-emerald-400 font-bold border-t border-slate-900/80 pt-1.5 first:border-0 first:pt-0">
+                                    <span class="text-cyan-400">root@fluxwan:</span><span class="text-amber-300 font-normal" x-text="entry.cwd"></span><span>#</span>
+                                    <span class="text-white font-semibold" x-text="entry.text"></span>
+                                    <span class="text-3xs text-slate-500 font-normal ml-auto" x-text="entry.time"></span>
+                                </div>
+                            </template>
+
+                            <!-- Output Line (Preformatted) -->
+                            <template x-if="entry.type === 'out'">
+                                <pre class="text-slate-200 whitespace-pre-wrap break-all text-2xs pl-2 font-mono" x-text="entry.text"></pre>
+                            </template>
+
+                            <!-- Error Line (Preformatted) -->
+                            <template x-if="entry.type === 'err'">
+                                <div class="pl-2">
+                                    <span x-show="entry.exit_code !== undefined && entry.exit_code !== 0" class="text-3xs text-rose-400 font-bold uppercase tracking-wider block mb-0.5" x-text="'[Exit Code: ' + entry.exit_code + ']'"></span>
+                                    <pre class="text-rose-400 whitespace-pre-wrap break-all text-2xs font-mono" x-text="entry.text"></pre>
+                                </div>
+                            </template>
+
+                            <!-- System Info Line -->
+                            <template x-if="entry.type === 'info'">
+                                <div class="text-slate-400 text-2xs whitespace-pre-wrap pl-2 font-mono leading-relaxed" x-text="entry.text"></div>
+                            </template>
+                        </div>
+                    </template>
+
+                    <!-- Loading Indicator -->
+                    <div x-show="terminalLoading" class="flex items-center space-x-2 text-amber-400 text-2xs animate-pulse pl-2 py-1">
+                        <svg class="w-3.5 h-3.5 animate-spin text-amber-400" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                        </svg>
+                        <span>جاري تنفيذ الأمر على نظام لينكس...</span>
+                    </div>
+                </div>
+
+                <!-- Terminal Command Input Bar -->
+                <form @submit.prevent="runTerminalCommand()" class="flex items-center space-x-2 bg-slate-900 border border-slate-700/80 rounded-xl px-3 py-2 shadow-lg">
+                    <span class="text-emerald-400 font-bold font-mono text-xs whitespace-nowrap">
+                        root@fluxwan:<span class="text-amber-300 font-normal" x-text="terminalCwd || '/root'"></span>#
+                    </span>
+                    <input type="text"
+                           id="terminalCommandInput"
+                           x-model="terminalInput"
+                           @keydown.up.prevent="terminalHistoryUp()"
+                           @keydown.down.prevent="terminalHistoryDown()"
+                           placeholder="اكتب أي أمر هنا (مثال: ip a أو ls -la أو ping 8.8.8.8) ثم اضغط Enter..."
+                           class="flex-1 bg-transparent border-none text-white font-mono text-xs focus:outline-none focus:ring-0 placeholder-slate-500">
+                    <button type="submit"
+                            :disabled="terminalLoading || !terminalInput.trim()"
+                            :class="terminalLoading || !terminalInput.trim() ? 'opacity-40 cursor-not-allowed bg-slate-800 text-slate-500' : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/30'"
+                            class="px-4 py-1.5 rounded-lg text-xs font-bold font-mono transition flex items-center space-x-1.5">
+                        <span x-show="!terminalLoading">تشغيل ⏎</span>
+                        <span x-show="terminalLoading">...</span>
+                    </button>
+                </form>
             </div>
         </div>
         
@@ -955,6 +1069,13 @@
                 debugView: 'visual',
                 debugText: '',
                 debugData: {},
+                showTerminalModal: false,
+                terminalInput: '',
+                terminalCwd: '/root',
+                terminalHistoryLog: [],
+                terminalCmdHistory: [],
+                terminalCmdIdx: -1,
+                terminalLoading: false,
                 loginUsername: '',
                 loginPassword: '',
                 loginError: '',
@@ -1657,6 +1778,155 @@
                     if (h > 0) return `${h}h ${m}m ${s}s`;
                     if (m > 0) return `${m}m ${s}s`;
                     return `${s}s`;
+                },
+
+                openTerminalModal() {
+                    this.showTerminalModal = true;
+                    if (this.terminalHistoryLog.length === 0) {
+                        this.terminalHistoryLog.push({
+                            type: 'info',
+                            text: '========================================================================\n' +
+                                  '  FluxWAN Linux Terminal — Interactive Root Command Console\n' +
+                                  '  OS: Linux 6.6.14-0-lts (x86_64) | User: root | Working Directory: ' + (this.terminalCwd || '/root') + '\n' +
+                                  '========================================================================\n' +
+                                  '• اكتب أي أمر لينكس تريده واضغط Enter لتنفيذه مباشرة على سيرفر الراوتر.\n' +
+                                  '• يمكنك استخدام أزرار الأوامر السريعة في الأعلى للفحص الفوري بنقرة واحدة.\n' +
+                                  '• استخدم سهم فوق/تحت (Up/Down) للتنقل في سجل الأوامر السابقة.'
+                        });
+                    }
+                    this.$nextTick(() => {
+                        const inp = document.getElementById('terminalCommandInput');
+                        if (inp) inp.focus();
+                    });
+                },
+
+                clearTerminal() {
+                    this.terminalHistoryLog = [];
+                },
+
+                scrollTerminalBottom() {
+                    this.$nextTick(() => {
+                        const el = document.getElementById('terminalScreen');
+                        if (el) el.scrollTop = el.scrollHeight;
+                    });
+                },
+
+                terminalHistoryUp() {
+                    if (this.terminalCmdHistory.length === 0) return;
+                    if (this.terminalCmdIdx === -1) {
+                        this.terminalCmdIdx = this.terminalCmdHistory.length - 1;
+                    } else if (this.terminalCmdIdx > 0) {
+                        this.terminalCmdIdx--;
+                    }
+                    this.terminalInput = this.terminalCmdHistory[this.terminalCmdIdx] || '';
+                },
+
+                terminalHistoryDown() {
+                    if (this.terminalCmdHistory.length === 0 || this.terminalCmdIdx === -1) return;
+                    if (this.terminalCmdIdx < this.terminalCmdHistory.length - 1) {
+                        this.terminalCmdIdx++;
+                        this.terminalInput = this.terminalCmdHistory[this.terminalCmdIdx] || '';
+                    } else {
+                        this.terminalCmdIdx = -1;
+                        this.terminalInput = '';
+                    }
+                },
+
+                runTerminalCommand(cmdArg) {
+                    const cmd = (cmdArg !== undefined ? cmdArg : this.terminalInput).trim();
+                    if (!cmd) return;
+                    this.terminalInput = '';
+
+                    if (cmd.toLowerCase() === 'clear') {
+                        this.clearTerminal();
+                        return;
+                    }
+
+                    if (cmd.toLowerCase() === 'help') {
+                        this.terminalHistoryLog.push({
+                            type: 'cmd',
+                            text: cmd,
+                            cwd: this.terminalCwd,
+                            time: new Date().toLocaleTimeString()
+                        });
+                        this.terminalHistoryLog.push({
+                            type: 'info',
+                            text: 'الأوامر الشائعة المفيدة:\n' +
+                                  '  ip a                  - عرض كروت الشبكة وعناوين الـ IP الحالية\n' +
+                                  '  ip route              - عرض جداول التوجيه الافتراضية والسياسات\n' +
+                                  '  modprobe af_packet    - تحميل موديل النواة لبروتوكول الـ Raw Socket\n' +
+                                  '  udhcpc -i eth1 -n -q  - طلب آي بي فوراً عبر الـ DHCP للكرت eth1\n' +
+                                  '  ping -c 3 8.8.8.8     - فحص الاتصال بالإنترنت\n' +
+                                  '  cat /opt/fluxwan/config/fluxwan.json - عرض ملف التكوين\n' +
+                                  '  ps | grep fluxwan     - التحقق من عمل محرك FluxWAN\n' +
+                                  '  dmesg | tail -n 20    - عرض سجلات كيرنل لينكس الحديثة\n' +
+                                  '  clear                 - مسح شاشة الأوامر'
+                        });
+                        this.scrollTerminalBottom();
+                        return;
+                    }
+
+                    // Save to command history
+                    if (this.terminalCmdHistory.length === 0 || this.terminalCmdHistory[this.terminalCmdHistory.length - 1] !== cmd) {
+                        this.terminalCmdHistory.push(cmd);
+                    }
+                    this.terminalCmdIdx = -1;
+
+                    this.terminalHistoryLog.push({
+                        type: 'cmd',
+                        text: cmd,
+                        cwd: this.terminalCwd,
+                        time: new Date().toLocaleTimeString()
+                    });
+                    this.terminalLoading = true;
+                    this.scrollTerminalBottom();
+
+                    fetch('/api/v1/terminal', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Auth-Token': this.authToken
+                        },
+                        body: JSON.stringify({ cmd: cmd })
+                    })
+                    .then(r => {
+                        if (r.status === 401) {
+                            this.showLoginModal = true;
+                            throw new Error('جلسة الدخول منتهية، يرجى تسجيل الدخول مجدداً.');
+                        }
+                        return r.json();
+                    })
+                    .then(d => {
+                        this.terminalLoading = false;
+                        if (d.cwd) this.terminalCwd = d.cwd;
+                        if (d.output && d.output.trim().length > 0) {
+                            this.terminalHistoryLog.push({
+                                type: d.exit_code === 0 ? 'out' : 'err',
+                                text: d.output,
+                                exit_code: d.exit_code
+                            });
+                        } else {
+                            this.terminalHistoryLog.push({
+                                type: d.exit_code === 0 ? 'info' : 'err',
+                                text: d.exit_code === 0 ? '[✓ تم تنفيذ الأمر بنجاح (كود 0)]' : `[خطأ: كود الخروج ${d.exit_code}]`,
+                                exit_code: d.exit_code
+                            });
+                        }
+                        this.scrollTerminalBottom();
+                        this.$nextTick(() => {
+                            const inp = document.getElementById('terminalCommandInput');
+                            if (inp) inp.focus();
+                        });
+                    })
+                    .catch(err => {
+                        this.terminalLoading = false;
+                        this.terminalHistoryLog.push({
+                            type: 'err',
+                            text: 'فشل إرسال الأمر: ' + err.message,
+                            exit_code: -1
+                        });
+                        this.scrollTerminalBottom();
+                    });
                 }
             }
         }
