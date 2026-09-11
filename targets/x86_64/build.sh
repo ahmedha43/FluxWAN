@@ -49,50 +49,59 @@ mkdir -p "$BUILD_DIR/modloop_unpacked"
 unsquashfs -d "$BUILD_DIR/modloop_unpacked" "$BUILD_DIR/iso_extract/boot/modloop-lts" >/dev/null 2>&1 || true
 
 # Filter kernel modules: Keep Network, Storage, CDROM, Netfilter, Crypto, VirtIO, Filesystems
-mkdir -p "$BUILD_DIR/filtered_modules"
+# Note: Alpine Linux init mounts modloop-lts to /.modloop and creates symlink /.modloop/modules -> /lib/modules.
+# Therefore, modloop-lts MUST have top-level directory "modules/$kver/..."
+mkdir -p "$BUILD_DIR/filtered_modules/modules"
 for kdir in "$BUILD_DIR/modloop_unpacked/modules/"*; do
     if [ -d "$kdir" ]; then
         kver="$(basename "$kdir")"
-        mkdir -p "$BUILD_DIR/filtered_modules/$kver/kernel/drivers"
-        mkdir -p "$BUILD_DIR/filtered_modules/$kver/kernel/net"
-        mkdir -p "$BUILD_DIR/filtered_modules/$kver/kernel/crypto"
-        mkdir -p "$BUILD_DIR/filtered_modules/$kver/kernel/fs"
-        mkdir -p "$BUILD_DIR/filtered_modules/$kver/kernel/lib"
+        K_DEST="$BUILD_DIR/filtered_modules/modules/$kver"
+        mkdir -p "$K_DEST/kernel/drivers"
+        mkdir -p "$K_DEST/kernel/net"
+        mkdir -p "$K_DEST/kernel/crypto"
+        mkdir -p "$K_DEST/kernel/fs"
+        mkdir -p "$K_DEST/kernel/lib"
 
         # Network Drivers (Intel, Realtek, Broadcom, Mellanox, VirtIO, VMXNET3)
-        [ -d "$kdir/kernel/drivers/net" ] && cp -a "$kdir/kernel/drivers/net" "$BUILD_DIR/filtered_modules/$kver/kernel/drivers/" 2>/dev/null || true
+        [ -d "$kdir/kernel/drivers/net" ] && cp -a "$kdir/kernel/drivers/net" "$K_DEST/kernel/drivers/" 2>/dev/null || true
         # Storage & CDROM Drivers (NVMe, SATA, AHCI, SCSI, CD-ROM, Block, VirtIO-blk, USB-Storage)
-        [ -d "$kdir/kernel/drivers/nvme" ] && cp -a "$kdir/kernel/drivers/nvme" "$BUILD_DIR/filtered_modules/$kver/kernel/drivers/" 2>/dev/null || true
-        [ -d "$kdir/kernel/drivers/ata" ] && cp -a "$kdir/kernel/drivers/ata" "$BUILD_DIR/filtered_modules/$kver/kernel/drivers/" 2>/dev/null || true
-        [ -d "$kdir/kernel/drivers/scsi" ] && cp -a "$kdir/kernel/drivers/scsi" "$BUILD_DIR/filtered_modules/$kver/kernel/drivers/" 2>/dev/null || true
-        [ -d "$kdir/kernel/drivers/cdrom" ] && cp -a "$kdir/kernel/drivers/cdrom" "$BUILD_DIR/filtered_modules/$kver/kernel/drivers/" 2>/dev/null || true
-        [ -d "$kdir/kernel/drivers/block" ] && cp -a "$kdir/kernel/drivers/block" "$BUILD_DIR/filtered_modules/$kver/kernel/drivers/" 2>/dev/null || true
-        [ -d "$kdir/kernel/drivers/virtio" ] && cp -a "$kdir/kernel/drivers/virtio" "$BUILD_DIR/filtered_modules/$kver/kernel/drivers/" 2>/dev/null || true
+        [ -d "$kdir/kernel/drivers/nvme" ] && cp -a "$kdir/kernel/drivers/nvme" "$K_DEST/kernel/drivers/" 2>/dev/null || true
+        [ -d "$kdir/kernel/drivers/ata" ] && cp -a "$kdir/kernel/drivers/ata" "$K_DEST/kernel/drivers/" 2>/dev/null || true
+        [ -d "$kdir/kernel/drivers/scsi" ] && cp -a "$kdir/kernel/drivers/scsi" "$K_DEST/kernel/drivers/" 2>/dev/null || true
+        [ -d "$kdir/kernel/drivers/cdrom" ] && cp -a "$kdir/kernel/drivers/cdrom" "$K_DEST/kernel/drivers/" 2>/dev/null || true
+        [ -d "$kdir/kernel/drivers/block" ] && cp -a "$kdir/kernel/drivers/block" "$K_DEST/kernel/drivers/" 2>/dev/null || true
+        [ -d "$kdir/kernel/drivers/virtio" ] && cp -a "$kdir/kernel/drivers/virtio" "$K_DEST/kernel/drivers/" 2>/dev/null || true
         if [ -d "$kdir/kernel/drivers/usb" ]; then
-            mkdir -p "$BUILD_DIR/filtered_modules/$kver/kernel/drivers/usb"
-            cp -a "$kdir/kernel/drivers/usb/storage" "$BUILD_DIR/filtered_modules/$kver/kernel/drivers/usb/" 2>/dev/null || true
-            cp -a "$kdir/kernel/drivers/usb/host" "$BUILD_DIR/filtered_modules/$kver/kernel/drivers/usb/" 2>/dev/null || true
-            cp -a "$kdir/kernel/drivers/usb/core" "$BUILD_DIR/filtered_modules/$kver/kernel/drivers/usb/" 2>/dev/null || true
+            mkdir -p "$K_DEST/kernel/drivers/usb"
+            cp -a "$kdir/kernel/drivers/usb/storage" "$K_DEST/kernel/drivers/usb/" 2>/dev/null || true
+            cp -a "$kdir/kernel/drivers/usb/host" "$K_DEST/kernel/drivers/usb/" 2>/dev/null || true
+            cp -a "$kdir/kernel/drivers/usb/core" "$K_DEST/kernel/drivers/usb/" 2>/dev/null || true
         fi
-        # Netfilter, Routing, eBPF Subsystems
-        [ -d "$kdir/kernel/net" ] && cp -a "$kdir/kernel/net" "$BUILD_DIR/filtered_modules/$kver/kernel/" 2>/dev/null || true
+        # Netfilter, Routing, eBPF Subsystems (includes packet / AF_PACKET)
+        [ -d "$kdir/kernel/net" ] && cp -a "$kdir/kernel/net" "$K_DEST/kernel/" 2>/dev/null || true
         # Crypto & Checksum Libraries (crc32c, sha, aes, etc.)
-        [ -d "$kdir/kernel/crypto" ] && cp -a "$kdir/kernel/crypto" "$BUILD_DIR/filtered_modules/$kver/kernel/" 2>/dev/null || true
+        [ -d "$kdir/kernel/crypto" ] && cp -a "$kdir/kernel/crypto" "$K_DEST/kernel/" 2>/dev/null || true
         # Essential Kernel Helper Libraries (crc16, zlib, etc.)
-        [ -d "$kdir/kernel/lib" ] && cp -a "$kdir/kernel/lib" "$BUILD_DIR/filtered_modules/$kver/kernel/" 2>/dev/null || true
+        [ -d "$kdir/kernel/lib" ] && cp -a "$kdir/kernel/lib" "$K_DEST/kernel/" 2>/dev/null || true
         # Complete Filesystem Modules (ext4, jbd2, mbcache, vfat, fat, nls, isofs, squashfs)
-        [ -d "$kdir/kernel/fs" ] && cp -a "$kdir/kernel/fs" "$BUILD_DIR/filtered_modules/$kver/kernel/" 2>/dev/null || true
+        [ -d "$kdir/kernel/fs" ] && cp -a "$kdir/kernel/fs" "$K_DEST/kernel/" 2>/dev/null || true
 
         # Remove irrelevant desktop/SAN modules to keep image compact
-        rm -rf "$BUILD_DIR/filtered_modules/$kver/kernel/net/wireless" \
-               "$BUILD_DIR/filtered_modules/$kver/kernel/net/mac80211" \
-               "$BUILD_DIR/filtered_modules/$kver/kernel/net/bluetooth" \
-               "$BUILD_DIR/filtered_modules/$kver/kernel/drivers/net/wireless" \
-               "$BUILD_DIR/filtered_modules/$kver/kernel/drivers/scsi/qla2xxx" \
-               "$BUILD_DIR/filtered_modules/$kver/kernel/drivers/scsi/lpfc" 2>/dev/null || true
+        rm -rf "$K_DEST/kernel/net/wireless" \
+               "$K_DEST/kernel/net/mac80211" \
+               "$K_DEST/kernel/net/bluetooth" \
+               "$K_DEST/kernel/drivers/net/wireless" \
+               "$K_DEST/kernel/drivers/scsi/qla2xxx" \
+               "$K_DEST/kernel/drivers/scsi/lpfc" 2>/dev/null || true
 
-        # Re-generate module dependencies with depmod
-        depmod -b "$BUILD_DIR/filtered_modules" "$kver" 2>/dev/null || cp -a "$kdir"/modules.* "$BUILD_DIR/filtered_modules/$kver/" 2>/dev/null || true
+        # Re-generate module dependencies with depmod (depmod -b DIR expects DIR/lib/modules/$kver)
+        mkdir -p "$BUILD_DIR/depmod_root/lib/modules"
+        rm -rf "$BUILD_DIR/depmod_root/lib/modules/$kver"
+        cp -a "$K_DEST" "$BUILD_DIR/depmod_root/lib/modules/$kver"
+        depmod -b "$BUILD_DIR/depmod_root" "$kver" 2>/dev/null || true
+        cp -a "$BUILD_DIR/depmod_root/lib/modules/$kver"/modules.* "$K_DEST/" 2>/dev/null || cp -a "$kdir"/modules.* "$K_DEST/" 2>/dev/null || true
+        # Also create backwards-compatible link at root of modloop
+        ln -sf modules/"$kver" "$BUILD_DIR/filtered_modules/$kver" 2>/dev/null || true
     fi
 done
 
@@ -259,7 +268,7 @@ chmod +x "$BUILD_DIR/initramfs_unpacked/usr/local/bin/"* "$BUILD_DIR/initramfs_u
 
 # Embed kernel filesystem modules (ext4, jbd2, mbcache, crc16, vfat, fat) directly into initramfs
 mkdir -p "$BUILD_DIR/initramfs_unpacked/lib/modules"
-cp -a "$BUILD_DIR/filtered_modules/." "$BUILD_DIR/initramfs_unpacked/lib/modules/" 2>/dev/null || true
+cp -a "$BUILD_DIR/filtered_modules/modules/." "$BUILD_DIR/initramfs_unpacked/lib/modules/" 2>/dev/null || true
 for kdir in "$BUILD_DIR/initramfs_unpacked/lib/modules/"*; do
     if [ -d "$kdir" ]; then
         depmod -b "$BUILD_DIR/initramfs_unpacked" "$(basename "$kdir")" 2>/dev/null || true
