@@ -64,6 +64,8 @@ struct wan_manager_ctx {
     pppoe_manager_ctx_t *pppoe;
     uint32_t maglev_lut[MAGLEV_RING_SIZE];
     uint64_t last_dhcp_renew_ms[MAX_WANS];
+    uint32_t dhcp_dead_cycles[MAX_WANS];
+    uint64_t last_dhcp_rebind_ms[MAX_WANS];
 };
 
 static inline uint64_t rotl64(uint64_t x, int8_t r) {
@@ -528,6 +530,7 @@ static void ensure_dhcp_hook_script(void) {
         "                *)               PREFIX=24 ;;\n"
         "            esac\n"
         "        fi\n"
+        "        ip addr flush dev \"$interface\" 2>/dev/null || true\n"
         "        ip addr add \"$ip/$PREFIX\" dev \"$interface\" 2>/dev/null || ip addr replace \"$ip/$PREFIX\" dev \"$interface\" 2>/dev/null || true\n"
         "        ip link set \"$interface\" up 2>/dev/null || true\n"
         "        cat > \"/run/fluxwan_wan_${interface}.lease\" << EOF\n"
@@ -557,6 +560,40 @@ static void ensure_dhcp_hook_script(void) {
 #endif
 }
 
+void wan_manager_dhcp_renew(wan_manager_ctx_t *ctx, int wan_idx) {
+    if (!ctx) return;
+    for (uint32_t i = 0; i < ctx->config->wan_count; i++) {
+        if (wan_idx >= 0 && (int)i != wan_idx) continue;
+        wan_config_t *w = &ctx->config->wans[i];
+        if (w->type == WAN_TYPE_DHCP && w->enabled) {
+            LOG_INFO("[WAN DHCP] Force-renewing IP lease on %s (Table %u)...", w->name, w->table_id);
+            wan_manager_add_log("INFO", "[DHCP Client] Force-renewing IP lease on %s...", w->name);
+#if defined(__linux__)
+            char flush_cmd[128];
+            snprintf(flush_cmd, sizeof(flush_cmd), "ip addr flush dev %s 2>/dev/null || true", w->name);
+            safe_system(flush_cmd);
+
+            char pid_path[64];
+            snprintf(pid_path, sizeof(pid_path), "/run/udhcpc_%s.pid", w->name);
+            FILE *pf = fopen(pid_path, "r");
+            if (pf) {
+                int pid = 0;
+                if (fscanf(pf, "%d", &pid) == 1 && pid > 1) {
+                    kill(pid, SIGKILL);
+                }
+                fclose(pf);
+                unlink(pid_path);
+            }
+            char lpath[64];
+            snprintf(lpath, sizeof(lpath), "/run/fluxwan_wan_%s.lease", w->name);
+            unlink(lpath);
+#endif
+            ctx->last_dhcp_renew_ms[i] = 0;
+            ctx->dhcp_dead_cycles[i] = 0;
+        }
+    }
+}
+
 void wan_manager_periodic_tick(wan_manager_ctx_t *ctx, uint64_t now_ms) {
     if (!ctx) return;
 
@@ -570,6 +607,23 @@ void wan_manager_periodic_tick(wan_manager_ctx_t *ctx, uint64_t now_ms) {
 
         /* WAN DHCP Client Engine */
         if (w->type == WAN_TYPE_DHCP && w->enabled) {
+            /* DHCP Dead Gateway Watchdog:
+             * If an interface is in WAN_STATE_DOWN or packet loss >= 99% for 5 consecutive checks (~10s),
+             * and at least 15s elapsed since last rebind, the network environment likely changed (e.g. router moved).
+             * Automatically trigger a rebind to discover the new gateway. */
+            if (w->state == WAN_STATE_DOWN || w->metrics.packet_loss_pct >= 99.0f) {
+                ctx->dhcp_dead_cycles[i]++;
+                if (ctx->dhcp_dead_cycles[i] >= 5 && (now_ms - ctx->last_dhcp_rebind_ms[i] >= 15000)) {
+                    ctx->last_dhcp_rebind_ms[i] = now_ms;
+                    ctx->dhcp_dead_cycles[i] = 0;
+                    LOG_WARN("[DHCP Watchdog] Gateway unreachable on %s (100%% packet loss). Auto-rebinding DHCP...", w->name);
+                    wan_manager_add_log("WARN", "[DHCP Watchdog] Gateway unreachable on %s. Re-discovering network...", w->name);
+                    wan_manager_dhcp_renew(ctx, (int)i);
+                }
+            } else {
+                ctx->dhcp_dead_cycles[i] = 0;
+            }
+
             if (now_ms - ctx->last_dhcp_renew_ms[i] >= 2000) { /* Check every 2s */
                 ctx->last_dhcp_renew_ms[i] = now_ms;
                 ensure_dhcp_hook_script();

@@ -13,7 +13,10 @@ while true; do
     echo " [6] Open Linux Root Shell"
     echo " [7] Reboot Router Appliance"
     echo " [8] Power Off System"
-    echo -n " Enter option [1-8]: "
+    echo " [B] Backup & Restore Configuration (MikroTik Style)"
+    echo " [U] Check & Apply Online System Updates (OTA)"
+    echo " [R] Renew & Auto-Detect WAN DHCP (إعادة طلب واكتشاف شبكة الـ WAN)"
+    echo -n " Enter option [1-8, B, U, R]: "
     read -r opt
     case "$opt" in
         1)
@@ -38,7 +41,10 @@ while true; do
         3)
             echo "[*] Restarting FluxWAN Router Daemon..."
             pkill -f "fluxwan" || true
-            /opt/fluxwan/fluxwan /opt/fluxwan/config/fluxwan.json > /var/log/fluxwan.log 2>&1 &
+            mkdir -p /root/config /config
+            ln -sf /opt/fluxwan/config/fluxwan.json /root/config/fluxwan.json 2>/dev/null || true
+            ln -sf /opt/fluxwan/config/fluxwan.json /config/fluxwan.json 2>/dev/null || true
+            (cd /opt/fluxwan && ./fluxwan /opt/fluxwan/config/fluxwan.json > /var/log/fluxwan.log 2>&1 &)
             sleep 1
             echo "[✓] Router engine active."
             printf "Press Enter to return to menu..."
@@ -67,6 +73,66 @@ while true; do
             ;;
         8)
             poweroff
+            ;;
+        [bB])
+            echo ""
+            echo "--- FluxWAN Backup & Disaster Recovery ---"
+            echo " [1] Export Backup Bundle (.fwb)"
+            echo " [2] Restore Configuration Archive (.fwb / .json)"
+            echo " [3] Reset to Factory Defaults"
+            printf "Enter backup option [1-3]: "
+            read -r bopt
+            case "$bopt" in
+                1)
+                    /usr/local/bin/fluxwan-backup export
+                    ;;
+                2)
+                    printf "Enter full path to backup file (e.g. /media/usb/backup.fwb): "
+                    read -r bfile
+                    /usr/local/bin/fluxwan-backup import "$bfile"
+                    ;;
+                3)
+                    /usr/local/bin/fluxwan-backup reset
+                    ;;
+            esac
+            printf "Press Enter to return to menu..."
+            read -r _
+            ;;
+        u|U)
+            echo ""
+            echo "--- Online System Update & Hot-Patch (OTA) ---"
+            echo " [1] Check for Updates"
+            echo " [2] Download & Apply Latest Hot-Patch"
+            echo " [3] Rollback to Previous Version"
+            printf "Select option [1-3]: "
+            read -r uopt
+            case "$uopt" in
+                1)
+                    /usr/local/bin/fluxwan-update check
+                    ;;
+                2)
+                    /usr/local/bin/fluxwan-update apply
+                    ;;
+                3)
+                    /usr/local/bin/fluxwan-update rollback
+                    ;;
+            esac
+            printf "Press Enter to return to menu..."
+            read -r _
+            ;;
+        r|R)
+            echo ""
+            echo "[*] Flushing old WAN IP leases and broadcasting DHCP Discover..."
+            for iface in $(ls /sys/class/net 2>/dev/null | grep -E '^eth[1-9]|^en[p|s]'); do
+                echo "  * Refreshing $iface..."
+                ip addr flush dev "$iface" 2>/dev/null || true
+                pkill -9 -f "udhcpc.*$iface" 2>/dev/null || true
+                rm -f "/run/udhcpc_${iface}.pid" "/run/fluxwan_wan_${iface}.lease"
+            done
+            sleep 1
+            echo "[✓] All WAN DHCP interfaces refreshed and re-discovered."
+            printf "Press Enter to return to menu..."
+            read -r _
             ;;
         *)
             echo "Invalid option."

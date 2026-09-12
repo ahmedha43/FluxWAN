@@ -470,6 +470,34 @@
             <span x-text="toastMessage"></span>
         </div>
 
+        <!-- System Update Available Banner -->
+        <div x-show="updateInfo && updateInfo.update_available" x-transition class="glass-card p-4 rounded-2xl border border-cyan-500/50 bg-gradient-to-r from-cyan-950/70 via-blue-950/60 to-slate-900 flex flex-col md:flex-row items-center justify-between gap-4 shadow-xl shadow-cyan-950/30">
+            <div class="flex items-center space-x-3.5">
+                <div class="p-2.5 rounded-xl bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 animate-pulse">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10"/>
+                    </svg>
+                </div>
+                <div>
+                    <div class="flex items-center space-x-2">
+                        <span class="text-sm font-bold text-white">🚀 New FluxWAN Update Available:</span>
+                        <span class="text-xs font-mono font-bold px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30" x-text="'v' + (updateInfo?.latest_version || '')"></span>
+                        <span class="text-3xs text-slate-400" x-text="updateInfo?.release_date || ''"></span>
+                    </div>
+                    <p class="text-xs text-slate-300 mt-0.5" x-text="(updateInfo?.changelog && Array.isArray(updateInfo.changelog)) ? updateInfo.changelog[0] : (updateInfo?.changelog || 'A new system update with performance optimizations and security improvements is available.')"></p>
+                </div>
+            </div>
+            <div class="flex items-center space-x-3 shrink-0">
+                <button @click="currentTab = 'backup'" class="text-xs text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/80 transition">
+                    View Details
+                </button>
+                <button @click="installOnlineUpgrade()" :disabled="upgrading" class="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-lg shadow-cyan-500/25 flex items-center space-x-1.5 transition">
+                    <span x-show="!upgrading">⚡ Update Now (Zero Downtime)</span>
+                    <span x-show="upgrading">⏳ Updating System...</span>
+                </button>
+            </div>
+        </div>
+
         <!-- ================= TAB 1: INTERFACES (المنافذ ومراقبة الترافيك) ================= -->
         <section x-show="currentTab === 'interfaces'" class="space-y-6">
             <div class="flex items-center justify-between">
@@ -586,9 +614,15 @@
                     <h2 class="text-xl font-bold text-white">Multi-WAN Uplink Configuration & Health Prober</h2>
                     <p class="text-xs text-slate-400">Select physical ports for WAN uplinks. Ports selected as WAN will not appear in the LAN tab.</p>
                 </div>
-                <button @click="addWanUplink()" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-4 py-2 rounded-xl flex items-center space-x-1.5">
-                    <span>+ Add WAN Uplink</span>
-                </button>
+                <div class="flex items-center space-x-2">
+                    <button @click="renewWanDhcp()" :disabled="renewingDhcp" class="bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/40 text-xs font-bold px-3.5 py-2 rounded-xl flex items-center space-x-1.5 transition">
+                        <span :class="renewingDhcp ? 'animate-spin' : ''">🔄</span>
+                        <span x-text="renewingDhcp ? 'Renewing DHCP...' : 'Renew WAN DHCP'">Renew WAN DHCP</span>
+                    </button>
+                    <button @click="addWanUplink()" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-4 py-2 rounded-xl flex items-center space-x-1.5">
+                        <span>+ Add WAN Uplink</span>
+                    </button>
+                </div>
             </div>
 
             <!-- Meta Katran Architecture Status Banner -->
@@ -1463,6 +1497,112 @@
                 </div>
             </div>
 
+            <!-- Online Software Updates & Hot-Patching Card -->
+            <div class="glass-card p-6 rounded-2xl border border-cyan-500/30 bg-cyan-950/10 space-y-5">
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                    <div class="flex items-center space-x-3">
+                        <div class="p-2.5 rounded-xl bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <div class="flex items-center space-x-2">
+                                <h3 class="text-base font-bold text-white">Online System Updates (OTA & Hot-Patch)</h3>
+                                <span class="text-3xs font-mono font-bold px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">CARRIER OTA</span>
+                            </div>
+                            <p class="text-3xs text-slate-400">Fetch latest releases directly from GitHub official repository with zero-downtime hot-restarting</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <button @click="checkForUpdates(true)" :disabled="checkingUpdate" class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold px-3.5 py-2 rounded-xl border border-slate-700 flex items-center space-x-1.5 transition">
+                            <span :class="checkingUpdate ? 'animate-spin' : ''">🔄</span>
+                            <span x-text="checkingUpdate ? 'Checking GitHub...' : 'Check for Updates'">Check for Updates</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Update Status Details Grid -->
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs">
+                    <div class="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800 space-y-1">
+                        <span class="text-3xs text-slate-400 uppercase tracking-wider block font-semibold">Current Running Version</span>
+                        <div class="text-sm font-bold font-mono text-white flex items-center space-x-1.5">
+                            <span>v</span><span x-text="systemVersion"></span>
+                            <span class="text-3xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.2 rounded font-sans">Active</span>
+                        </div>
+                    </div>
+                    <div class="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800 space-y-1">
+                        <span class="text-3xs text-slate-400 uppercase tracking-wider block font-semibold">Latest Available Online</span>
+                        <div class="text-sm font-bold font-mono text-cyan-400 flex items-center space-x-1.5">
+                            <span>v</span><span x-text="updateInfo?.latest_version || systemVersion"></span>
+                            <span x-show="updateInfo && updateInfo.update_available" class="text-3xs text-cyan-300 bg-cyan-500/20 border border-cyan-500/40 px-1.5 py-0.2 rounded font-sans animate-pulse">Update Ready</span>
+                            <span x-show="!updateInfo || !updateInfo.update_available" class="text-3xs text-slate-400 bg-slate-800 px-1.5 py-0.2 rounded font-sans">Up to Date</span>
+                        </div>
+                    </div>
+                    <div class="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800 space-y-1">
+                        <span class="text-3xs text-slate-400 uppercase tracking-wider block font-semibold">Release Channel</span>
+                        <div class="text-sm font-bold font-mono text-indigo-300">
+                            <span x-text="(updateInfo?.channel || 'stable').toUpperCase()"></span>
+                            <span class="text-3xs text-slate-400 font-sans font-normal" x-text="updateInfo?.release_date ? '(' + updateInfo.release_date + ')' : ''"></span>
+                        </div>
+                    </div>
+                    <div class="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800 space-y-1">
+                        <span class="text-3xs text-slate-400 uppercase tracking-wider block font-semibold">Rollback Backup</span>
+                        <div class="text-sm font-bold font-mono flex items-center space-x-1.5">
+                            <span :class="updateInfo?.rollback_available ? 'text-amber-400' : 'text-slate-500'" x-text="updateInfo?.rollback_available ? 'Available (.old)' : 'None'"></span>
+                            <button x-show="updateInfo?.rollback_available" @click="rollbackVersion()" :disabled="rollingBack" class="text-3xs bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded font-sans transition">
+                                <span x-text="rollingBack ? 'Restoring...' : 'Rollback'"></span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Update Available Action Bar -->
+                <div x-show="updateInfo && updateInfo.update_available" class="p-4 rounded-xl bg-gradient-to-r from-cyan-950/60 to-blue-950/40 border border-cyan-500/30 space-y-3">
+                    <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                        <div class="space-y-1">
+                            <div class="text-xs font-bold text-white flex items-center space-x-2">
+                                <span>🎉 New version ready to install:</span>
+                                <span class="font-mono text-cyan-300 font-bold" x-text="'v' + updateInfo.latest_version"></span>
+                            </div>
+                            <div class="text-3xs text-slate-300">
+                                Pre-upgrade backup will be created automatically. Network routing, active NAT flows, and configuration will remain uninterrupted during the hot-swap.
+                            </div>
+                        </div>
+                        <button @click="installOnlineUpgrade()" :disabled="upgrading" class="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-lg shadow-cyan-500/25 flex items-center justify-center space-x-2 transition shrink-0">
+                            <svg x-show="upgrading" class="w-4 h-4 animate-spin text-white" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                            </svg>
+                            <span x-show="!upgrading">⚡ Apply Online Hot-Update Now</span>
+                            <span x-show="upgrading">Downloading & Upgrading...</span>
+                        </button>
+                    </div>
+
+                    <!-- Changelog List if available -->
+                    <div x-show="updateInfo?.changelog && Array.isArray(updateInfo.changelog)" class="pt-2 border-t border-cyan-900/40 text-3xs space-y-1">
+                        <span class="text-slate-400 font-semibold block uppercase tracking-wider">What's New in this Version:</span>
+                        <ul class="list-disc list-inside text-slate-300 space-y-0.5">
+                            <template x-for="item in (updateInfo?.changelog || [])" :key="item">
+                                <li x-text="item"></li>
+                            </template>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Up to date confirmation notice -->
+                <div x-show="!updateInfo || !updateInfo.update_available" class="p-3 rounded-xl bg-slate-900/40 border border-slate-800 text-3xs text-slate-400 flex items-center justify-between">
+                    <div class="flex items-center space-x-2">
+                        <span class="text-emerald-400">✓</span>
+                        <span>Your FluxWAN system is running the latest stable release. Automatic checks run in the background.</span>
+                    </div>
+                    <a href="https://github.com/ahmedha43/FluxWAN/releases" target="_blank" class="text-cyan-400 hover:underline flex items-center space-x-1">
+                        <span>GitHub Releases</span>
+                        <span>↗</span>
+                    </a>
+                </div>
+            </div>
+
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <!-- Export Backup Card -->
                 <div class="glass-card p-6 rounded-2xl border border-slate-700 space-y-4">
@@ -1689,6 +1829,18 @@
                 loginPassword: '',
                 loginError: '',
                 authToken: '',
+                updateInfo: {
+                    update_available: false,
+                    latest_version: '',
+                    release_date: '',
+                    channel: 'stable',
+                    changelog: [],
+                    rollback_available: false
+                },
+                checkingUpdate: false,
+                upgrading: false,
+                rollingBack: false,
+                renewingDhcp: false,
 
                 initApp() {
                     /* Always verify session with server before loading anything */
@@ -1728,6 +1880,7 @@
                             this.fetchLeases();
                             this.fetchLogs();
                             this.initChart();
+                            this.checkForUpdates(false);
                         }
                     })
                     .catch(() => {
@@ -1763,6 +1916,7 @@
                             this.fetchLeases();
                             this.fetchLogs();
                             this.initChart();
+                            this.checkForUpdates(false);
                         }
                     })
                     .catch(() => {
@@ -2588,6 +2742,140 @@
                     .catch(err => {
                         this.toastMessage = 'Reset failed: ' + err.message;
                         setTimeout(() => this.toastMessage = '', 5000);
+                    });
+                },
+
+                /* Online Automatic Update & Hot-Patching (OTA) */
+                checkForUpdates(notifyManual = false) {
+                    this.checkingUpdate = true;
+                    fetch('/api/v1/system/check_update', {
+                        headers: { 'X-Auth-Token': this.authToken }
+                    })
+                    .then(r => {
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                        return r.json();
+                    })
+                    .then(d => {
+                        this.updateInfo = d;
+                        this.checkingUpdate = false;
+                        if (notifyManual) {
+                            if (d.update_available) {
+                                this.toastMessage = '🚀 New update found: v' + d.latest_version + '!';
+                            } else {
+                                this.toastMessage = '✓ FluxWAN is up to date (v' + (d.current_version || this.systemVersion) + ')';
+                            }
+                            setTimeout(() => this.toastMessage = '', 4000);
+                        }
+                    })
+                    .catch(err => {
+                        this.checkingUpdate = false;
+                        if (notifyManual) {
+                            this.toastMessage = 'Check update failed: ' + err.message;
+                            setTimeout(() => this.toastMessage = '', 4000);
+                        }
+                    });
+                },
+
+                installOnlineUpgrade() {
+                    const targetVer = (this.updateInfo && this.updateInfo.latest_version) || 'latest';
+                    if (!confirm(`Apply online update to version v${targetVer}?\n\n- Configuration will be automatically backed up.\n- Service will hot-restart with zero downtime.\n- Active sessions will be preserved.`)) {
+                        return;
+                    }
+
+                    this.upgrading = true;
+                    this.toastMessage = 'Downloading update package and applying hot-patch...';
+
+                    fetch('/api/v1/system/upgrade', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Auth-Token': this.authToken
+                        },
+                        body: JSON.stringify({ version: targetVer })
+                    })
+                    .then(r => r.json())
+                    .then(d => {
+                        if (d.status === 'ok') {
+                            this.toastMessage = '✓ ' + (d.message || 'Upgrade applied successfully!');
+                            /* Wait 3.5 seconds for daemon to hot-restart then reload page */
+                            setTimeout(() => {
+                                location.reload();
+                            }, 3500);
+                        } else {
+                            this.upgrading = false;
+                            this.toastMessage = 'Upgrade error: ' + (d.message || 'Unknown error');
+                            setTimeout(() => this.toastMessage = '', 5000);
+                        }
+                    })
+                    .catch(err => {
+                        /* A temporary disconnect during daemon restart is expected */
+                        this.toastMessage = 'Service restarting with new version... Reloading page.';
+                        setTimeout(() => {
+                            location.reload();
+                        }, 4000);
+                    });
+                },
+
+                rollbackVersion() {
+                    if (!confirm('⚠️ Rollback to previous binary version (/opt/fluxwan/fluxwan.old)?\n\nThis will restore the previous executable and hot-restart the daemon.')) {
+                        return;
+                    }
+
+                    this.rollingBack = true;
+                    this.toastMessage = 'Rolling back to previous version...';
+
+                    fetch('/api/v1/system/rollback', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Auth-Token': this.authToken
+                        }
+                    })
+                    .then(r => r.json())
+                    .then(d => {
+                        if (d.status === 'ok') {
+                            this.toastMessage = '✓ ' + (d.message || 'Rollback applied!');
+                            setTimeout(() => {
+                                location.reload();
+                            }, 3500);
+                        } else {
+                            this.rollingBack = false;
+                            this.toastMessage = 'Rollback failed: ' + (d.message || 'Error');
+                            setTimeout(() => this.toastMessage = '', 5000);
+                        }
+                    })
+                    .catch(err => {
+                        this.toastMessage = 'Daemon restarting with previous version... Reloading.';
+                        setTimeout(() => {
+                            location.reload();
+                        }, 4000);
+                    });
+                },
+
+                renewWanDhcp() {
+                    this.renewingDhcp = true;
+                    this.toastMessage = 'Broadcasting DHCP discover and refreshing all WAN leases...';
+                    fetch('/api/v1/wans/renew', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Auth-Token': this.authToken
+                        }
+                    })
+                    .then(r => r.json())
+                    .then(d => {
+                        this.renewingDhcp = false;
+                        this.toastMessage = '✓ ' + (d.message || 'WAN DHCP renewed!');
+                        setTimeout(() => this.toastMessage = '', 4000);
+                        setTimeout(() => {
+                            this.fetchStatus();
+                            this.fetchInterfaces();
+                        }, 1500);
+                    })
+                    .catch(err => {
+                        this.renewingDhcp = false;
+                        this.toastMessage = 'Renew failed: ' + err.message;
+                        setTimeout(() => this.toastMessage = '', 4000);
                     });
                 },
 

@@ -42,4 +42,10 @@ void wan_manager_add_log(const char *level, const char *fmt, ...);
  */
 uint32_t wan_manager_get_logs(system_log_entry_t *out_logs, uint32_t max_count);
 
+/**
+ * Force immediate DHCP rebind on all (or specific) DHCP WAN interfaces
+ * @param wan_idx Index of WAN interface to renew, or -1 for all DHCP WANs
+ */
+void wan_manager_dhcp_renew(wan_manager_ctx_t *ctx, int wan_idx);
+
 #endif /* WAN_MANAGER_H */

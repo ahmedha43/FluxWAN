@@ -33,6 +33,7 @@ case "$1" in
             esac
         fi
 
+        ip addr flush dev "$interface" 2>/dev/null || true
         ip addr add "$ip/$PREFIX" dev "$interface" 2>/dev/null || ip addr replace "$ip/$PREFIX" dev "$interface" 2>/dev/null || true
         ip link set "$interface" up 2>/dev/null || true
 

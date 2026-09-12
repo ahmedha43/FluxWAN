@@ -1,0 +1,164 @@
+#!/bin/sh
+# ==============================================================================
+# FluxWAN Carrier-Grade Online System Update & Hot-Patch CLI (OTA)
+# ==============================================================================
+set -e
+
+MANIFEST_URL="${FLUXWAN_UPDATE_URL:-https://raw.githubusercontent.com/ahmedha43/FluxWAN/main/version.json}"
+CONFIG_FILE="/opt/fluxwan/config/fluxwan.json"
+CURRENT_VERSION="1.2.3"
+if [ -f /opt/fluxwan/version ]; then
+    CURRENT_VERSION=$(cat /opt/fluxwan/version)
+elif [ -x /opt/fluxwan/fluxwan ]; then
+    V_DETECT=$(/opt/fluxwan/fluxwan 2>&1 | grep -o 'Router v[0-9.]*' | cut -d'v' -f2 || true)
+    [ -n "$V_DETECT" ] && CURRENT_VERSION="$V_DETECT"
+fi
+
+download_file() {
+    URL="$1"
+    DEST="$2"
+    TIMEOUT="$3"
+    wget -q -T "$TIMEOUT" -O "$DEST" "$URL" 2>/dev/null || curl -sSL --connect-timeout 5 -m "$TIMEOUT" "$URL" -o "$DEST" 2>/dev/null
+}
+
+usage() {
+    echo "Usage: fluxwan-update {check|apply|rollback|status}"
+    echo ""
+    echo "Commands:"
+    echo "  check      Query GitHub for new software updates and display changelog"
+    echo "  apply      Download, verify, and hot-patch FluxWAN engine without reboot"
+    echo "  rollback   Revert to previous version backup (fluxwan.old)"
+    echo "  status     Display active system version and rollback status"
+    echo ""
+    exit 1
+}
+
+CMD="$1"
+
+case "$CMD" in
+    check)
+        echo "[*] Querying update server ($MANIFEST_URL)..."
+        if ! download_file "$MANIFEST_URL" /tmp/fluxwan_ver.json 10; then
+            echo "[ERROR] Could not connect to update server. Check router internet connection."
+            exit 1
+        fi
+        
+        LATEST_VER=$(grep -o '"latest_version": *"[^"]*"' /tmp/fluxwan_ver.json | head -n1 | cut -d'"' -f4)
+        REL_DATE=$(grep -o '"release_date": *"[^"]*"' /tmp/fluxwan_ver.json | head -n1 | cut -d'"' -f4)
+        CHANNEL=$(grep -o '"channel": *"[^"]*"' /tmp/fluxwan_ver.json | head -n1 | cut -d'"' -f4)
+        
+        echo "=================================================="
+        echo "  FluxWAN Online Update System (OTA)"
+        echo "=================================================="
+        echo "  Current Version : v${CURRENT_VERSION}"
+        echo "  Latest Version  : v${LATEST_VER} (${CHANNEL})"
+        echo "  Release Date    : ${REL_DATE}"
+        echo "--------------------------------------------------"
+        
+        if [ "$CURRENT_VERSION" != "$LATEST_VER" ]; then
+            echo " [!] NEW UPDATE AVAILABLE: v${LATEST_VER}!"
+            echo ""
+            echo " Changelog:"
+            grep -A 10 '"changelog"' /tmp/fluxwan_ver.json | grep '"' | grep -v 'changelog' | sed 's/[",]//g' | while read -r line; do
+                echo "   • $line"
+            done
+            echo ""
+            echo " Run 'fluxwan-update apply' to install this update."
+        else
+            echo " [✓] System is up to date!"
+        fi
+        echo "=================================================="
+        rm -f /tmp/fluxwan_ver.json
+        ;;
+        
+    apply)
+        echo "[*] Checking available updates..."
+        if ! download_file "$MANIFEST_URL" /tmp/fluxwan_ver.json 10; then
+            echo "[ERROR] Could not reach update server."
+            exit 1
+        fi
+        
+        PKG_URL=$(grep -o '"url": *"[^"]*"' /tmp/fluxwan_ver.json | head -n 1 | cut -d'"' -f4)
+        PKG_SHA=$(grep -o '"sha256": *"[^"]*"' /tmp/fluxwan_ver.json | head -n 1 | cut -d'"' -f4)
+        [ -z "$PKG_URL" ] && PKG_URL="https://raw.githubusercontent.com/ahmedha43/FluxWAN/main/dist/fluxwan"
+        
+        echo "[*] Creating automated configuration backup..."
+        if [ -x /usr/local/bin/fluxwan-backup ]; then
+            /usr/local/bin/fluxwan-backup export /opt/fluxwan/config/pre_upgrade_backup.fwb >/dev/null 2>&1 || true
+        fi
+        
+        echo "[*] Downloading update package from $PKG_URL..."
+        if ! download_file "$PKG_URL" /tmp/fluxwan_update.tmp 120; then
+            echo "[ERROR] Download failed."
+            rm -f /tmp/fluxwan_update.tmp /tmp/fluxwan_ver.json
+            exit 1
+        fi
+        
+        SZ=$(wc -c < /tmp/fluxwan_update.tmp)
+        if [ "$SZ" -lt 50000 ]; then
+            echo "[ERROR] Downloaded package is too small ($SZ bytes) or corrupted."
+            rm -f /tmp/fluxwan_update.tmp /tmp/fluxwan_ver.json
+            exit 1
+        fi
+        
+        if [ -n "$PKG_SHA" ] && [ ${#PKG_SHA} -eq 64 ]; then
+            echo "[*] Verifying SHA-256 cryptographic checksum..."
+            ACT_SHA=$(sha256sum /tmp/fluxwan_update.tmp | awk '{print $1}')
+            if [ "$ACT_SHA" != "$PKG_SHA" ]; then
+                echo "[ERROR] SHA-256 integrity mismatch! Aborting update."
+                rm -f /tmp/fluxwan_update.tmp /tmp/fluxwan_ver.json
+                exit 1
+            fi
+            echo "[✓] SHA-256 Checksum Verified."
+        fi
+        
+        echo "[*] Backing up current running binary..."
+        cp -a /opt/fluxwan/fluxwan /opt/fluxwan/fluxwan.old 2>/dev/null || true
+        
+        echo "[*] Applying update atomically..."
+        chmod +x /tmp/fluxwan_update.tmp
+        mv /tmp/fluxwan_update.tmp /opt/fluxwan/fluxwan
+        
+        echo "[*] Restarting FluxWAN reactor loop..."
+        killall fluxwan 2>/dev/null || true
+        rm -f /run/fluxwan.pid
+        sleep 1
+        start-stop-daemon --start --background --make-pidfile --pidfile /run/fluxwan.pid --exec /opt/fluxwan/fluxwan -- "$CONFIG_FILE" || (nohup /opt/fluxwan/fluxwan "$CONFIG_FILE" >/dev/null 2>&1 &)
+        sleep 1
+        
+        echo ""
+        echo "=================================================="
+        echo " [✓] FLUXWAN SUCCESSFULLY UPDATED & RUNNING!"
+        echo "=================================================="
+        rm -f /tmp/fluxwan_ver.json
+        ;;
+        
+    rollback)
+        if [ ! -f /opt/fluxwan/fluxwan.old ]; then
+            echo "[ERROR] No previous version backup (/opt/fluxwan/fluxwan.old) found."
+            exit 1
+        fi
+        echo "[*] Rolling back to previous binary..."
+        mv /opt/fluxwan/fluxwan.old /opt/fluxwan/fluxwan
+        chmod +x /opt/fluxwan/fluxwan
+        killall fluxwan 2>/dev/null || true
+        rm -f /run/fluxwan.pid
+        sleep 1
+        start-stop-daemon --start --background --make-pidfile --pidfile /run/fluxwan.pid --exec /opt/fluxwan/fluxwan -- "$CONFIG_FILE" || (nohup /opt/fluxwan/fluxwan "$CONFIG_FILE" >/dev/null 2>&1 &)
+        sleep 1
+        echo "[✓] Rolled back and restarted successfully."
+        ;;
+        
+    status)
+        echo "Current Version: v${CURRENT_VERSION}"
+        if [ -f /opt/fluxwan/fluxwan.old ]; then
+            echo "Rollback Backup : Available (/opt/fluxwan/fluxwan.old)"
+        else
+            echo "Rollback Backup : None"
+        fi
+        ;;
+        
+    *)
+        usage
+        ;;
+esac

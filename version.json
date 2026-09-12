@@ -1,0 +1,24 @@
+{
+  "latest_version": "1.2.4",
+  "channel": "stable",
+  "release_date": "2026-09-12",
+  "min_compatible_version": "1.2.0",
+  "changelog": [
+    "Carrier-Grade Online Automatic Update (OTA) & Zero-Downtime Hot-Patch engine",
+    "Hardened backup restoration against stack overflow and socket leakage",
+    "Enhanced Meta Katran Maglev consistent hashing balance stability",
+    "Optimized Web UI real-time throughput monitoring and terminal interface"
+  ],
+  "packages": {
+    "core": {
+      "url": "https://raw.githubusercontent.com/ahmedha43/FluxWAN/main/dist/fluxwan",
+      "sha256": "c5519b1b3fc5c0b18903f8028d9e380392d23bedef1a332f2340a026907a7e5d",
+      "size_bytes": 198496
+    },
+    "full_iso": {
+      "url": "https://github.com/ahmedha43/FluxWAN/releases/download/v1.2.4/fluxwan-os-x86_64.iso",
+      "sha256": "",
+      "size_bytes": 240124928
+    }
+  }
+}

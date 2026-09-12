@@ -14,7 +14,9 @@ while true; do
     echo " [7] Reboot Router Appliance"
     echo " [8] Power Off System"
     echo " [B] Backup & Restore Configuration (MikroTik Style)"
-    echo -n " Enter option [1-8, B]: "
+    echo " [U] Check & Apply Online System Updates (OTA)"
+    echo " [R] Renew & Auto-Detect WAN DHCP (إعادة طلب واكتشاف شبكة الـ WAN)"
+    echo -n " Enter option [1-8, B, U, R]: "
     read -r opt
     case "$opt" in
         1)
@@ -93,6 +95,42 @@ while true; do
                     /usr/local/bin/fluxwan-backup reset
                     ;;
             esac
+            printf "Press Enter to return to menu..."
+            read -r _
+            ;;
+        u|U)
+            echo ""
+            echo "--- Online System Update & Hot-Patch (OTA) ---"
+            echo " [1] Check for Updates"
+            echo " [2] Download & Apply Latest Hot-Patch"
+            echo " [3] Rollback to Previous Version"
+            printf "Select option [1-3]: "
+            read -r uopt
+            case "$uopt" in
+                1)
+                    /usr/local/bin/fluxwan-update check
+                    ;;
+                2)
+                    /usr/local/bin/fluxwan-update apply
+                    ;;
+                3)
+                    /usr/local/bin/fluxwan-update rollback
+                    ;;
+            esac
+            printf "Press Enter to return to menu..."
+            read -r _
+            ;;
+        r|R)
+            echo ""
+            echo "[*] Flushing old WAN IP leases and broadcasting DHCP Discover..."
+            for iface in $(ls /sys/class/net 2>/dev/null | grep -E '^eth[1-9]|^en[p|s]'); do
+                echo "  * Refreshing $iface..."
+                ip addr flush dev "$iface" 2>/dev/null || true
+                pkill -9 -f "udhcpc.*$iface" 2>/dev/null || true
+                rm -f "/run/udhcpc_${iface}.pid" "/run/fluxwan_wan_${iface}.lease"
+            done
+            sleep 1
+            echo "[✓] All WAN DHCP interfaces refreshed and re-discovered."
             printf "Press Enter to return to menu..."
             read -r _
             ;;

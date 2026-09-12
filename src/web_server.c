@@ -94,6 +94,47 @@ static const char *get_config_target_path(const web_server_ctx_t *ctx) {
     return "config/fluxwan.json";
 }
 
+static int compare_semver(const char *v1, const char *v2) {
+    if (!v1 || !v2) return 0;
+    while (*v1 == 'v' || *v1 == 'V') v1++;
+    while (*v2 == 'v' || *v2 == 'V') v2++;
+    int maj1 = 0, min1 = 0, pat1 = 0;
+    int maj2 = 0, min2 = 0, pat2 = 0;
+    sscanf(v1, "%d.%d.%d", &maj1, &min1, &pat1);
+    sscanf(v2, "%d.%d.%d", &maj2, &min2, &pat2);
+    if (maj1 != maj2) return maj1 - maj2;
+    if (min1 != min2) return min1 - min2;
+    return pat1 - pat2;
+}
+
+static int fetch_version_manifest(char *out_json, size_t max_len) {
+    if (!out_json || max_len == 0) return -1;
+    out_json[0] = '\0';
+#if defined(__linux__)
+    const char *manifest_url = getenv("FLUXWAN_UPDATE_URL");
+    if (!manifest_url || manifest_url[0] == '\0') {
+        manifest_url = "https://raw.githubusercontent.com/ahmedha43/FluxWAN/main/version.json";
+    }
+    char cmd[1024];
+    snprintf(cmd, sizeof(cmd),
+             "wget -q -T 6 -O /tmp/fluxwan_version.json \"%s\" 2>/dev/null || curl -sSL --connect-timeout 4 -m 8 \"%s\" -o /tmp/fluxwan_version.json 2>/dev/null",
+             manifest_url, manifest_url);
+    int rc = safe_system(cmd);
+    if (rc != 0) return -1;
+
+    FILE *f = fopen("/tmp/fluxwan_version.json", "rb");
+    if (!f) return -1;
+
+    size_t rd = fread(out_json, 1, max_len - 1, f);
+    out_json[rd] = '\0';
+    fclose(f);
+    remove("/tmp/fluxwan_version.json");
+    return (rd > 0) ? 0 : -1;
+#else
+    return -1;
+#endif
+}
+
 static void get_real_ipv6_str(const char *ifname, char *out_v6, size_t max_len) {
     out_v6[0] = '\0';
 #if defined(__linux__)
@@ -2112,6 +2153,257 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
             strlen(rb), rb);
         send(client_fd, resp, len, 0); close_client_socket(client_fd);
+    } else if (strstr(req, "GET /api/v1/system/check_update") != NULL) {
+        char *manifest_buf = calloc(1, 16384);
+        char *resp_body = calloc(1, 32768);
+        int fetch_res = manifest_buf ? fetch_version_manifest(manifest_buf, 16384) : -1;
+
+        char latest_ver[32] = "1.2.3";
+        char rel_date[32] = "2026-09-12";
+        char channel[32] = "stable";
+        bool update_available = false;
+
+        if (fetch_res == 0 && manifest_buf && manifest_buf[0]) {
+            extract_json_string(manifest_buf, "latest_version", latest_ver, sizeof(latest_ver));
+            extract_json_string(manifest_buf, "release_date", rel_date, sizeof(rel_date));
+            extract_json_string(manifest_buf, "channel", channel, sizeof(channel));
+            if (compare_semver(latest_ver, FLUXWAN_VERSION) > 0) {
+                update_available = true;
+            }
+        }
+
+        bool rollback_avail = false;
+#if defined(__linux__)
+        rollback_avail = (access("/opt/fluxwan/fluxwan.old", F_OK) == 0);
+#endif
+
+        if (resp_body) {
+            if (fetch_res == 0 && manifest_buf && manifest_buf[0]) {
+                snprintf(resp_body, 32768,
+                    "{\n"
+                    "  \"status\": \"ok\",\n"
+                    "  \"current_version\": \"%s\",\n"
+                    "  \"latest_version\": \"%s\",\n"
+                    "  \"update_available\": %s,\n"
+                    "  \"release_date\": \"%s\",\n"
+                    "  \"channel\": \"%s\",\n"
+                    "  \"rollback_available\": %s,\n"
+                    "  \"manifest\": %s\n"
+                    "}",
+                    FLUXWAN_VERSION, latest_ver,
+                    update_available ? "true" : "false",
+                    rel_date, channel,
+                    rollback_avail ? "true" : "false",
+                    manifest_buf);
+            } else {
+                snprintf(resp_body, 32768,
+                    "{\n"
+                    "  \"status\": \"offline\",\n"
+                    "  \"message\": \"Unable to fetch update manifest from GitHub. Check router internet connection.\",\n"
+                    "  \"current_version\": \"%s\",\n"
+                    "  \"latest_version\": \"%s\",\n"
+                    "  \"update_available\": false,\n"
+                    "  \"rollback_available\": %s\n"
+                    "}",
+                    FLUXWAN_VERSION, FLUXWAN_VERSION,
+                    rollback_avail ? "true" : "false");
+            }
+
+            char resp_hdr[512];
+            int hlen = snprintf(resp_hdr, sizeof(resp_hdr),
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n",
+                strlen(resp_body));
+            send(client_fd, resp_hdr, hlen, 0);
+            send(client_fd, resp_body, (int)strlen(resp_body), 0);
+            free(resp_body);
+        }
+        if (manifest_buf) free(manifest_buf);
+        close_client_socket(client_fd);
+        return 0;
+    } else if (strstr(req, "POST /api/v1/system/upgrade") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+
+        /* 1. Take automated backup before touching any files */
+        char backup_path[MAX_PATH_LEN] = "/opt/fluxwan/config/pre_upgrade_backup.fwb";
+        char *backup_json = malloc(65536);
+        if (backup_json) {
+            if (config_export_backup(ctx->config, backup_json, 65536) == 0) {
+                FILE *fb = fopen(backup_path, "wb");
+                if (fb) {
+                    fputs(backup_json, fb);
+                    fclose(fb);
+                    LOG_INFO("[Update] Automated pre-upgrade backup created at %s", backup_path);
+                }
+            }
+            free(backup_json);
+        }
+
+        /* 2. Determine target package URL */
+        const char *body = strstr(req, "\r\n\r\n");
+        char pkg_url[512] = {0};
+        char expected_sha[128] = {0};
+        if (body) {
+            body += 4;
+            extract_json_string(body, "url", pkg_url, sizeof(pkg_url));
+            extract_json_string(body, "sha256", expected_sha, sizeof(expected_sha));
+        }
+
+        if (!pkg_url[0]) {
+            char *manifest_buf = calloc(1, 16384);
+            if (manifest_buf && fetch_version_manifest(manifest_buf, 16384) == 0) {
+                const char *core_pos = strstr(manifest_buf, "\"core\"");
+                if (core_pos) {
+                    extract_json_string(core_pos, "url", pkg_url, sizeof(pkg_url));
+                    extract_json_string(core_pos, "sha256", expected_sha, sizeof(expected_sha));
+                }
+            }
+            if (manifest_buf) free(manifest_buf);
+        }
+
+        if (!pkg_url[0]) {
+            safe_str_copy(pkg_url, "https://raw.githubusercontent.com/ahmedha43/FluxWAN/main/dist/fluxwan", sizeof(pkg_url));
+        }
+
+        LOG_INFO("[Update] Downloading upgrade package from: %s", pkg_url);
+
+        /* 3. Download package to /tmp/fluxwan_update.tmp */
+        char dl_cmd[1024];
+        snprintf(dl_cmd, sizeof(dl_cmd),
+                 "wget -q -T 60 -O /tmp/fluxwan_update.tmp \"%s\" 2>/dev/null || curl -sSL --connect-timeout 8 -m 120 \"%s\" -o /tmp/fluxwan_update.tmp 2>/dev/null",
+                 pkg_url, pkg_url);
+        int dl_rc = safe_system(dl_cmd);
+
+        bool valid = false;
+        char err_msg[256] = "Download failed";
+
+        if (dl_rc == 0) {
+            FILE *ft = fopen("/tmp/fluxwan_update.tmp", "rb");
+            if (ft) {
+                fseek(ft, 0, SEEK_END);
+                long fsz = ftell(ft);
+                fclose(ft);
+                if (fsz > 50000) {
+                    valid = true;
+                } else {
+                    snprintf(err_msg, sizeof(err_msg), "Downloaded file is corrupted or too small (%ld bytes)", fsz);
+                }
+            }
+        }
+
+        /* 4. SHA-256 verification if hash was specified */
+        if (valid && expected_sha[0] && strlen(expected_sha) == 64) {
+            char sha_cmd[512];
+            snprintf(sha_cmd, sizeof(sha_cmd),
+                     "sha256sum /tmp/fluxwan_update.tmp | awk '{print $1}' > /tmp/fluxwan_hash.tmp 2>/dev/null");
+            safe_system(sha_cmd);
+            FILE *fh = fopen("/tmp/fluxwan_hash.tmp", "r");
+            if (fh) {
+                char actual_sha[128] = {0};
+                if (fscanf(fh, "%127s", actual_sha) == 1) {
+                    if (strcasecmp(actual_sha, expected_sha) != 0) {
+                        valid = false;
+                        snprintf(err_msg, sizeof(err_msg), "SHA-256 integrity check failed (expected %s, got %s)", expected_sha, actual_sha);
+                    }
+                }
+                fclose(fh);
+                remove("/tmp/fluxwan_hash.tmp");
+            }
+        }
+
+        if (!valid) {
+            remove("/tmp/fluxwan_update.tmp");
+            char resp_body[512];
+            snprintf(resp_body, sizeof(resp_body), "{\"status\":\"error\",\"message\":\"%s\"}", err_msg);
+            char resp[1024];
+            int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(resp_body), resp_body);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd);
+            return 0;
+        }
+
+        /* 5. Backup current running binary and atomic replace */
+#if defined(__linux__)
+        safe_system("chmod +x /tmp/fluxwan_update.tmp");
+        safe_system("cp -a /opt/fluxwan/fluxwan /opt/fluxwan/fluxwan.old 2>/dev/null || true");
+        safe_system("mv /tmp/fluxwan_update.tmp /opt/fluxwan/fluxwan && chmod +x /opt/fluxwan/fluxwan");
+#endif
+
+        LOG_INFO("[Update] FluxWAN core binary successfully updated! Scheduling reactor hot-restart...");
+        wan_manager_add_log("INFO", "Online update applied successfully. Reactor restarting in 1 second...");
+
+        const char *rb = "{\"status\":\"ok\",\"message\":\"Update applied successfully! Core engine restarting in 1 second...\"}";
+        char resp[512]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd);
+
+#if defined(__linux__)
+        /* Schedule background restart detached with nohup so HTTP response is fully flushed to client first */
+        safe_system("nohup sh -c 'sleep 1; rc-service fluxwan restart 2>/dev/null || /etc/init.d/fluxwan restart 2>/dev/null || (killall fluxwan 2>/dev/null; sleep 1; /opt/fluxwan/fluxwan /opt/fluxwan/config/fluxwan.json >/dev/null 2>&1 &)' >/dev/null 2>&1 &");
+#endif
+        return 0;
+    } else if (strstr(req, "POST /api/v1/system/rollback") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+
+        bool old_exists = false;
+#if defined(__linux__)
+        old_exists = (access("/opt/fluxwan/fluxwan.old", F_OK) == 0);
+#endif
+
+        if (!old_exists) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"No previous version backup (fluxwan.old) found to rollback\"}";
+            char resp[512]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+
+#if defined(__linux__)
+        safe_system("mv /opt/fluxwan/fluxwan.old /opt/fluxwan/fluxwan && chmod +x /opt/fluxwan/fluxwan");
+        LOG_WARN("[Update] System rolled back to previous fluxwan.old binary! Scheduling restart...");
+        wan_manager_add_log("WARN", "System rolled back to previous version. Restarting in 1s...");
+#endif
+
+        const char *rb = "{\"status\":\"ok\",\"message\":\"Rolled back to previous version successfully! Restarting in 1 second...\"}";
+        char resp[512]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd);
+
+#if defined(__linux__)
+        safe_system("nohup sh -c 'sleep 1; rc-service fluxwan restart 2>/dev/null || /etc/init.d/fluxwan restart 2>/dev/null || (killall fluxwan 2>/dev/null; sleep 1; /opt/fluxwan/fluxwan /opt/fluxwan/config/fluxwan.json >/dev/null 2>&1 &)' >/dev/null 2>&1 &");
+#endif
+        return 0;
+    } else if (strstr(req, "POST /api/v1/wans/renew") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+
+        if (ctx->wan_mgr) {
+            wan_manager_dhcp_renew(ctx->wan_mgr, -1);
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"WAN DHCP renew broadcasted across all uplinks successfully!\"}";
+        char resp[512]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
     } else if (strstr(req, "POST /api/v1/assign") != NULL || strstr(req, "POST /api/v1/apply") != NULL) {
         /* Check admin authorization */
         if (!is_request_authorized(ctx->config, req)) {
