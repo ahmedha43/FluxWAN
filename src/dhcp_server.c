@@ -86,6 +86,31 @@ static size_t append_option(uint8_t *opts, size_t offset, size_t max_len, uint8_
     return offset;
 }
 
+static const static_lease_t *find_static_lease_by_mac(const dhcp_server_ctx_t *ctx, const uint8_t *mac) {
+    if (!ctx) return NULL;
+    for (uint32_t i = 0; i < ctx->config.lan.static_lease_count; i++) {
+        const static_lease_t *sl = &ctx->config.lan.static_leases[i];
+        if (sl->enabled && memcmp(sl->mac_addr, mac, 6) == 0) {
+            return sl;
+        }
+    }
+    return NULL;
+}
+
+static bool is_ip_reserved_by_static(const dhcp_server_ctx_t *ctx, uint32_t ip, const uint8_t *mac) {
+    if (!ctx) return false;
+    for (uint32_t i = 0; i < ctx->config.lan.static_lease_count; i++) {
+        const static_lease_t *sl = &ctx->config.lan.static_leases[i];
+        if (sl->enabled && sl->ip_addr == ip) {
+            if (mac && memcmp(sl->mac_addr, mac, 6) == 0) {
+                return false; /* Assigned to this MAC */
+            }
+            return true; /* Reserved for someone else */
+        }
+    }
+    return false;
+}
+
 static dhcp_lease_t *find_lease_by_mac(dhcp_server_ctx_t *ctx, const uint8_t *mac) {
     for (uint32_t i = 0; i < ctx->lease_count; i++) {
         if (memcmp(ctx->leases[i].mac_addr, mac, 6) == 0) {
@@ -105,7 +130,13 @@ static dhcp_lease_t *find_lease_by_ip(dhcp_server_ctx_t *ctx, uint32_t ip) {
 }
 
 static uint32_t allocate_next_ip(dhcp_server_ctx_t *ctx, const uint8_t *mac) {
-    /* Check if this MAC already has a lease */
+    /* 1. Check if this MAC has a static reservation */
+    const static_lease_t *sl = find_static_lease_by_mac(ctx, mac);
+    if (sl && sl->ip_addr != 0) {
+        return sl->ip_addr;
+    }
+
+    /* 2. Check if this MAC already has an active lease */
     dhcp_lease_t *existing = find_lease_by_mac(ctx, mac);
     if (existing && existing->is_active) {
         return existing->ip_addr;
@@ -121,6 +152,8 @@ static uint32_t allocate_next_ip(dhcp_server_ctx_t *ctx, const uint8_t *mac) {
 
     for (uint32_t ip_h = start_h; ip_h <= end_h; ip_h++) {
         uint32_t ip_n = htonl(ip_h);
+        if (is_ip_reserved_by_static(ctx, ip_n, mac)) continue;
+
         dhcp_lease_t *l = find_lease_by_ip(ctx, ip_n);
         if (!l || !l->is_active) {
             return ip_n;
@@ -143,15 +176,74 @@ static void update_lease_record(dhcp_server_ctx_t *ctx, const uint8_t *mac, uint
     snprintf(l->mac_str, sizeof(l->mac_str), "%02x:%02x:%02x:%02x:%02x:%02x",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     l->ip_addr = ip;
-    if (hostname && hostname[0]) {
+    
+    const static_lease_t *sl = find_static_lease_by_mac(ctx, mac);
+    if (sl) {
+        l->is_static = true;
+        if (sl->hostname[0]) {
+            strncpy(l->hostname, sl->hostname, sizeof(l->hostname) - 1);
+            l->hostname[sizeof(l->hostname) - 1] = '\0';
+        }
+    } else {
+        l->is_static = false;
+    }
+
+    if (hostname && hostname[0] && (!sl || !sl->hostname[0])) {
         strncpy(l->hostname, hostname, sizeof(l->hostname) - 1);
         l->hostname[sizeof(l->hostname) - 1] = '\0';
     } else if (!l->hostname[0]) {
         strncpy(l->hostname, "LAN-Client", sizeof(l->hostname) - 1);
     }
     l->lease_start_sec = (uint64_t)time(NULL);
-    l->lease_expire_sec = l->lease_start_sec + ctx->config.lan.dhcp_lease_time;
+    l->lease_expire_sec = l->is_static ? (l->lease_start_sec + 31536000ULL) : (l->lease_start_sec + ctx->config.lan.dhcp_lease_time);
     l->is_active = true;
+}
+
+int dhcp_server_reload_config(dhcp_server_ctx_t *ctx, const fluxwan_config_t *config) {
+    if (!ctx || !config) return -1;
+    ctx->config = *config;
+
+    for (uint32_t s = 0; s < config->lan.static_lease_count; s++) {
+        const static_lease_t *sl = &config->lan.static_leases[s];
+        if (!sl->enabled) continue;
+        dhcp_lease_t *l = find_lease_by_mac(ctx, sl->mac_addr);
+        if (l) {
+            l->ip_addr = sl->ip_addr;
+            l->is_static = true;
+            if (sl->hostname[0]) {
+                strncpy(l->hostname, sl->hostname, sizeof(l->hostname) - 1);
+                l->hostname[sizeof(l->hostname) - 1] = '\0';
+            }
+        } else {
+            update_lease_record(ctx, sl->mac_addr, sl->ip_addr, sl->hostname);
+        }
+    }
+    return 0;
+}
+
+int dhcp_server_update_client_traffic(dhcp_server_ctx_t *ctx, uint32_t client_ip, uint64_t rx_bytes, uint64_t tx_bytes) {
+    if (!ctx) return -1;
+    dhcp_lease_t *l = find_lease_by_ip(ctx, client_ip);
+    if (!l) {
+        if (ctx->lease_count < MAX_DHCP_LEASES) {
+            l = &ctx->leases[ctx->lease_count++];
+            l->ip_addr = client_ip;
+            l->is_active = true;
+            ip_to_str(client_ip, l->hostname, sizeof(l->hostname));
+        } else {
+            return -1;
+        }
+    }
+
+    if (rx_bytes >= l->rx_bytes && l->rx_bytes > 0) {
+        l->current_rx_kbps = (uint32_t)((rx_bytes - l->rx_bytes) * 8 / 1000);
+    }
+    if (tx_bytes >= l->tx_bytes && l->tx_bytes > 0) {
+        l->current_tx_kbps = (uint32_t)((tx_bytes - l->tx_bytes) * 8 / 1000);
+    }
+    l->rx_bytes = rx_bytes;
+    l->tx_bytes = tx_bytes;
+    return 0;
 }
 
 dhcp_server_ctx_t *dhcp_server_init(const fluxwan_config_t *config) {
@@ -195,10 +287,20 @@ dhcp_server_ctx_t *dhcp_server_init(const fluxwan_config_t *config) {
         }
     }
 
-    /* Seed default active LAN device for demonstration */
-    uint8_t def_mac[6] = {0xd8, 0x3a, 0xdd, 0x12, 0x34, 0x56};
-    uint32_t def_ip = config->lan.dhcp_start != 0 ? config->lan.dhcp_start : str_to_ip("192.168.90.105");
-    update_lease_record(ctx, def_mac, def_ip, "Workstation-Office");
+    /* Load configured static leases into table */
+    for (uint32_t s = 0; s < config->lan.static_lease_count; s++) {
+        const static_lease_t *sl = &config->lan.static_leases[s];
+        if (sl->enabled && sl->ip_addr != 0) {
+            update_lease_record(ctx, sl->mac_addr, sl->ip_addr, sl->hostname);
+        }
+    }
+
+    /* Seed default active LAN device for demonstration if table is empty */
+    if (ctx->lease_count == 0) {
+        uint8_t def_mac[6] = {0xd8, 0x3a, 0xdd, 0x12, 0x34, 0x56};
+        uint32_t def_ip = config->lan.dhcp_start != 0 ? config->lan.dhcp_start : str_to_ip("192.168.90.105");
+        update_lease_record(ctx, def_mac, def_ip, "Workstation-Office");
+    }
 
     return ctx;
 }

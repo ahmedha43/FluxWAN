@@ -361,6 +361,21 @@ void wan_manager_close(wan_manager_ctx_t *ctx) {
     free(ctx);
 }
 
+static void send_telegram_alert(const telegram_config_t *tg, const char *msg) {
+    if (!tg || !tg->enabled || !tg->bot_token[0] || !tg->chat_id[0] || !msg) return;
+#if defined(__linux__)
+    pid_t pid = fork();
+    if (pid == 0) {
+        char url[512];
+        snprintf(url, sizeof(url), "https://api.telegram.org/bot%s/sendMessage", tg->bot_token);
+        char post_data[1024];
+        snprintf(post_data, sizeof(post_data), "chat_id=%s&text=%s", tg->chat_id, msg);
+        execlp("curl", "curl", "-s", "-X", "POST", url, "-d", post_data, "-o", "/dev/null", (char *)NULL);
+        _exit(0);
+    }
+#endif
+}
+
 void wan_manager_on_health_update(uint32_t wan_idx, wan_state_t state, const wan_metrics_t *metrics, void *user_data) {
     wan_manager_ctx_t *ctx = (wan_manager_ctx_t *)user_data;
     if (!ctx || wan_idx >= ctx->config->wan_count) return;
@@ -391,12 +406,37 @@ void wan_manager_on_health_update(uint32_t wan_idx, wan_state_t state, const wan
                             "WAN %u (%s) health transitioned to %s (RTT: %ums, Loss: %.1f%%)",
                             w->id, w->label, state_str, w->metrics.rtt_ms, w->metrics.packet_loss_pct);
 
+        /* Send Telegram Notification if enabled */
+        if (ctx->config->telegram.enabled) {
+            char tg_msg[512];
+            if ((state == WAN_STATE_DOWN || state == WAN_STATE_DEGRADED) && ctx->config->telegram.notify_on_failover) {
+                snprintf(tg_msg, sizeof(tg_msg), "⚠️ FluxWAN Alert: WAN %u (%s) is %s (RTT: %ums, Loss: %.1f%%)",
+                         w->id, w->label, state_str, w->metrics.rtt_ms, w->metrics.packet_loss_pct);
+                send_telegram_alert(&ctx->config->telegram, tg_msg);
+            } else if (state == WAN_STATE_HEALTHY && ctx->config->telegram.notify_on_recovery) {
+                snprintf(tg_msg, sizeof(tg_msg), "✅ FluxWAN Recovery: WAN %u (%s) is now HEALTHY (RTT: %ums, Loss: %.1f%%)",
+                         w->id, w->label, w->metrics.rtt_ms, w->metrics.packet_loss_pct);
+                send_telegram_alert(&ctx->config->telegram, tg_msg);
+            }
+        }
+
         wan_manager_rebalance(ctx);
     }
 }
 
 int wan_manager_rebalance(wan_manager_ctx_t *ctx) {
     if (!ctx) return -1;
+
+    /* Find minimum RTT among healthy WANs for latency steering */
+    uint32_t min_healthy_rtt = 999999;
+    for (uint32_t i = 0; i < ctx->config->wan_count; i++) {
+        const wan_config_t *w = &ctx->config->wans[i];
+        if (w->enabled && w->state == WAN_STATE_HEALTHY && w->metrics.rtt_ms > 0) {
+            if (w->metrics.rtt_ms < min_healthy_rtt) {
+                min_healthy_rtt = w->metrics.rtt_ms;
+            }
+        }
+    }
 
     for (uint32_t i = 0; i < ctx->config->wan_count; i++) {
         wan_config_t *w = &ctx->config->wans[i];
@@ -405,11 +445,23 @@ int wan_manager_rebalance(wan_manager_ctx_t *ctx) {
             if (!w->enabled) w->state = WAN_STATE_DOWN;
         } else if (w->state == WAN_STATE_DRAINING) {
             w->dynamic_weight = 0;
-        } else if (w->state == WAN_STATE_DEGRADED) {
-            w->dynamic_weight = w->config_weight / 4;
-            if (w->dynamic_weight == 0) w->dynamic_weight = 1;
         } else {
-            w->dynamic_weight = w->config_weight;
+            /* Ratio / Bandwidth-weighted base weight */
+            uint32_t base_weight = (w->bandwidth_down_mbps > 0) ? w->bandwidth_down_mbps : w->config_weight;
+            if (base_weight == 0) base_weight = 1;
+
+            if (w->state == WAN_STATE_DEGRADED) {
+                w->dynamic_weight = base_weight / 4;
+                if (w->dynamic_weight == 0) w->dynamic_weight = 1;
+            } else {
+                w->dynamic_weight = base_weight;
+            }
+
+            /* Latency-Aware Steering: penalize WANs whose RTT significantly exceeds the lowest latency line */
+            if (ctx->config->prober.dynamic_latency_steering && min_healthy_rtt < 999999 && w->metrics.rtt_ms > min_healthy_rtt + 60) {
+                uint32_t scaled = (w->dynamic_weight * min_healthy_rtt) / w->metrics.rtt_ms;
+                w->dynamic_weight = (scaled > 0) ? scaled : 1;
+            }
         }
 
         if (ctx->bpf) {

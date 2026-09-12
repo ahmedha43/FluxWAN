@@ -101,6 +101,17 @@ static const char *find_matching_bracket(const char *start) {
     return NULL;
 }
 
+static bool parse_mac_str(const char *str, uint8_t *mac) {
+    if (!str || !mac) return false;
+    unsigned int m[6];
+    if (sscanf(str, "%x:%x:%x:%x:%x:%x", &m[0], &m[1], &m[2], &m[3], &m[4], &m[5]) == 6 ||
+        sscanf(str, "%x-%x-%x-%x-%x-%x", &m[0], &m[1], &m[2], &m[3], &m[4], &m[5]) == 6) {
+        for (int i = 0; i < 6; i++) mac[i] = (uint8_t)m[i];
+        return true;
+    }
+    return false;
+}
+
 int config_load(const char *config_path, fluxwan_config_t *out_config) {
     if (!config_path || !out_config) return -1;
     memset(out_config, 0, sizeof(fluxwan_config_t));
@@ -193,6 +204,123 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
                 out_config->lan.policy_route_count = pr_idx;
             }
         }
+
+        /* Parse LAN Static DHCP Leases */
+        const char *sl_pos = strstr(lan_pos, "\"static_leases\"");
+        if (sl_pos) {
+            const char *array_start = strchr(sl_pos, '[');
+            const char *array_end = find_matching_bracket(array_start);
+            if (array_start && array_end) {
+                const char *p = array_start;
+                uint32_t sl_idx = 0;
+                while (p < array_end && sl_idx < MAX_STATIC_LEASES) {
+                    const char *obj_start = strchr(p, '{');
+                    if (!obj_start || obj_start > array_end) break;
+                    const char *obj_end = strchr(obj_start, '}');
+                    if (!obj_end || obj_end > array_end) break;
+
+                    size_t obj_len = obj_end - obj_start + 1;
+                    char *obj_str = malloc(obj_len + 1);
+                    if (obj_str) {
+                        strncpy(obj_str, obj_start, obj_len);
+                        obj_str[obj_len] = '\0';
+
+                        static_lease_t *sl = &out_config->lan.static_leases[sl_idx];
+                        char mval[64] = {0}, ipval[64] = {0}, hval[64] = {0};
+                        extract_json_string(obj_str, "mac", mval, sizeof(mval));
+                        extract_json_string(obj_str, "ip", ipval, sizeof(ipval));
+                        extract_json_string(obj_str, "hostname", hval, sizeof(hval));
+                        safe_str_copy(sl->mac_str, mval, sizeof(sl->mac_str));
+                        parse_mac_str(mval, sl->mac_addr);
+                        sl->ip_addr = str_to_ip(ipval);
+                        safe_str_copy(sl->hostname, hval, sizeof(sl->hostname));
+                        sl->enabled = extract_json_bool(obj_str, "enabled", true);
+
+                        free(obj_str);
+                        sl_idx++;
+                    }
+                    p = obj_end + 1;
+                }
+                out_config->lan.static_lease_count = sl_idx;
+            }
+        }
+
+        /* Parse LAN Per-IP Rate Limits */
+        const char *rl_pos = strstr(lan_pos, "\"rate_limits\"");
+        if (rl_pos) {
+            const char *array_start = strchr(rl_pos, '[');
+            const char *array_end = find_matching_bracket(array_start);
+            if (array_start && array_end) {
+                const char *p = array_start;
+                uint32_t rl_idx = 0;
+                while (p < array_end && rl_idx < MAX_RATE_LIMITS) {
+                    const char *obj_start = strchr(p, '{');
+                    if (!obj_start || obj_start > array_end) break;
+                    const char *obj_end = strchr(obj_start, '}');
+                    if (!obj_end || obj_end > array_end) break;
+
+                    size_t obj_len = obj_end - obj_start + 1;
+                    char *obj_str = malloc(obj_len + 1);
+                    if (obj_str) {
+                        strncpy(obj_str, obj_start, obj_len);
+                        obj_str[obj_len] = '\0';
+
+                        rate_limit_t *rl = &out_config->lan.rate_limits[rl_idx];
+                        char ipval[64] = {0}, dval[64] = {0};
+                        extract_json_string(obj_str, "ip", ipval, sizeof(ipval));
+                        extract_json_string(obj_str, "description", dval, sizeof(dval));
+                        safe_str_copy(rl->ip_str, ipval, sizeof(rl->ip_str));
+                        rl->ip_addr = str_to_ip(ipval);
+                        safe_str_copy(rl->description, dval, sizeof(rl->description));
+                        rl->max_down_mbps = (uint32_t)extract_json_int(obj_str, "max_down_mbps", 50);
+                        rl->max_up_mbps = (uint32_t)extract_json_int(obj_str, "max_up_mbps", 10);
+                        rl->enabled = extract_json_bool(obj_str, "enabled", true);
+
+                        free(obj_str);
+                        rl_idx++;
+                    }
+                    p = obj_end + 1;
+                }
+                out_config->lan.rate_limit_count = rl_idx;
+            }
+        }
+
+        /* Parse Smart Queue Management (QoS / CAKE) */
+        const char *qos_pos = strstr(lan_pos, "\"qos\"");
+        if (qos_pos) {
+            out_config->lan.qos.enabled = extract_json_bool(qos_pos, "enabled", false);
+            char algo[32] = {0};
+            if (extract_json_string(qos_pos, "algorithm", algo, sizeof(algo)) && algo[0]) {
+                safe_str_copy(out_config->lan.qos.algorithm, algo, sizeof(out_config->lan.qos.algorithm));
+            } else {
+                safe_str_copy(out_config->lan.qos.algorithm, "cake", sizeof(out_config->lan.qos.algorithm));
+            }
+            out_config->lan.qos.bandwidth_down_mbps = (uint32_t)extract_json_int(qos_pos, "bandwidth_down_mbps", 100);
+            out_config->lan.qos.bandwidth_up_mbps = (uint32_t)extract_json_int(qos_pos, "bandwidth_up_mbps", 20);
+            out_config->lan.qos.diffserv4 = extract_json_bool(qos_pos, "diffserv4", true);
+        } else {
+            safe_str_copy(out_config->lan.qos.algorithm, "cake", sizeof(out_config->lan.qos.algorithm));
+            out_config->lan.qos.bandwidth_down_mbps = 100;
+            out_config->lan.qos.bandwidth_up_mbps = 20;
+            out_config->lan.qos.diffserv4 = true;
+        }
+
+        /* Parse DNS Ad-blocking & Privacy */
+        const char *dns_pos = strstr(lan_pos, "\"dns\"");
+        if (dns_pos) {
+            out_config->lan.dns.adblock_enabled = extract_json_bool(dns_pos, "adblock_enabled", false);
+            out_config->lan.dns.fast_dns_enabled = extract_json_bool(dns_pos, "fast_dns_enabled", true);
+            char dns1[32] = {0}, dns2[32] = {0};
+            extract_json_string(dns_pos, "primary_dns", dns1, sizeof(dns1));
+            extract_json_string(dns_pos, "secondary_dns", dns2, sizeof(dns2));
+            safe_str_copy(out_config->lan.dns.primary_dns, dns1[0] ? dns1 : "1.1.1.1", sizeof(out_config->lan.dns.primary_dns));
+            safe_str_copy(out_config->lan.dns.secondary_dns, dns2[0] ? dns2 : "8.8.8.8", sizeof(out_config->lan.dns.secondary_dns));
+        } else {
+            out_config->lan.dns.adblock_enabled = false;
+            out_config->lan.dns.fast_dns_enabled = true;
+            safe_str_copy(out_config->lan.dns.primary_dns, "1.1.1.1", sizeof(out_config->lan.dns.primary_dns));
+            safe_str_copy(out_config->lan.dns.secondary_dns, "8.8.8.8", sizeof(out_config->lan.dns.secondary_dns));
+        }
     }
 
     /* Parse WANS array (find top-level array containing objects) */
@@ -263,6 +391,8 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
                     uint32_t weight = (uint32_t)extract_json_int(obj_str, "weight", 100);
                     w->config_weight = weight;
                     w->dynamic_weight = weight;
+                    w->bandwidth_down_mbps = (uint32_t)extract_json_int(obj_str, "bandwidth_down_mbps", 100);
+                    w->bandwidth_up_mbps = (uint32_t)extract_json_int(obj_str, "bandwidth_up_mbps", 20);
                     w->table_id = (uint32_t)extract_json_int(obj_str, "table_id", 100 + idx + 1);
                     w->mss_clamping = (uint16_t)extract_json_int(obj_str, "mss_clamping", 1452);
                     w->mtu = (uint32_t)extract_json_int(obj_str, "mtu", 1500);
@@ -301,12 +431,14 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
         out_config->prober.loss_window = extract_json_int(prober_pos, "loss_window", 20);
         out_config->prober.max_acceptable_rtt_ms = extract_json_int(prober_pos, "max_acceptable_rtt_ms", 250);
         out_config->prober.max_acceptable_loss_pct = extract_json_float(prober_pos, "max_acceptable_loss_pct", 20.0f);
+        out_config->prober.dynamic_latency_steering = extract_json_bool(prober_pos, "dynamic_latency_steering", true);
     } else {
         out_config->prober.interval_ms = 500;
         out_config->prober.timeout_ms = 1000;
         out_config->prober.loss_window = 20;
         out_config->prober.max_acceptable_rtt_ms = 250;
         out_config->prober.max_acceptable_loss_pct = 20.0f;
+        out_config->prober.dynamic_latency_steering = true;
     }
 
     /* Parse Sticky block */
@@ -314,9 +446,11 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
     if (sticky_pos) {
         out_config->sticky.enabled = extract_json_bool(sticky_pos, "enabled", true);
         out_config->sticky.timeout_seconds = extract_json_int(sticky_pos, "timeout_seconds", 300);
+        out_config->sticky.strict_banking_enabled = extract_json_bool(sticky_pos, "strict_banking_enabled", true);
     } else {
         out_config->sticky.enabled = true;
         out_config->sticky.timeout_seconds = 300;
+        out_config->sticky.strict_banking_enabled = true;
     }
 
     /* Parse Web block */
@@ -386,6 +520,33 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
         safe_str_copy(out_config->nat46.synthetic_prefix, "198.18.0.0/15", sizeof(out_config->nat46.synthetic_prefix));
         safe_str_copy(out_config->nat46.upstream_dns, "1.1.1.1", sizeof(out_config->nat46.upstream_dns));
         safe_str_copy(out_config->nat46.starlink_wan_name, "veth_wan2", sizeof(out_config->nat46.starlink_wan_name));
+    }
+
+    /* Parse Application-Based Smart Steering block */
+    const char *as_pos = strstr(json, "\"app_steering\"");
+    if (as_pos) {
+        out_config->app_steering.gaming_steering_enabled = extract_json_bool(as_pos, "gaming_steering_enabled", true);
+        out_config->app_steering.voip_steering_enabled = extract_json_bool(as_pos, "voip_steering_enabled", true);
+        out_config->app_steering.bulk_balancing_enabled = extract_json_bool(as_pos, "bulk_balancing_enabled", true);
+        out_config->app_steering.primary_gaming_wan_id = (uint32_t)extract_json_int(as_pos, "primary_gaming_wan_id", 0);
+        out_config->app_steering.primary_voip_wan_id = (uint32_t)extract_json_int(as_pos, "primary_voip_wan_id", 0);
+    } else {
+        out_config->app_steering.gaming_steering_enabled = true;
+        out_config->app_steering.voip_steering_enabled = true;
+        out_config->app_steering.bulk_balancing_enabled = true;
+    }
+
+    /* Parse Telegram Bot Alerts block */
+    const char *tg_pos = strstr(json, "\"telegram\"");
+    if (tg_pos) {
+        out_config->telegram.enabled = extract_json_bool(tg_pos, "enabled", false);
+        extract_json_string(tg_pos, "bot_token", out_config->telegram.bot_token, sizeof(out_config->telegram.bot_token));
+        extract_json_string(tg_pos, "chat_id", out_config->telegram.chat_id, sizeof(out_config->telegram.chat_id));
+        out_config->telegram.notify_on_failover = extract_json_bool(tg_pos, "notify_on_failover", true);
+        out_config->telegram.notify_on_recovery = extract_json_bool(tg_pos, "notify_on_recovery", true);
+    } else {
+        out_config->telegram.notify_on_failover = true;
+        out_config->telegram.notify_on_recovery = true;
     }
 
     /* Parse Groups array */
@@ -546,10 +707,54 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
             fprintf(f, "        \"enabled\": %s\n", pr->enabled ? "true" : "false");
             fprintf(f, "      }%s\n", (p == config->lan.policy_route_count - 1) ? "" : ",");
         }
-        fprintf(f, "    ]\n");
-    } else {
-        fprintf(f, "\n");
+        fprintf(f, "    ]");
     }
+
+    if (config->lan.static_lease_count > 0) {
+        fprintf(f, ",\n    \"static_leases\": [\n");
+        for (uint32_t s = 0; s < config->lan.static_lease_count; s++) {
+            const static_lease_t *sl = &config->lan.static_leases[s];
+            char slip[32];
+            ip_to_str(sl->ip_addr, slip, sizeof(slip));
+            fprintf(f, "      {\n");
+            fprintf(f, "        \"mac\": \"%s\",\n", sl->mac_str);
+            fprintf(f, "        \"ip\": \"%s\",\n", slip);
+            fprintf(f, "        \"hostname\": \"%s\",\n", sl->hostname);
+            fprintf(f, "        \"enabled\": %s\n", sl->enabled ? "true" : "false");
+            fprintf(f, "      }%s\n", (s == config->lan.static_lease_count - 1) ? "" : ",");
+        }
+        fprintf(f, "    ]");
+    }
+
+    if (config->lan.rate_limit_count > 0) {
+        fprintf(f, ",\n    \"rate_limits\": [\n");
+        for (uint32_t r = 0; r < config->lan.rate_limit_count; r++) {
+            const rate_limit_t *rl = &config->lan.rate_limits[r];
+            fprintf(f, "      {\n");
+            fprintf(f, "        \"ip\": \"%s\",\n", rl->ip_str);
+            fprintf(f, "        \"max_down_mbps\": %u,\n", rl->max_down_mbps);
+            fprintf(f, "        \"max_up_mbps\": %u,\n", rl->max_up_mbps);
+            fprintf(f, "        \"description\": \"%s\",\n", rl->description);
+            fprintf(f, "        \"enabled\": %s\n", rl->enabled ? "true" : "false");
+            fprintf(f, "      }%s\n", (r == config->lan.rate_limit_count - 1) ? "" : ",");
+        }
+        fprintf(f, "    ]");
+    }
+
+    fprintf(f, ",\n    \"qos\": {\n");
+    fprintf(f, "      \"enabled\": %s,\n", config->lan.qos.enabled ? "true" : "false");
+    fprintf(f, "      \"algorithm\": \"%s\",\n", config->lan.qos.algorithm[0] ? config->lan.qos.algorithm : "cake");
+    fprintf(f, "      \"bandwidth_down_mbps\": %u,\n", config->lan.qos.bandwidth_down_mbps);
+    fprintf(f, "      \"bandwidth_up_mbps\": %u,\n", config->lan.qos.bandwidth_up_mbps);
+    fprintf(f, "      \"diffserv4\": %s\n", config->lan.qos.diffserv4 ? "true" : "false");
+    fprintf(f, "    },\n");
+
+    fprintf(f, "    \"dns\": {\n");
+    fprintf(f, "      \"adblock_enabled\": %s,\n", config->lan.dns.adblock_enabled ? "true" : "false");
+    fprintf(f, "      \"fast_dns_enabled\": %s,\n", config->lan.dns.fast_dns_enabled ? "true" : "false");
+    fprintf(f, "      \"primary_dns\": \"%s\",\n", config->lan.dns.primary_dns[0] ? config->lan.dns.primary_dns : "1.1.1.1");
+    fprintf(f, "      \"secondary_dns\": \"%s\"\n", config->lan.dns.secondary_dns[0] ? config->lan.dns.secondary_dns : "8.8.8.8");
+    fprintf(f, "    }\n");
     fprintf(f, "  },\n");
 
     if (config->group_count > 0) {
@@ -592,6 +797,8 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
         fprintf(f, "      \"netmask\": \"%s\",\n", mask);
         fprintf(f, "      \"gateway\": \"%s\",\n", gw);
         fprintf(f, "      \"weight\": %u,\n", w->config_weight);
+        fprintf(f, "      \"bandwidth_down_mbps\": %u,\n", w->bandwidth_down_mbps);
+        fprintf(f, "      \"bandwidth_up_mbps\": %u,\n", w->bandwidth_up_mbps);
         fprintf(f, "      \"enabled\": %s,\n", w->enabled ? "true" : "false");
         fprintf(f, "      \"probe_target\": \"%s\",\n", w->probe_target);
         fprintf(f, "      \"table_id\": %u\n", w->table_id);
@@ -604,12 +811,30 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
     fprintf(f, "    \"timeout_ms\": %u,\n", config->prober.timeout_ms);
     fprintf(f, "    \"loss_window\": %u,\n", config->prober.loss_window);
     fprintf(f, "    \"max_acceptable_rtt_ms\": %u,\n", config->prober.max_acceptable_rtt_ms);
-    fprintf(f, "    \"max_acceptable_loss_pct\": %.1f\n", config->prober.max_acceptable_loss_pct);
+    fprintf(f, "    \"max_acceptable_loss_pct\": %.1f,\n", config->prober.max_acceptable_loss_pct);
+    fprintf(f, "    \"dynamic_latency_steering\": %s\n", config->prober.dynamic_latency_steering ? "true" : "false");
     fprintf(f, "  },\n");
 
     fprintf(f, "  \"sticky\": {\n");
     fprintf(f, "    \"enabled\": %s,\n", config->sticky.enabled ? "true" : "false");
-    fprintf(f, "    \"timeout_seconds\": %u\n", config->sticky.timeout_seconds);
+    fprintf(f, "    \"timeout_seconds\": %u,\n", config->sticky.timeout_seconds);
+    fprintf(f, "    \"strict_banking_enabled\": %s\n", config->sticky.strict_banking_enabled ? "true" : "false");
+    fprintf(f, "  },\n");
+
+    fprintf(f, "  \"app_steering\": {\n");
+    fprintf(f, "    \"gaming_steering_enabled\": %s,\n", config->app_steering.gaming_steering_enabled ? "true" : "false");
+    fprintf(f, "    \"voip_steering_enabled\": %s,\n", config->app_steering.voip_steering_enabled ? "true" : "false");
+    fprintf(f, "    \"bulk_balancing_enabled\": %s,\n", config->app_steering.bulk_balancing_enabled ? "true" : "false");
+    fprintf(f, "    \"primary_gaming_wan_id\": %u,\n", config->app_steering.primary_gaming_wan_id);
+    fprintf(f, "    \"primary_voip_wan_id\": %u\n", config->app_steering.primary_voip_wan_id);
+    fprintf(f, "  },\n");
+
+    fprintf(f, "  \"telegram\": {\n");
+    fprintf(f, "    \"enabled\": %s,\n", config->telegram.enabled ? "true" : "false");
+    fprintf(f, "    \"bot_token\": \"%s\",\n", config->telegram.bot_token);
+    fprintf(f, "    \"chat_id\": \"%s\",\n", config->telegram.chat_id);
+    fprintf(f, "    \"notify_on_failover\": %s,\n", config->telegram.notify_on_failover ? "true" : "false");
+    fprintf(f, "    \"notify_on_recovery\": %s\n", config->telegram.notify_on_recovery ? "true" : "false");
     fprintf(f, "  },\n");
 
     fprintf(f, "  \"web\": {\n");

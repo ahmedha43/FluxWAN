@@ -188,7 +188,7 @@ static void run_test_load_balancing(void) {
     wans[2].id = 3; strcpy(wans[2].name, "ppp0"); strcpy(wans[2].label, "WAN3_PPPoE");
     wans[2].config_weight = 75;  wans[2].dynamic_weight = 75;  wans[2].state = WAN_STATE_HEALTHY;
 
-    uint32_t lut[MAGLEV_RING_SIZE];
+    static uint32_t lut[MAGLEV_RING_SIZE];
     build_maglev_lut_sim(wans, 3, lut);
 
     uint32_t total_weight = 100 + 50 + 75;
@@ -288,7 +288,7 @@ static void run_test_dynamic_failover(void) {
     wans[2].config_weight = 75;  wans[2].dynamic_weight = 75;  wans[2].state = WAN_STATE_HEALTHY;
 
     printf("[Phase 1: Normal State - All Uplinks Healthy]\n");
-    uint32_t lut1[MAGLEV_RING_SIZE];
+    static uint32_t lut1[MAGLEV_RING_SIZE];
     build_maglev_lut_sim(wans, 3, lut1);
     uint32_t counts_phase1[3] = {0, 0, 0};
     for (int i = 0; i < 10000; i++) {
@@ -302,7 +302,7 @@ static void run_test_dynamic_failover(void) {
     wans[1].state = WAN_STATE_DOWN;
     wans[1].dynamic_weight = 0; /* Dynamic Failover */
 
-    uint32_t lut2[MAGLEV_RING_SIZE];
+    static uint32_t lut2[MAGLEV_RING_SIZE];
     build_maglev_lut_sim(wans, 3, lut2);
     uint32_t counts_phase2[3] = {0, 0, 0};
     for (int i = 0; i < 10000; i++) {
@@ -316,7 +316,7 @@ static void run_test_dynamic_failover(void) {
     wans[0].state = WAN_STATE_DEGRADED;
     wans[0].dynamic_weight = wans[0].config_weight / 4; /* Scaled down to 25 */
 
-    uint32_t lut3[MAGLEV_RING_SIZE];
+    static uint32_t lut3[MAGLEV_RING_SIZE];
     build_maglev_lut_sim(wans, 3, lut3);
     uint32_t counts_phase3[3] = {0, 0, 0};
     for (int i = 0; i < 10000; i++) {

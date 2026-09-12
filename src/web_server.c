@@ -54,6 +54,17 @@ static inline void safe_str_copy(char *dst, const char *src, size_t max_len) {
     dst[slen] = '\0';
 }
 
+static bool parse_mac_str(const char *str, uint8_t *mac) {
+    if (!str || !mac) return false;
+    unsigned int m[6];
+    if (sscanf(str, "%x:%x:%x:%x:%x:%x", &m[0], &m[1], &m[2], &m[3], &m[4], &m[5]) == 6 ||
+        sscanf(str, "%x-%x-%x-%x-%x-%x", &m[0], &m[1], &m[2], &m[3], &m[4], &m[5]) == 6) {
+        for (int i = 0; i < 6; i++) mac[i] = (uint8_t)m[i];
+        return true;
+    }
+    return false;
+}
+
 static const char *get_config_target_path(const web_server_ctx_t *ctx) {
     if (ctx && ctx->config && ctx->config->config_file_path[0]) {
         return ctx->config->config_file_path;
@@ -356,6 +367,8 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
             "      \"probe_target\": \"%s\",\n"
             "      \"config_weight\": %u,\n"
             "      \"dynamic_weight\": %u,\n"
+            "      \"bandwidth_down_mbps\": %u,\n"
+            "      \"bandwidth_up_mbps\": %u,\n"
             "      \"rtt_ms\": %u,\n"
             "      \"jitter_ms\": %u,\n"
             "      \"packet_loss\": %.1f,\n"
@@ -373,7 +386,9 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
             lease_total,
             lease_remaining,
             w->probe_target,
-            w->config_weight, w->dynamic_weight, w->metrics.rtt_ms, w->metrics.jitter_ms,
+            w->config_weight, w->dynamic_weight,
+            w->bandwidth_down_mbps, w->bandwidth_up_mbps,
+            w->metrics.rtt_ms, w->metrics.jitter_ms,
             w->metrics.packet_loss_pct, w->enabled ? "true" : "false", state_str, (i == config->wan_count - 1) ? "" : ",");
     }
 
@@ -418,7 +433,66 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
             (p == config->lan.policy_route_count - 1) ? "" : ",");
     }
 
-    snprintf(buf + offset, max_len - offset, "  ],\n  \"sticky_count\": %u\n}\n", get_real_active_connections());
+    /* Static Leases */
+    offset += snprintf(buf + offset, max_len - offset, "  ],\n  \"static_leases\": [\n");
+    for (uint32_t s = 0; s < config->lan.static_lease_count; s++) {
+        const static_lease_t *sl = &config->lan.static_leases[s];
+        char slip[32];
+        ip_to_str(sl->ip_addr, slip, sizeof(slip));
+        offset += snprintf(buf + offset, max_len - offset,
+            "    {\n"
+            "      \"mac\": \"%s\",\n"
+            "      \"ip\": \"%s\",\n"
+            "      \"hostname\": \"%s\",\n"
+            "      \"enabled\": %s\n"
+            "    }%s\n",
+            sl->mac_str, slip, sl->hostname, sl->enabled ? "true" : "false",
+            (s == config->lan.static_lease_count - 1) ? "" : ",");
+    }
+
+    /* Rate Limits */
+    offset += snprintf(buf + offset, max_len - offset, "  ],\n  \"rate_limits\": [\n");
+    for (uint32_t r = 0; r < config->lan.rate_limit_count; r++) {
+        const rate_limit_t *rl = &config->lan.rate_limits[r];
+        offset += snprintf(buf + offset, max_len - offset,
+            "    {\n"
+            "      \"ip\": \"%s\",\n"
+            "      \"max_down_mbps\": %u,\n"
+            "      \"max_up_mbps\": %u,\n"
+            "      \"description\": \"%s\",\n"
+            "      \"enabled\": %s\n"
+            "    }%s\n",
+            rl->ip_str, rl->max_down_mbps, rl->max_up_mbps, rl->description, rl->enabled ? "true" : "false",
+            (r == config->lan.rate_limit_count - 1) ? "" : ",");
+    }
+
+    /* QoS, DNS, App Steering, Telegram */
+    offset += snprintf(buf + offset, max_len - offset,
+        "  ],\n"
+        "  \"qos\": { \"enabled\": %s, \"algorithm\": \"%s\", \"bandwidth_down_mbps\": %u, \"bandwidth_up_mbps\": %u, \"diffserv4\": %s },\n"
+        "  \"dns\": { \"adblock_enabled\": %s, \"fast_dns_enabled\": %s, \"primary_dns\": \"%s\", \"secondary_dns\": \"%s\" },\n"
+        "  \"app_steering\": { \"gaming_steering_enabled\": %s, \"voip_steering_enabled\": %s, \"bulk_balancing_enabled\": %s, \"primary_gaming_wan_id\": %u, \"primary_voip_wan_id\": %u },\n"
+        "  \"telegram\": { \"enabled\": %s, \"bot_token\": \"%s\", \"chat_id\": \"%s\", \"notify_on_failover\": %s, \"notify_on_recovery\": %s },\n",
+        config->lan.qos.enabled ? "true" : "false",
+        config->lan.qos.algorithm[0] ? config->lan.qos.algorithm : "cake",
+        config->lan.qos.bandwidth_down_mbps, config->lan.qos.bandwidth_up_mbps,
+        config->lan.qos.diffserv4 ? "true" : "false",
+        config->lan.dns.adblock_enabled ? "true" : "false",
+        config->lan.dns.fast_dns_enabled ? "true" : "false",
+        config->lan.dns.primary_dns[0] ? config->lan.dns.primary_dns : "1.1.1.1",
+        config->lan.dns.secondary_dns[0] ? config->lan.dns.secondary_dns : "8.8.8.8",
+        config->app_steering.gaming_steering_enabled ? "true" : "false",
+        config->app_steering.voip_steering_enabled ? "true" : "false",
+        config->app_steering.bulk_balancing_enabled ? "true" : "false",
+        config->app_steering.primary_gaming_wan_id,
+        config->app_steering.primary_voip_wan_id,
+        config->telegram.enabled ? "true" : "false",
+        config->telegram.bot_token,
+        config->telegram.chat_id,
+        config->telegram.notify_on_failover ? "true" : "false",
+        config->telegram.notify_on_recovery ? "true" : "false");
+
+    snprintf(buf + offset, max_len - offset, "  \"sticky_count\": %u\n}\n", get_real_active_connections());
 }
 
 static void build_json_dhcp_leases(dhcp_server_ctx_t *dhcp, char *buf, size_t max_len) {
@@ -434,10 +508,20 @@ static void build_json_dhcp_leases(dhcp_server_ctx_t *dhcp, char *buf, size_t ma
             "      \"ip\": \"%s\",\n"
             "      \"mac\": \"%s\",\n"
             "      \"hostname\": \"%s\",\n"
-            "      \"expire_sec\": %llu\n"
+            "      \"expire_sec\": %llu,\n"
+            "      \"is_static\": %s,\n"
+            "      \"rx_bytes\": %llu,\n"
+            "      \"tx_bytes\": %llu,\n"
+            "      \"rx_kbps\": %u,\n"
+            "      \"tx_kbps\": %u\n"
             "    }%s\n",
             ip, leases[i].mac_str, leases[i].hostname,
             (unsigned long long)leases[i].lease_expire_sec,
+            leases[i].is_static ? "true" : "false",
+            (unsigned long long)leases[i].rx_bytes,
+            (unsigned long long)leases[i].tx_bytes,
+            leases[i].current_rx_kbps,
+            leases[i].current_tx_kbps,
             (i == count - 1) ? "" : ",");
     }
     snprintf(buf + offset, max_len - offset, "  ]\n}\n");
@@ -1543,6 +1627,323 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
             }
         }
         const char *rb = "{\"status\":\"ok\",\"message\":\"Policy route saved\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd);
+    } else if (strstr(req, "GET /api/v1/leases") != NULL || strstr(req, "GET /api/v1/dhcp/leases") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        char json_buf[8192];
+        build_json_dhcp_leases(ctx->dhcp, json_buf, sizeof(json_buf));
+        char resp[8500];
+        int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(json_buf), json_buf);
+        send(client_fd, resp, (int)len, 0); close_client_socket(client_fd);
+    } else if (strstr(req, "POST /api/v1/leases/static/delete") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        if (body) {
+            body += 4;
+            char mac[32] = {0}, ip[32] = {0};
+            extract_json_string(body, "mac", mac, sizeof(mac));
+            extract_json_string(body, "ip", ip, sizeof(ip));
+            int found_idx = -1;
+            for (uint32_t i = 0; i < ctx->config->lan.static_lease_count; i++) {
+                if ((mac[0] && strcasecmp(ctx->config->lan.static_leases[i].mac_str, mac) == 0) ||
+                    (ip[0] && ctx->config->lan.static_leases[i].ip_addr == str_to_ip(ip))) {
+                    found_idx = (int)i;
+                    break;
+                }
+            }
+            if (found_idx >= 0) {
+                for (uint32_t i = found_idx; i + 1 < ctx->config->lan.static_lease_count; i++) {
+                    ctx->config->lan.static_leases[i] = ctx->config->lan.static_leases[i + 1];
+                }
+                ctx->config->lan.static_lease_count--;
+                config_save(get_config_target_path(ctx), ctx->config);
+                config_load(get_config_target_path(ctx), ctx->config);
+                if (ctx->dhcp) dhcp_server_reload_config(ctx->dhcp, ctx->config);
+            }
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"Static reservation removed\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd);
+    } else if (strstr(req, "POST /api/v1/leases/static") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        if (body) {
+            body += 4;
+            char mac[32] = {0}, ip[32] = {0}, host[64] = {0};
+            extract_json_string(body, "mac", mac, sizeof(mac));
+            extract_json_string(body, "ip", ip, sizeof(ip));
+            extract_json_string(body, "hostname", host, sizeof(host));
+            bool enabled = extract_json_bool(body, "enabled", true);
+            if (mac[0] && ip[0]) {
+                int found_idx = -1;
+                for (uint32_t i = 0; i < ctx->config->lan.static_lease_count; i++) {
+                    if (strcasecmp(ctx->config->lan.static_leases[i].mac_str, mac) == 0) {
+                        found_idx = (int)i;
+                        break;
+                    }
+                }
+                if (found_idx < 0 && ctx->config->lan.static_lease_count < MAX_STATIC_LEASES) {
+                    found_idx = (int)ctx->config->lan.static_lease_count++;
+                }
+                if (found_idx >= 0) {
+                    static_lease_t *sl = &ctx->config->lan.static_leases[found_idx];
+                    safe_str_copy(sl->mac_str, mac, sizeof(sl->mac_str));
+                    parse_mac_str(mac, sl->mac_addr);
+                    sl->ip_addr = str_to_ip(ip);
+                    safe_str_copy(sl->hostname, host[0] ? host : "Static-Host", sizeof(sl->hostname));
+                    sl->enabled = enabled;
+                    config_save(get_config_target_path(ctx), ctx->config);
+                    config_load(get_config_target_path(ctx), ctx->config);
+                    if (ctx->dhcp) dhcp_server_reload_config(ctx->dhcp, ctx->config);
+                }
+            }
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"Static reservation saved\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd);
+    } else if (strstr(req, "POST /api/v1/ratelimits/delete") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        if (body) {
+            body += 4;
+            char ip[32] = {0};
+            extract_json_string(body, "ip", ip, sizeof(ip));
+            int found_idx = -1;
+            for (uint32_t i = 0; i < ctx->config->lan.rate_limit_count; i++) {
+                if (ip[0] && strcmp(ctx->config->lan.rate_limits[i].ip_str, ip) == 0) {
+                    found_idx = (int)i;
+                    break;
+                }
+            }
+            if (found_idx >= 0) {
+                for (uint32_t i = found_idx; i + 1 < ctx->config->lan.rate_limit_count; i++) {
+                    ctx->config->lan.rate_limits[i] = ctx->config->lan.rate_limits[i + 1];
+                }
+                ctx->config->lan.rate_limit_count--;
+                config_save(get_config_target_path(ctx), ctx->config);
+                config_load(get_config_target_path(ctx), ctx->config);
+                net_apply_rate_limits(ctx->config);
+            }
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"Rate limit deleted\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd);
+    } else if (strstr(req, "POST /api/v1/ratelimits") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        if (body) {
+            body += 4;
+            char ip[32] = {0}, desc[64] = {0};
+            extract_json_string(body, "ip", ip, sizeof(ip));
+            extract_json_string(body, "description", desc, sizeof(desc));
+            uint32_t max_d = (uint32_t)extract_json_int(body, "max_down_mbps", 50);
+            uint32_t max_u = (uint32_t)extract_json_int(body, "max_up_mbps", 10);
+            bool enabled = extract_json_bool(body, "enabled", true);
+            if (ip[0]) {
+                int found_idx = -1;
+                for (uint32_t i = 0; i < ctx->config->lan.rate_limit_count; i++) {
+                    if (strcmp(ctx->config->lan.rate_limits[i].ip_str, ip) == 0) {
+                        found_idx = (int)i;
+                        break;
+                    }
+                }
+                if (found_idx < 0 && ctx->config->lan.rate_limit_count < MAX_RATE_LIMITS) {
+                    found_idx = (int)ctx->config->lan.rate_limit_count++;
+                }
+                if (found_idx >= 0) {
+                    rate_limit_t *rl = &ctx->config->lan.rate_limits[found_idx];
+                    safe_str_copy(rl->ip_str, ip, sizeof(rl->ip_str));
+                    rl->ip_addr = str_to_ip(ip);
+                    safe_str_copy(rl->description, desc, sizeof(rl->description));
+                    rl->max_down_mbps = max_d;
+                    rl->max_up_mbps = max_u;
+                    rl->enabled = enabled;
+                    config_save(get_config_target_path(ctx), ctx->config);
+                    config_load(get_config_target_path(ctx), ctx->config);
+                    net_apply_rate_limits(ctx->config);
+                }
+            }
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"Rate limit saved\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd);
+    } else if (strstr(req, "POST /api/v1/qos") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        if (body) {
+            body += 4;
+            char algo[32] = {0};
+            extract_json_string(body, "algorithm", algo, sizeof(algo));
+            if (algo[0]) safe_str_copy(ctx->config->lan.qos.algorithm, algo, sizeof(ctx->config->lan.qos.algorithm));
+            ctx->config->lan.qos.enabled = extract_json_bool(body, "enabled", ctx->config->lan.qos.enabled);
+            ctx->config->lan.qos.bandwidth_down_mbps = (uint32_t)extract_json_int(body, "bandwidth_down_mbps", ctx->config->lan.qos.bandwidth_down_mbps);
+            ctx->config->lan.qos.bandwidth_up_mbps = (uint32_t)extract_json_int(body, "bandwidth_up_mbps", ctx->config->lan.qos.bandwidth_up_mbps);
+            ctx->config->lan.qos.diffserv4 = extract_json_bool(body, "diffserv4", ctx->config->lan.qos.diffserv4);
+            config_save(get_config_target_path(ctx), ctx->config);
+            config_load(get_config_target_path(ctx), ctx->config);
+            net_apply_qos(ctx->config);
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"QoS settings updated\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd);
+    } else if (strstr(req, "POST /api/v1/dns") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        if (body) {
+            body += 4;
+            char dns1[32] = {0}, dns2[32] = {0};
+            extract_json_string(body, "primary_dns", dns1, sizeof(dns1));
+            extract_json_string(body, "secondary_dns", dns2, sizeof(dns2));
+            if (dns1[0]) safe_str_copy(ctx->config->lan.dns.primary_dns, dns1, sizeof(ctx->config->lan.dns.primary_dns));
+            if (dns2[0]) safe_str_copy(ctx->config->lan.dns.secondary_dns, dns2, sizeof(ctx->config->lan.dns.secondary_dns));
+            ctx->config->lan.dns.adblock_enabled = extract_json_bool(body, "adblock_enabled", ctx->config->lan.dns.adblock_enabled);
+            ctx->config->lan.dns.fast_dns_enabled = extract_json_bool(body, "fast_dns_enabled", ctx->config->lan.dns.fast_dns_enabled);
+            config_save(get_config_target_path(ctx), ctx->config);
+            config_load(get_config_target_path(ctx), ctx->config);
+            net_apply_dns_features(ctx->config);
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"DNS settings updated\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd);
+    } else if (strstr(req, "POST /api/v1/app_steering") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        if (body) {
+            body += 4;
+            ctx->config->app_steering.gaming_steering_enabled = extract_json_bool(body, "gaming_steering_enabled", ctx->config->app_steering.gaming_steering_enabled);
+            ctx->config->app_steering.voip_steering_enabled = extract_json_bool(body, "voip_steering_enabled", ctx->config->app_steering.voip_steering_enabled);
+            ctx->config->app_steering.bulk_balancing_enabled = extract_json_bool(body, "bulk_balancing_enabled", ctx->config->app_steering.bulk_balancing_enabled);
+            ctx->config->app_steering.primary_gaming_wan_id = (uint32_t)extract_json_int(body, "primary_gaming_wan_id", ctx->config->app_steering.primary_gaming_wan_id);
+            ctx->config->app_steering.primary_voip_wan_id = (uint32_t)extract_json_int(body, "primary_voip_wan_id", ctx->config->app_steering.primary_voip_wan_id);
+            config_save(get_config_target_path(ctx), ctx->config);
+            config_load(get_config_target_path(ctx), ctx->config);
+            net_apply_app_steering(ctx->config);
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"Application steering updated\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd);
+    } else if (strstr(req, "POST /api/v1/telegram/test") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        char token[128] = {0}, chat[64] = {0};
+        if (body) {
+            body += 4;
+            extract_json_string(body, "bot_token", token, sizeof(token));
+            extract_json_string(body, "chat_id", chat, sizeof(chat));
+        }
+        if (!token[0]) safe_str_copy(token, ctx->config->telegram.bot_token, sizeof(token));
+        if (!chat[0]) safe_str_copy(chat, ctx->config->telegram.chat_id, sizeof(chat));
+
+#if defined(__linux__)
+        if (token[0] && chat[0]) {
+            char cmd[512];
+            snprintf(cmd, sizeof(cmd),
+                     "curl -s -X POST 'https://api.telegram.org/bot%s/sendMessage' -d 'chat_id=%s' -d 'text=🚀 FluxWAN Router: Test notification sent successfully!' >/dev/null 2>&1 &",
+                     token, chat);
+            safe_system(cmd);
+        }
+#endif
+        const char *rb = "{\"status\":\"ok\",\"message\":\"Test alert sent\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd);
+    } else if (strstr(req, "POST /api/v1/telegram") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        if (body) {
+            body += 4;
+            char token[128] = {0}, chat[64] = {0};
+            extract_json_string(body, "bot_token", token, sizeof(token));
+            extract_json_string(body, "chat_id", chat, sizeof(chat));
+            if (token[0]) safe_str_copy(ctx->config->telegram.bot_token, token, sizeof(ctx->config->telegram.bot_token));
+            if (chat[0]) safe_str_copy(ctx->config->telegram.chat_id, chat, sizeof(ctx->config->telegram.chat_id));
+            ctx->config->telegram.enabled = extract_json_bool(body, "enabled", ctx->config->telegram.enabled);
+            ctx->config->telegram.notify_on_failover = extract_json_bool(body, "notify_on_failover", ctx->config->telegram.notify_on_failover);
+            ctx->config->telegram.notify_on_recovery = extract_json_bool(body, "notify_on_recovery", ctx->config->telegram.notify_on_recovery);
+            config_save(get_config_target_path(ctx), ctx->config);
+            config_load(get_config_target_path(ctx), ctx->config);
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"Telegram configuration updated\"}";
         char resp[256]; int len = snprintf(resp, sizeof(resp),
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
             strlen(rb), rb);

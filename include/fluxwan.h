@@ -164,6 +164,8 @@ typedef struct {
     uint32_t table_id;      /* Policy routing table ID (e.g. 101) */
     uint32_t config_weight; /* User configured base weight (1-100) */
     uint32_t dynamic_weight;/* Health-scaled dynamic weight */
+    uint32_t bandwidth_down_mbps; /* Downstream speed in Mbps (e.g. 100) */
+    uint32_t bandwidth_up_mbps;   /* Upstream speed in Mbps (e.g. 20) */
     wan_state_t state;
     bool enabled;           /* Administrative status: true=Enabled, false=Disabled */
     
@@ -217,6 +219,45 @@ typedef struct {
     bool enabled;
 } wan_group_t;
 
+#define MAX_STATIC_LEASES 64
+#define MAX_RATE_LIMITS 32
+
+/* Static DHCP IP Reservation */
+typedef struct {
+    char mac_str[18];
+    uint8_t mac_addr[6];
+    uint32_t ip_addr;
+    char hostname[64];
+    bool enabled;
+} static_lease_t;
+
+/* Per-IP Bandwidth Rate Limiting */
+typedef struct {
+    char ip_str[32];
+    uint32_t ip_addr;
+    uint32_t max_down_mbps;
+    uint32_t max_up_mbps;
+    char description[64];
+    bool enabled;
+} rate_limit_t;
+
+/* Smart Queue Management (CAKE / FQ-CoDel QoS) */
+typedef struct {
+    bool enabled;
+    char algorithm[16];          /* "cake" or "fq_codel" */
+    uint32_t bandwidth_down_mbps;/* Downstream limit in Mbps */
+    uint32_t bandwidth_up_mbps;  /* Upstream limit in Mbps */
+    bool diffserv4;              /* Enable diffserv4 priority isolation */
+} qos_config_t;
+
+/* DNS Ad-blocking & Privacy */
+typedef struct {
+    bool adblock_enabled;
+    bool fast_dns_enabled;
+    char primary_dns[32];
+    char secondary_dns[32];
+} dns_features_t;
+
 /* LAN Interface Definition */
 typedef struct {
     char name[MAX_IFNAME_LEN];
@@ -229,6 +270,12 @@ typedef struct {
     int ifindex;
     policy_route_t policy_routes[MAX_POLICY_ROUTES];
     uint32_t policy_route_count;
+    static_lease_t static_leases[MAX_STATIC_LEASES];
+    uint32_t static_lease_count;
+    rate_limit_t rate_limits[MAX_RATE_LIMITS];
+    uint32_t rate_limit_count;
+    qos_config_t qos;
+    dns_features_t dns;
 } lan_config_t;
 
 /* Prober Configuration */
@@ -238,13 +285,33 @@ typedef struct {
     uint32_t loss_window;
     uint32_t max_acceptable_rtt_ms;
     float max_acceptable_loss_pct;
+    bool dynamic_latency_steering; /* Penalize high latency WANs automatically */
 } prober_config_t;
 
 /* Sticky Session Configuration */
 typedef struct {
     bool enabled;
     uint32_t timeout_seconds;
+    bool strict_banking_enabled;   /* Strict persistence for banking/payment sites */
 } sticky_config_t;
+
+/* L7 Application-Based Smart Steering */
+typedef struct {
+    bool gaming_steering_enabled;     /* Route gaming UDP (Steam, PSN, Xbox, Valorant) to lowest RTT WAN */
+    bool voip_steering_enabled;       /* Route VoIP/RTC (SIP, Zoom, WebRTC, WhatsApp) to lowest Jitter WAN */
+    bool bulk_balancing_enabled;      /* Distribute bulk downloads across all WANs */
+    uint32_t primary_gaming_wan_id;   /* 0=Auto lowest RTT, or specific WAN ID */
+    uint32_t primary_voip_wan_id;     /* 0=Auto lowest Jitter, or specific WAN ID */
+} app_steering_t;
+
+/* Telegram Failover Alert Bot */
+typedef struct {
+    bool enabled;
+    char bot_token[128];
+    char chat_id[64];
+    bool notify_on_failover;
+    bool notify_on_recovery;
+} telegram_config_t;
 
 /* Embedded Web Server Configuration */
 typedef struct {
@@ -286,6 +353,8 @@ typedef struct {
     uint32_t group_count;
     prober_config_t prober;
     sticky_config_t sticky;
+    app_steering_t app_steering;
+    telegram_config_t telegram;
     web_config_t web;
     auth_config_t auth;
     nat46_config_t nat46;

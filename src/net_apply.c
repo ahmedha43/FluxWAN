@@ -221,6 +221,12 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
     safe_system("iptables -t mangle -A PREROUTING -j CONNMARK --save-mark 2>/dev/null || true");
 #endif
 
+    /* 5. Apply QoS, Rate Limits, Application Steering, and DNS Redirection */
+    net_apply_qos(config);
+    net_apply_rate_limits(config);
+    net_apply_app_steering(config);
+    net_apply_dns_features(config);
+
     LOG_INFO("Network configuration successfully applied to Kernel!");
     return 0;
 }
@@ -254,6 +260,217 @@ int net_apply_policy_routes(const fluxwan_config_t *config) {
                 }
             }
         }
+    }
+#endif
+    return 0;
+}
+
+int net_apply_qos(const fluxwan_config_t *config) {
+    if (!config) return -1;
+#if defined(__linux__)
+    const qos_config_t *qos = &config->lan.qos;
+    const char *lan = config->lan.name[0] ? config->lan.name : "eth0";
+
+    if (!qos->enabled) {
+        char cmd[256];
+        snprintf(cmd, sizeof(cmd), "tc qdisc del dev %s root 2>/dev/null || true", lan);
+        safe_system(cmd);
+        for (uint32_t i = 0; i < config->wan_count; i++) {
+            snprintf(cmd, sizeof(cmd), "tc qdisc del dev %s root 2>/dev/null || true", config->wans[i].name);
+            safe_system(cmd);
+        }
+        return 0;
+    }
+
+    char qdisc_cmd[512];
+    if (strcmp(qos->algorithm, "cake") == 0) {
+        if (qos->bandwidth_down_mbps > 0) {
+            snprintf(qdisc_cmd, sizeof(qdisc_cmd),
+                     "tc qdisc replace dev %s root cake bandwidth %llubit %s nonat dual-dsthost 2>/dev/null || true",
+                     lan, (unsigned long long)qos->bandwidth_down_mbps * 1000000ULL,
+                     qos->diffserv4 ? "diffserv4" : "besteffort");
+        } else {
+            snprintf(qdisc_cmd, sizeof(qdisc_cmd),
+                     "tc qdisc replace dev %s root cake %s nonat dual-dsthost 2>/dev/null || true",
+                     lan, qos->diffserv4 ? "diffserv4" : "besteffort");
+        }
+        safe_system(qdisc_cmd);
+
+        for (uint32_t i = 0; i < config->wan_count; i++) {
+            const wan_config_t *w = &config->wans[i];
+            if (!w->enabled || w->state == WAN_STATE_DOWN) continue;
+            uint32_t up_bw = w->bandwidth_up_mbps > 0 ? w->bandwidth_up_mbps : (qos->bandwidth_up_mbps / (config->wan_count > 0 ? config->wan_count : 1));
+            if (up_bw > 0) {
+                snprintf(qdisc_cmd, sizeof(qdisc_cmd),
+                         "tc qdisc replace dev %s root cake bandwidth %llubit %s nat dual-srchost 2>/dev/null || true",
+                         w->name, (unsigned long long)up_bw * 1000000ULL,
+                         qos->diffserv4 ? "diffserv4" : "besteffort");
+            } else {
+                snprintf(qdisc_cmd, sizeof(qdisc_cmd),
+                         "tc qdisc replace dev %s root cake %s nat dual-srchost 2>/dev/null || true",
+                         w->name, qos->diffserv4 ? "diffserv4" : "besteffort");
+            }
+            safe_system(qdisc_cmd);
+        }
+    } else {
+        snprintf(qdisc_cmd, sizeof(qdisc_cmd),
+                 "tc qdisc replace dev %s root fq_codel limit 1024 target 5ms interval 100ms 2>/dev/null || true",
+                 lan);
+        safe_system(qdisc_cmd);
+        for (uint32_t i = 0; i < config->wan_count; i++) {
+            const wan_config_t *w = &config->wans[i];
+            if (!w->enabled || w->state == WAN_STATE_DOWN) continue;
+            snprintf(qdisc_cmd, sizeof(qdisc_cmd),
+                     "tc qdisc replace dev %s root fq_codel limit 1024 target 5ms interval 100ms 2>/dev/null || true",
+                     w->name);
+            safe_system(qdisc_cmd);
+        }
+    }
+    LOG_INFO("[QoS Engine] SQM (%s) bufferbloat mitigations active on LAN %s", qos->algorithm, lan);
+#endif
+    return 0;
+}
+
+int net_apply_rate_limits(const fluxwan_config_t *config) {
+    if (!config) return -1;
+#if defined(__linux__)
+    safe_system("iptables -F FLUXWAN_RATELIMIT 2>/dev/null || true");
+    safe_system("iptables -N FLUXWAN_RATELIMIT 2>/dev/null || true");
+    safe_system("iptables -D FORWARD -j FLUXWAN_RATELIMIT 2>/dev/null || true");
+    safe_system("iptables -I FORWARD 1 -j FLUXWAN_RATELIMIT 2>/dev/null || true");
+
+    for (uint32_t i = 0; i < config->lan.rate_limit_count; i++) {
+        const rate_limit_t *rl = &config->lan.rate_limits[i];
+        if (!rl->enabled || !rl->ip_str[0]) continue;
+
+        char cmd[512];
+        if (rl->max_down_mbps > 0) {
+            uint32_t kbps = rl->max_down_mbps * 1024;
+            snprintf(cmd, sizeof(cmd),
+                     "iptables -A FLUXWAN_RATELIMIT -d %s -m hashlimit --hashlimit-above %ukb/s --hashlimit-mode dstip --hashlimit-name rl_d_%u -j DROP 2>/dev/null || true",
+                     rl->ip_str, kbps, i);
+            safe_system(cmd);
+        }
+        if (rl->max_up_mbps > 0) {
+            uint32_t kbps = rl->max_up_mbps * 1024;
+            snprintf(cmd, sizeof(cmd),
+                     "iptables -A FLUXWAN_RATELIMIT -s %s -m hashlimit --hashlimit-above %ukb/s --hashlimit-mode srcip --hashlimit-name rl_u_%u -j DROP 2>/dev/null || true",
+                     rl->ip_str, kbps, i);
+            safe_system(cmd);
+        }
+        LOG_INFO("[Rate Limiter] Applied %u/%u Mbps limit for %s (%s)",
+                 rl->max_down_mbps, rl->max_up_mbps, rl->ip_str, rl->description);
+    }
+#endif
+    return 0;
+}
+
+int net_apply_app_steering(const fluxwan_config_t *config) {
+    if (!config) return -1;
+#if defined(__linux__)
+    safe_system("iptables -t mangle -F FLUXWAN_STEER 2>/dev/null || true");
+    safe_system("iptables -t mangle -N FLUXWAN_STEER 2>/dev/null || true");
+    safe_system("iptables -t mangle -D PREROUTING -j FLUXWAN_STEER 2>/dev/null || true");
+    safe_system("iptables -t mangle -I PREROUTING 2 -j FLUXWAN_STEER 2>/dev/null || true");
+
+    const app_steering_t *as = &config->app_steering;
+    const char *lan = config->lan.name[0] ? config->lan.name : "eth0";
+
+    /* Find lowest RTT WAN for Gaming */
+    if (as->gaming_steering_enabled && config->wan_count > 0) {
+        uint32_t best_wan_idx = 0;
+        uint32_t min_rtt = 999999;
+        for (uint32_t i = 0; i < config->wan_count; i++) {
+            const wan_config_t *w = &config->wans[i];
+            if (as->primary_gaming_wan_id > 0 && w->id == as->primary_gaming_wan_id) {
+                best_wan_idx = i;
+                break;
+            }
+            if (w->enabled && w->state == WAN_STATE_HEALTHY && w->metrics.rtt_ms < min_rtt) {
+                min_rtt = w->metrics.rtt_ms;
+                best_wan_idx = i;
+            }
+        }
+        uint32_t fwmark = 0x100 + best_wan_idx + 1;
+        char cmd[512];
+        snprintf(cmd, sizeof(cmd),
+                 "iptables -t mangle -A FLUXWAN_STEER -i %s -p udp -m multiport --dports 3074,3478,3479,3480,27015,27020,27031,27036 -j MARK --set-mark 0x%x 2>/dev/null || true",
+                 lan, fwmark);
+        safe_system(cmd);
+        snprintf(cmd, sizeof(cmd),
+                 "iptables -t mangle -A FLUXWAN_STEER -i %s -p udp --dport 27000:27050 -j MARK --set-mark 0x%x 2>/dev/null || true",
+                 lan, fwmark);
+        safe_system(cmd);
+        snprintf(cmd, sizeof(cmd),
+                 "iptables -t mangle -A FLUXWAN_STEER -i %s -p udp --dport 5000:5500 -j MARK --set-mark 0x%x 2>/dev/null || true",
+                 lan, fwmark);
+        safe_system(cmd);
+        LOG_INFO("[App Steering] Steered Gaming traffic -> WAN %u (%s, mark 0x%x)",
+                 config->wans[best_wan_idx].id, config->wans[best_wan_idx].name, fwmark);
+    }
+
+    /* Find lowest Jitter WAN for VoIP & RTC */
+    if (as->voip_steering_enabled && config->wan_count > 0) {
+        uint32_t best_voip_idx = 0;
+        uint32_t min_jitter = 999999;
+        for (uint32_t i = 0; i < config->wan_count; i++) {
+            const wan_config_t *w = &config->wans[i];
+            if (as->primary_voip_wan_id > 0 && w->id == as->primary_voip_wan_id) {
+                best_voip_idx = i;
+                break;
+            }
+            if (w->enabled && w->state == WAN_STATE_HEALTHY && w->metrics.jitter_ms < min_jitter) {
+                min_jitter = w->metrics.jitter_ms;
+                best_voip_idx = i;
+            }
+        }
+        uint32_t fwmark = 0x100 + best_voip_idx + 1;
+        char cmd[512];
+        snprintf(cmd, sizeof(cmd),
+                 "iptables -t mangle -A FLUXWAN_STEER -i %s -p udp -m multiport --dports 5060,5061 -j MARK --set-mark 0x%x 2>/dev/null || true",
+                 lan, fwmark);
+        safe_system(cmd);
+        snprintf(cmd, sizeof(cmd),
+                 "iptables -t mangle -A FLUXWAN_STEER -i %s -p udp --dport 10000:20000 -j MARK --set-mark 0x%x 2>/dev/null || true",
+                 lan, fwmark);
+        safe_system(cmd);
+        LOG_INFO("[App Steering] Steered VoIP & RTC traffic -> WAN %u (%s, mark 0x%x)",
+                 config->wans[best_voip_idx].id, config->wans[best_voip_idx].name, fwmark);
+    }
+#endif
+    return 0;
+}
+
+int net_apply_dns_features(const fluxwan_config_t *config) {
+    if (!config) return -1;
+#if defined(__linux__)
+    safe_system("iptables -t nat -F FLUXWAN_DNS 2>/dev/null || true");
+    safe_system("iptables -t nat -N FLUXWAN_DNS 2>/dev/null || true");
+    safe_system("iptables -t nat -D PREROUTING -j FLUXWAN_DNS 2>/dev/null || true");
+    safe_system("iptables -t nat -I PREROUTING 1 -j FLUXWAN_DNS 2>/dev/null || true");
+
+    const dns_features_t *dns = &config->lan.dns;
+    const char *lan = config->lan.name[0] ? config->lan.name : "eth0";
+
+    const char *target_dns = "1.1.1.1";
+    if (dns->adblock_enabled) {
+        target_dns = "94.140.14.14"; /* AdGuard DNS */
+    } else if (dns->fast_dns_enabled && dns->primary_dns[0]) {
+        target_dns = dns->primary_dns;
+    }
+
+    if (dns->adblock_enabled || dns->fast_dns_enabled) {
+        char cmd[512];
+        snprintf(cmd, sizeof(cmd),
+                 "iptables -t nat -A FLUXWAN_DNS -i %s -p udp --dport 53 -j DNAT --to-destination %s:53 2>/dev/null || true",
+                 lan, target_dns);
+        safe_system(cmd);
+        snprintf(cmd, sizeof(cmd),
+                 "iptables -t nat -A FLUXWAN_DNS -i %s -p tcp --dport 53 -j DNAT --to-destination %s:53 2>/dev/null || true",
+                 lan, target_dns);
+        safe_system(cmd);
+        LOG_INFO("[DNS Engine] Intercepting port 53 -> %s (%s)",
+                 target_dns, dns->adblock_enabled ? "Ad-Blocking Active" : "Fast DNS Active");
     }
 #endif
     return 0;
