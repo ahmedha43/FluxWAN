@@ -17,8 +17,8 @@
     },
     "full_iso": {
       "url": "https://github.com/ahmedha43/FluxWAN/releases/download/v1.2.4/fluxwan-os-x86_64.iso",
-      "sha256": "",
-      "size_bytes": 240124928
+      "sha256": "c8406acaf8180cf0d11b0857bb3cc46a4f8c756273779fa4b06761071a6b7bfe",
+      "size_bytes": 226492416
     }
   }
 }
