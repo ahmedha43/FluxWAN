@@ -36,6 +36,8 @@ RUN apk update && apk add --no-cache \
     ethtool \
     util-linux \
     curl \
+    dropbear \
+    dropbear-ssh \
     libnl3-dev \
     libmnl-dev
 

@@ -127,6 +127,8 @@ dosfstools
 syslinux
 grub-bios
 util-linux
+dropbear
+dropbear-ssh
 EOF
 
 # Copy FluxWAN binaries, BPF objects, configs and scripts into apkovl
@@ -178,12 +180,19 @@ EXTLINUX_BIN=$(command -v extlinux 2>/dev/null || true)
 # libraries in initramfs so it cannot fail after the disk is repartitioned.
 mkdir -p "$APKOVL_DIR/usr/lib" "$APKOVL_DIR/lib"
 cp -aL /usr/lib/liblzma.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
-# Embed networking utilities (iptables, ip, conntrack, ethtool, curl)
-for bin in iptables iptables-save iptables-restore ip conntrack ethtool curl; do
+# Embed networking utilities (iptables, ip, conntrack, ethtool, curl, dropbear)
+for bin in iptables iptables-save iptables-restore ip conntrack ethtool curl dropbear; do
     SRC=$(command -v "$bin" 2>/dev/null || true)
     if [ -n "$SRC" ]; then
         cp -f "$SRC" "$APKOVL_DIR/usr/sbin/$bin" 2>/dev/null || true
         cp -f "$SRC" "$APKOVL_DIR/sbin/$bin" 2>/dev/null || true
+    fi
+done
+for bin in dropbearkey dropbearconvert dbclient; do
+    SRC=$(command -v "$bin" 2>/dev/null || true)
+    if [ -n "$SRC" ]; then
+        cp -f "$SRC" "$APKOVL_DIR/usr/bin/$bin" 2>/dev/null || true
+        cp -f "$SRC" "$APKOVL_DIR/bin/$bin" 2>/dev/null || true
     fi
 done
 cp -aL /usr/lib/libxtables.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
@@ -193,6 +202,8 @@ cp -aL /usr/lib/libnetfilter_conntrack.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null ||
 cp -aL /usr/lib/libnfnetlink.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
 cp -aL /usr/lib/libelf.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
 cp -aL /usr/lib/libzstd.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
+cp -aL /usr/lib/libcrypt.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
+cp -aL /lib/libcrypt.so* "$APKOVL_DIR/lib/" 2>/dev/null || true
 
 # Copy appliance configuration files
 cp -f "$PROJECT_ROOT/appliance/etc/inittab" "$APKOVL_DIR/etc/inittab" 2>/dev/null || true

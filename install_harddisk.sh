@@ -428,7 +428,22 @@ ip addr add 192.168.90.1/24 dev "$LAN_IFACE" 2>/dev/null || true
 # 7. Web Management Port 80 -> 8080 Redirection
 iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 8080 2>/dev/null || true
 
-# 8. Start FluxWAN Core Reactor Daemon from /opt/fluxwan with persistent config symlinks
+# 8. Start Dropbear SSH Daemon (Port 22)
+mkdir -p /etc/dropbear /root/.ssh
+if [ ! -f /etc/dropbear/dropbear_ed25519_host_key ] && command -v dropbearkey >/dev/null 2>&1; then
+    dropbearkey -t ed25519 -f /etc/dropbear/dropbear_ed25519_host_key 2>/dev/null || true
+fi
+if [ ! -f /etc/dropbear/dropbear_rsa_host_key ] && command -v dropbearkey >/dev/null 2>&1; then
+    dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key 2>/dev/null || true
+fi
+echo "root:admin" | chpasswd 2>/dev/null || true
+if command -v dropbear >/dev/null 2>&1; then
+    dropbear -R -B -p 22 2>/dev/null || true
+elif [ -x /usr/sbin/dropbear ]; then
+    /usr/sbin/dropbear -R -B -p 22 2>/dev/null || true
+fi
+
+# 9. Start FluxWAN Core Reactor Daemon from /opt/fluxwan with persistent config symlinks
 mkdir -p /root/config /config
 ln -sf /opt/fluxwan/config/fluxwan.json /root/config/fluxwan.json 2>/dev/null || true
 ln -sf /opt/fluxwan/config/fluxwan.json /config/fluxwan.json 2>/dev/null || true
