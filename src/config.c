@@ -954,3 +954,234 @@ bool config_validate_wan_attachments(const fluxwan_config_t *config, char *err_m
 
     return true;
 }
+
+uint32_t config_calc_checksum(const char *data) {
+    if (!data) return 0;
+    uint32_t hash = 5381;
+    int c;
+    while ((c = *data++)) {
+        if (c != ' ' && c != '\t' && c != '\r' && c != '\n') {
+            hash = ((hash << 5) + hash) + (uint32_t)c;
+        }
+    }
+    return hash;
+}
+
+int config_export_backup(const fluxwan_config_t *config, char *out_json, size_t max_len) {
+    if (!config || !out_json || max_len < 2048) return -1;
+
+    const char *tmp_path = "/tmp/fluxwan_export_tmp.json";
+#if defined(_WIN32) || defined(_WIN64)
+    tmp_path = "fluxwan_export_tmp.json";
+#endif
+
+    if (config_save(tmp_path, config) != 0) {
+        return -1;
+    }
+
+    char *cfg_str = read_file_to_string(tmp_path);
+    remove(tmp_path);
+    if (!cfg_str) return -1;
+
+    uint32_t csum = config_calc_checksum(cfg_str);
+    time_t now = time(NULL);
+    struct tm *tm_info = gmtime(&now);
+    char iso_time[64] = {0};
+    if (tm_info) {
+        strftime(iso_time, sizeof(iso_time), "%Y-%m-%dT%H:%M:%SZ", tm_info);
+    }
+
+    char hostname[64] = "FluxWAN-Router";
+#if defined(__linux__)
+    gethostname(hostname, sizeof(hostname));
+#endif
+
+    int len = snprintf(out_json, max_len,
+        "{\n"
+        "  \"fluxwan_backup\": {\n"
+        "    \"version\": \"%s\",\n"
+        "    \"created_at\": %lld,\n"
+        "    \"created_at_iso\": \"%s\",\n"
+        "    \"hostname\": \"%s\",\n"
+        "    \"architecture\": \"x86_64\",\n"
+        "    \"wan_count\": %u,\n"
+        "    \"checksum\": %u,\n"
+        "    \"type\": \"full_system_configuration\"\n"
+        "  },\n"
+        "  \"config\": %s\n"
+        "}\n",
+        FLUXWAN_VERSION,
+        (long long)now,
+        iso_time[0] ? iso_time : "2026-09-12T13:00:00Z",
+        hostname,
+        config->wan_count,
+        csum,
+        cfg_str);
+
+    free(cfg_str);
+    return (len > 0 && (size_t)len < max_len) ? 0 : -1;
+}
+
+int config_import_backup(const char *backup_json, fluxwan_config_t *out_config, char *err_msg, size_t err_size) {
+    if (!backup_json || !out_config) {
+        if (err_msg && err_size > 0) snprintf(err_msg, err_size, "Empty backup data received");
+        return -1;
+    }
+
+    const char *cfg_body = backup_json;
+    const char *cfg_key = strstr(backup_json, "\"config\"");
+    if (cfg_key) {
+        const char *brace = strchr(cfg_key, '{');
+        if (brace) cfg_body = brace;
+    }
+
+    const char *tmp_path = "/tmp/fluxwan_restore_tmp.json";
+#if defined(_WIN32) || defined(_WIN64)
+    tmp_path = "fluxwan_restore_tmp.json";
+#endif
+
+    FILE *f = fopen(tmp_path, "w");
+    if (!f) {
+        if (err_msg && err_size > 0) snprintf(err_msg, err_size, "Unable to write temporary restore file");
+        return -1;
+    }
+    fputs(cfg_body, f);
+    fclose(f);
+
+    fluxwan_config_t test_cfg;
+    if (config_load(tmp_path, &test_cfg) != 0) {
+        remove(tmp_path);
+        if (err_msg && err_size > 0) snprintf(err_msg, err_size, "Invalid or corrupted JSON configuration syntax");
+        return -1;
+    }
+    remove(tmp_path);
+
+    if (test_cfg.lan.ip_addr == 0) {
+        if (err_msg && err_size > 0) snprintf(err_msg, err_size, "Backup is missing valid LAN IP configuration");
+        return -1;
+    }
+
+    char validate_err[256] = {0};
+    if (!config_validate_wan_attachments(&test_cfg, validate_err, sizeof(validate_err))) {
+        if (err_msg && err_size > 0) snprintf(err_msg, err_size, "%s", validate_err);
+        return -1;
+    }
+
+    memcpy(out_config, &test_cfg, sizeof(fluxwan_config_t));
+    if (err_msg && err_size > 0) snprintf(err_msg, err_size, "Configuration validated successfully");
+    return 0;
+}
+
+int config_reset_to_defaults(fluxwan_config_t *out_config) {
+    if (!out_config) return -1;
+    memset(out_config, 0, sizeof(fluxwan_config_t));
+
+    /* 1. LAN Default */
+    safe_str_copy(out_config->lan.name, "eth0", sizeof(out_config->lan.name));
+    out_config->lan.ip_addr = str_to_ip("192.168.90.1");
+    out_config->lan.netmask = str_to_ip("255.255.255.0");
+    out_config->lan.dhcp_enabled = true;
+    out_config->lan.dhcp_start = str_to_ip("192.168.90.100");
+    out_config->lan.dhcp_end = str_to_ip("192.168.90.200");
+    out_config->lan.dhcp_lease_time = 43200;
+    out_config->lan.policy_route_count = 0;
+    out_config->lan.static_lease_count = 0;
+    out_config->lan.rate_limit_count = 0;
+
+    /* QoS Default */
+    out_config->lan.qos.enabled = false;
+    safe_str_copy(out_config->lan.qos.algorithm, "cake", sizeof(out_config->lan.qos.algorithm));
+    out_config->lan.qos.bandwidth_down_mbps = 0;
+    out_config->lan.qos.bandwidth_up_mbps = 0;
+    out_config->lan.qos.diffserv4 = true;
+
+    /* DNS Default */
+    out_config->lan.dns.adblock_enabled = false;
+    out_config->lan.dns.fast_dns_enabled = true;
+    safe_str_copy(out_config->lan.dns.primary_dns, "1.1.1.1", sizeof(out_config->lan.dns.primary_dns));
+    safe_str_copy(out_config->lan.dns.secondary_dns, "8.8.8.8", sizeof(out_config->lan.dns.secondary_dns));
+
+    /* 2. WAN Defaults: Two DHCP WANs (eth1, eth2) */
+    out_config->wan_count = 2;
+    out_config->wans[0].id = 1;
+    safe_str_copy(out_config->wans[0].name, "eth1", sizeof(out_config->wans[0].name));
+    safe_str_copy(out_config->wans[0].label, "WAN1_Primary", sizeof(out_config->wans[0].label));
+    out_config->wans[0].type = WAN_TYPE_DHCP;
+    out_config->wans[0].config_weight = 100;
+    out_config->wans[0].dynamic_weight = 100;
+    out_config->wans[0].bandwidth_down_mbps = 100;
+    out_config->wans[0].bandwidth_up_mbps = 20;
+    out_config->wans[0].table_id = 101;
+    out_config->wans[0].mtu = 1500;
+    out_config->wans[0].mss_clamping = 1452;
+    out_config->wans[0].enabled = true;
+    safe_str_copy(out_config->wans[0].probe_target, "8.8.8.8", sizeof(out_config->wans[0].probe_target));
+
+    out_config->wans[1].id = 2;
+    safe_str_copy(out_config->wans[1].name, "eth2", sizeof(out_config->wans[1].name));
+    safe_str_copy(out_config->wans[1].label, "WAN2_Secondary", sizeof(out_config->wans[1].label));
+    out_config->wans[1].type = WAN_TYPE_DHCP;
+    out_config->wans[1].config_weight = 100;
+    out_config->wans[1].dynamic_weight = 100;
+    out_config->wans[1].bandwidth_down_mbps = 100;
+    out_config->wans[1].bandwidth_up_mbps = 20;
+    out_config->wans[1].table_id = 102;
+    out_config->wans[1].mtu = 1500;
+    out_config->wans[1].mss_clamping = 1452;
+    out_config->wans[1].enabled = true;
+    safe_str_copy(out_config->wans[1].probe_target, "1.1.1.1", sizeof(out_config->wans[1].probe_target));
+
+    /* Groups Default */
+    out_config->group_count = 1;
+    out_config->groups[0].id = 1;
+    safe_str_copy(out_config->groups[0].name, "Default_Balance", sizeof(out_config->groups[0].name));
+    safe_str_copy(out_config->groups[0].description, "Default Multi-WAN Load Balancing Pool", sizeof(out_config->groups[0].description));
+    out_config->groups[0].enabled = true;
+    out_config->groups[0].wan_count = 2;
+    safe_str_copy(out_config->groups[0].wan_names[0], "WAN1_Primary", sizeof(out_config->groups[0].wan_names[0]));
+    safe_str_copy(out_config->groups[0].wan_names[1], "WAN2_Secondary", sizeof(out_config->groups[0].wan_names[1]));
+    out_config->groups[0].wan_member_indices[0] = 0;
+    out_config->groups[0].wan_member_indices[1] = 1;
+    out_config->groups[0].active_wan_count = 2;
+
+    /* Prober Defaults */
+    out_config->prober.interval_ms = 500;
+    out_config->prober.timeout_ms = 1000;
+    out_config->prober.loss_window = 20;
+    out_config->prober.max_acceptable_rtt_ms = 250;
+    out_config->prober.max_acceptable_loss_pct = 20.0f;
+    out_config->prober.dynamic_latency_steering = true;
+
+    /* Sticky Defaults */
+    out_config->sticky.enabled = true;
+    out_config->sticky.timeout_seconds = 300;
+    out_config->sticky.strict_banking_enabled = true;
+
+    /* App Steering Defaults */
+    out_config->app_steering.gaming_steering_enabled = true;
+    out_config->app_steering.voip_steering_enabled = true;
+    out_config->app_steering.bulk_balancing_enabled = true;
+    out_config->app_steering.primary_gaming_wan_id = 1;
+    out_config->app_steering.primary_voip_wan_id = 1;
+
+    /* Telegram Defaults */
+    out_config->telegram.enabled = false;
+    out_config->telegram.notify_on_failover = true;
+    out_config->telegram.notify_on_recovery = true;
+
+    /* Web & Auth Defaults */
+    safe_str_copy(out_config->web.bind_ip, "0.0.0.0", sizeof(out_config->web.bind_ip));
+    out_config->web.port = 8080;
+    out_config->auth.enabled = true;
+    safe_str_copy(out_config->auth.username, "admin", sizeof(out_config->auth.username));
+    safe_str_copy(out_config->auth.password, "admin", sizeof(out_config->auth.password));
+    safe_str_copy(out_config->auth.session_token, "flux_token_admin_default", sizeof(out_config->auth.session_token));
+
+    /* NAT46 */
+    out_config->nat46.enabled = true;
+    safe_str_copy(out_config->nat46.synthetic_prefix, "198.18.0.0/15", sizeof(out_config->nat46.synthetic_prefix));
+    safe_str_copy(out_config->nat46.upstream_dns, "1.1.1.1", sizeof(out_config->nat46.upstream_dns));
+    safe_str_copy(out_config->nat46.starlink_wan_name, "veth_wan2", sizeof(out_config->nat46.starlink_wan_name));
+
+    return 0;
+}

@@ -1948,6 +1948,121 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
             strlen(rb), rb);
         send(client_fd, resp, len, 0); close_client_socket(client_fd);
+    } else if (strstr(req, "GET /api/v1/system/backup") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        char *backup_buf = malloc(65536);
+        if (!backup_buf) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Out of memory\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+
+        if (config_export_backup(ctx->config, backup_buf, 65536) != 0) {
+            free(backup_buf);
+            const char *rb = "{\"status\":\"error\",\"message\":\"Failed to generate backup bundle\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+
+        time_t now = time(NULL);
+        struct tm *tm_info = gmtime(&now);
+        char date_str[32] = "2026-09-12";
+        if (tm_info) strftime(date_str, sizeof(date_str), "%Y-%m-%d", tm_info);
+
+        size_t b_len = strlen(backup_buf);
+        char resp_hdr[512];
+        int hdr_len = snprintf(resp_hdr, sizeof(resp_hdr),
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: application/json\r\n"
+            "Content-Disposition: attachment; filename=\"fluxwan-backup-%s.fwb\"\r\n"
+            "Access-Control-Allow-Origin: *\r\n"
+            "Content-Length: %zu\r\n"
+            "Connection: close\r\n\r\n",
+            date_str, b_len);
+
+        send(client_fd, resp_hdr, hdr_len, 0);
+        send(client_fd, backup_buf, (int)b_len, 0);
+        free(backup_buf);
+        close_client_socket(client_fd);
+    } else if (strstr(req, "POST /api/v1/system/restore") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        char err_msg[256] = "Invalid payload";
+        bool success = false;
+        if (body) {
+            body += 4;
+            while (*body == ' ' || *body == '\t' || *body == '\r' || *body == '\n') body++;
+            fluxwan_config_t restored_cfg;
+            if (config_import_backup(body, &restored_cfg, err_msg, sizeof(err_msg)) == 0) {
+                const char *save_path = get_config_target_path(ctx);
+                if (config_save(save_path, &restored_cfg) < 0) {
+                    save_path = "/opt/fluxwan/config/fluxwan.json";
+                    config_save(save_path, &restored_cfg);
+                }
+                config_load(save_path, ctx->config);
+                net_apply_configuration(ctx->config, ctx->nl);
+                if (ctx->wan_mgr) wan_manager_rebalance(ctx->wan_mgr);
+                if (ctx->dhcp) dhcp_server_reload_config(ctx->dhcp, ctx->config);
+                success = true;
+                LOG_INFO("[System] Configuration restored successfully from backup.");
+                wan_manager_add_log("INFO", "Configuration restored from backup bundle and applied to kernel");
+            }
+        }
+        char resp_body[512];
+        if (success) {
+            snprintf(resp_body, sizeof(resp_body), "{\"status\":\"ok\",\"message\":\"Backup restored and applied to Linux kernel successfully!\"}");
+        } else {
+            snprintf(resp_body, sizeof(resp_body), "{\"status\":\"error\",\"message\":\"%s\"}", err_msg);
+        }
+        char resp[1024];
+        int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 %s\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            success ? "200 OK" : "400 Bad Request", strlen(resp_body), resp_body);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd);
+    } else if (strstr(req, "POST /api/v1/system/reset") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        fluxwan_config_t default_cfg;
+        config_reset_to_defaults(&default_cfg);
+        const char *save_path = get_config_target_path(ctx);
+        if (config_save(save_path, &default_cfg) < 0) {
+            save_path = "/opt/fluxwan/config/fluxwan.json";
+            config_save(save_path, &default_cfg);
+        }
+        config_load(save_path, ctx->config);
+        net_apply_configuration(ctx->config, ctx->nl);
+        if (ctx->wan_mgr) wan_manager_rebalance(ctx->wan_mgr);
+        if (ctx->dhcp) dhcp_server_reload_config(ctx->dhcp, ctx->config);
+
+        LOG_WARN("[System] Router reset to factory default configuration!");
+        wan_manager_add_log("WARN", "Router reset to factory default settings");
+
+        const char *rb = "{\"status\":\"ok\",\"message\":\"System reset to factory defaults successfully\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd);
     } else if (strstr(req, "POST /api/v1/assign") != NULL || strstr(req, "POST /api/v1/apply") != NULL) {
         /* Check admin authorization */
         if (!is_request_authorized(ctx->config, req)) {

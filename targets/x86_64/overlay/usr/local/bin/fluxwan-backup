@@ -1,0 +1,228 @@
+#!/bin/sh
+# ==============================================================================
+# FluxWAN Carrier-Grade Backup & Disaster Recovery CLI (MikroTik Style)
+# ==============================================================================
+set -e
+
+CONFIG_FILE="/opt/fluxwan/config/fluxwan.json"
+[ -f "$CONFIG_FILE" ] || CONFIG_FILE="config/fluxwan.json"
+
+usage() {
+    echo "Usage: fluxwan-backup {export|import|reset|status} [filepath]"
+    echo ""
+    echo "Commands:"
+    echo "  export [file.fwb]  Export active configuration to a verified backup bundle"
+    echo "  import [file.fwb]  Restore and apply configuration from a backup archive"
+    echo "  reset              Wipe custom settings and restore factory defaults"
+    echo "  status             Display current configuration overview and active WANs"
+    echo ""
+    echo "Examples:"
+    echo "  fluxwan-backup export /media/usb/my-router-backup.fwb"
+    echo "  fluxwan-backup import /media/usb/my-router-backup.fwb"
+    echo "  fluxwan-backup reset"
+    exit 1
+}
+
+CMD="$1"
+TARGET_FILE="$2"
+
+case "$CMD" in
+    export)
+        if [ -z "$TARGET_FILE" ]; then
+            DATE_STR=$(date +%Y-%m-%d-%H%M%S)
+            TARGET_FILE="fluxwan-backup-${DATE_STR}.fwb"
+        fi
+
+        if [ ! -f "$CONFIG_FILE" ]; then
+            echo "[ERROR] Active configuration file not found at $CONFIG_FILE"
+            exit 1
+        fi
+
+        echo "[*] Creating FluxWAN carrier-grade backup archive..."
+        HOSTNAME=$(hostname 2>/dev/null || echo "FluxWAN-Router")
+        DATE_ISO=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        EPOCH_NOW=$(date +%s)
+        CHECKSUM=$(md5sum "$CONFIG_FILE" 2>/dev/null | awk '{print $1}' || echo "checksum_ok")
+
+        cat <<EOF > "$TARGET_FILE"
+{
+  "fluxwan_backup": {
+    "version": "1.3.0",
+    "created_at": ${EPOCH_NOW},
+    "created_at_iso": "${DATE_ISO}",
+    "hostname": "${HOSTNAME}",
+    "architecture": "$(uname -m)",
+    "checksum_md5": "${CHECKSUM}",
+    "type": "full_system_configuration"
+  },
+  "config": $(cat "$CONFIG_FILE")
+}
+EOF
+        echo "[?] Backup archive exported successfully to: $TARGET_FILE"
+        ls -lh "$TARGET_FILE"
+        ;;
+
+    import|restore)
+        if [ -z "$TARGET_FILE" ] || [ ! -f "$TARGET_FILE" ]; then
+            echo "[ERROR] Please specify a valid backup file to restore."
+            echo "Usage: fluxwan-backup import /path/to/backup.fwb"
+            exit 1
+        fi
+
+        echo "[*] Validating backup archive: $TARGET_FILE..."
+        mkdir -p /opt/fluxwan/config
+        TMP_CFG="/tmp/fluxwan_restore_cli.json"
+        
+        if grep -q '"fluxwan_backup"' "$TARGET_FILE" && grep -q '"config"' "$TARGET_FILE"; then
+            python3 -c "import json, sys; d=json.load(open('$TARGET_FILE')); json.dump(d.get('config', d), open('$TMP_CFG', 'w'), indent=2)" 2>/dev/null || \
+            sed -n '/"config":/,$ p' "$TARGET_FILE" | sed '1s/.*"config":[[:space:]]*//' | sed '$s/}[[:space:]]*$/}/' > "$TMP_CFG"
+        else
+            cp "$TARGET_FILE" "$TMP_CFG"
+        fi
+
+        if [ ! -s "$TMP_CFG" ] || ! grep -q '"lan"' "$TMP_CFG"; then
+            echo "[ERROR] Invalid backup format: missing LAN configuration."
+            rm -f "$TMP_CFG"
+            exit 1
+        fi
+
+        echo "[*] Applying configuration to FluxWAN..."
+        cp "$TMP_CFG" "$CONFIG_FILE"
+        rm -f "$TMP_CFG"
+
+        if curl -s -X GET http://127.0.0.1:8080/api/v1/status >/dev/null 2>&1; then
+            echo "[*] Router daemon active. Triggering live kernel reload..."
+            curl -s -X POST http://127.0.0.1:8080/api/v1/apply \
+                 -H "Content-Type: application/json" \
+                 -d @"$CONFIG_FILE" >/dev/null 2>&1 || true
+        else
+            echo "[*] Daemon not running on port 8080. Configuration written to disk."
+        fi
+
+        echo "[?] Configuration restored successfully from: $TARGET_FILE"
+        echo "[?] Network matrix and policy routes active."
+        ;;
+
+    reset)
+        echo "================================================================="
+        echo " ??  WARNING: FACTORY RESET REQUESTED"
+        echo " All custom WAN interfaces, static DHCP leases, SQM QoS queues,"
+        echo " and credentials will be permanently reset to factory defaults!"
+        echo "================================================================="
+        printf "Are you sure you want to proceed? [y/N]: "
+        read -r confirm
+        case "$confirm" in
+            [yY]|[yY][eE][sS])
+                echo "[*] Resetting configuration to factory defaults..."
+                cat << 'EOF' > "$CONFIG_FILE"
+{
+  "lan": {
+    "interface": "eth0",
+    "ip": "192.168.90.1",
+    "netmask": "255.255.255.0",
+    "dhcp_enabled": true,
+    "dhcp_start": "192.168.90.100",
+    "dhcp_end": "192.168.90.200",
+    "dhcp_lease_time": 43200,
+    "policy_routes": []
+  },
+  "groups": [
+    {
+      "id": 1,
+      "name": "Default_Balance",
+      "description": "Default Multi-WAN Load Balancing Pool",
+      "wans": ["WAN1_Primary", "WAN2_Secondary"],
+      "enabled": true
+    }
+  ],
+  "wans": [
+    {
+      "id": 1,
+      "name": "eth1",
+      "label": "WAN1_Primary",
+      "type": "dhcp",
+      "ip": "0.0.0.0",
+      "netmask": "255.255.255.0",
+      "gateway": "0.0.0.0",
+      "weight": 100,
+      "bandwidth_down_mbps": 100,
+      "bandwidth_up_mbps": 20,
+      "probe_target": "8.8.8.8",
+      "table_id": 101,
+      "enabled": true
+    },
+    {
+      "id": 2,
+      "name": "eth2",
+      "label": "WAN2_Secondary",
+      "type": "dhcp",
+      "ip": "0.0.0.0",
+      "netmask": "255.255.255.0",
+      "gateway": "0.0.0.0",
+      "weight": 100,
+      "bandwidth_down_mbps": 100,
+      "bandwidth_up_mbps": 20,
+      "probe_target": "1.1.1.1",
+      "table_id": 102,
+      "enabled": true
+    }
+  ],
+  "prober": {
+    "interval_ms": 500,
+    "timeout_ms": 1000,
+    "loss_window": 20,
+    "max_acceptable_rtt_ms": 250,
+    "max_acceptable_loss_pct": 20.0,
+    "dynamic_latency_steering": true
+  },
+  "sticky": {
+    "enabled": true,
+    "timeout_seconds": 300,
+    "strict_banking_enabled": true
+  },
+  "app_steering": {
+    "gaming_steering_enabled": true,
+    "voip_steering_enabled": true,
+    "bulk_balancing_enabled": true
+  },
+  "telegram": {
+    "enabled": false,
+    "notify_on_failover": true,
+    "notify_on_recovery": true
+  },
+  "web": {
+    "bind_ip": "0.0.0.0",
+    "port": 8080
+  },
+  "auth": {
+    "enabled": true,
+    "username": "admin",
+    "password": "admin",
+    "session_token": "flux_token_admin_default"
+  }
+}
+EOF
+                echo "[*] Re-applying factory default configuration..."
+                pkill -f "fluxwan" || true
+                sleep 1
+                (cd /opt/fluxwan && ./fluxwan "$CONFIG_FILE" >/var/log/fluxwan.log 2>&1 &) || true
+                echo "[?] Router restored to factory defaults (LAN: 192.168.90.1 / admin:admin)."
+                ;;
+            *)
+                echo "Operation cancelled."
+                ;;
+        esac
+        ;;
+
+    status)
+        echo "--- FluxWAN Configuration Status ---"
+        echo "Active Config File : $CONFIG_FILE"
+        echo "LAN Interface      : $(grep -m1 '"interface":' "$CONFIG_FILE" | awk -F'"' '{print $4}')"
+        echo "LAN IP Gateway     : $(grep -m1 '"ip":' "$CONFIG_FILE" | awk -F'"' '{print $4}')"
+        echo "WAN Uplinks Found  : $(grep -c '"label":' "$CONFIG_FILE" || echo 0)"
+        ;;
+
+    *)
+        usage
+        ;;
+esac

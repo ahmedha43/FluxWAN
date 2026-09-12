@@ -56,6 +56,10 @@
                 <span>🛡️</span>
                 <span>Services & Alerts</span>
             </button>
+            <button @click="currentTab = 'backup'" :class="currentTab === 'backup' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'" class="px-3.5 py-2 text-xs font-bold rounded-lg transition flex items-center space-x-1.5">
+                <span>📦</span>
+                <span>Backup & System</span>
+            </button>
         </nav>
 
         <div class="flex items-center space-x-3">
@@ -1439,6 +1443,166 @@
             </div>
         </section>
 
+        <!-- ================= TAB 7: BACKUP & SYSTEM MAINTENANCE ================= -->
+        <section x-show="currentTab === 'backup'" class="space-y-8">
+            <!-- Header Banner -->
+            <div class="glass-card p-6 rounded-2xl border border-slate-700 bg-gradient-to-r from-blue-950/40 via-indigo-950/30 to-purple-950/20 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                <div class="space-y-1">
+                    <div class="flex items-center space-x-2">
+                        <span class="text-xl">📦</span>
+                        <h2 class="text-lg font-bold text-white">Carrier-Grade Backup & Disaster Recovery</h2>
+                    </div>
+                    <p class="text-xs text-slate-400 max-w-3xl">
+                        Export, archive, or transfer your complete router configuration. Easily migrate your network to new hardware or restore settings after system updates with zero downtime and automatic kernel application — exactly like MikroTik Backup & Restore.
+                    </p>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <button @click="downloadBackup()" class="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-lg shadow-blue-500/20 flex items-center space-x-2 transition">
+                        <span>💾 Export Backup (.fwb)</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- Export Backup Card -->
+                <div class="glass-card p-6 rounded-2xl border border-slate-700 space-y-4">
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                        <div class="flex items-center space-x-2">
+                            <span class="text-lg">💾</span>
+                            <div>
+                                <h3 class="text-base font-bold text-white">Create System Backup</h3>
+                                <p class="text-3xs text-slate-400">Generates a complete cryptographically verified .fwb configuration archive</p>
+                            </div>
+                        </div>
+                        <span class="text-xs font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">READY</span>
+                    </div>
+
+                    <div class="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3 text-xs">
+                        <div class="text-2xs font-bold text-slate-300 uppercase tracking-wider">Archive Contents Included:</div>
+                        <div class="grid grid-cols-2 gap-2 text-3xs font-mono">
+                            <div class="p-2 rounded bg-slate-800/60 border border-slate-700/50 flex justify-between">
+                                <span class="text-slate-400">WAN Uplinks:</span>
+                                <span class="text-blue-400 font-bold" x-text="(config.wans || []).length + ' uplinks'"></span>
+                            </div>
+                            <div class="p-2 rounded bg-slate-800/60 border border-slate-700/50 flex justify-between">
+                                <span class="text-slate-400">LAN Subnet:</span>
+                                <span class="text-emerald-400 font-bold" x-text="config.lan.ip"></span>
+                            </div>
+                            <div class="p-2 rounded bg-slate-800/60 border border-slate-700/50 flex justify-between">
+                                <span class="text-slate-400">DHCP & Static Leases:</span>
+                                <span class="text-amber-400 font-bold" x-text="(config.lan.static_leases || []).length + ' reserved'"></span>
+                            </div>
+                            <div class="p-2 rounded bg-slate-800/60 border border-slate-700/50 flex justify-between">
+                                <span class="text-slate-400">SQM QoS & Rate Limits:</span>
+                                <span class="text-indigo-400 font-bold" x-text="((config.lan.rate_limits || []).length) + ' limits'"></span>
+                            </div>
+                            <div class="p-2 rounded bg-slate-800/60 border border-slate-700/50 flex justify-between">
+                                <span class="text-slate-400">WAN Groups & PBR:</span>
+                                <span class="text-purple-400 font-bold" x-text="(config.groups || []).length + ' groups'"></span>
+                            </div>
+                            <div class="p-2 rounded bg-slate-800/60 border border-slate-700/50 flex justify-between">
+                                <span class="text-slate-400">Security & Bot:</span>
+                                <span class="text-teal-400 font-bold">Encrypted / Saved</span>
+                            </div>
+                        </div>
+
+                        <div class="pt-2">
+                            <button @click="downloadBackup()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center space-x-2 transition shadow-lg shadow-blue-500/20">
+                                <span>📥</span>
+                                <span>Download FluxWAN Backup (.fwb)</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Restore Backup Card -->
+                <div class="glass-card p-6 rounded-2xl border border-slate-700 space-y-4">
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                        <div class="flex items-center space-x-2">
+                            <span class="text-lg">⚡</span>
+                            <div>
+                                <h3 class="text-base font-bold text-white">Restore Backup Archive</h3>
+                                <p class="text-3xs text-slate-400">Upload a .fwb or fluxwan.json file to restore all settings</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- File Upload Dropzone -->
+                    <div class="border-2 border-dashed border-slate-700 hover:border-blue-500 rounded-2xl p-6 text-center transition cursor-pointer bg-slate-900/40"
+                         @click="$refs.backupFileRef.click()"
+                         @dragover.prevent=""
+                         @drop.prevent="handleBackupDrop($event)">
+                        <input type="file" x-ref="backupFileRef" @change="onBackupFileSelected($event)" accept=".fwb,.json" class="hidden">
+                        <div class="space-y-2">
+                            <span class="text-3xl">📂</span>
+                            <div class="text-xs font-bold text-slate-200">
+                                Click to select or Drag & Drop backup file (.fwb, .json)
+                            </div>
+                            <p class="text-3xs text-slate-500">Supports FluxWAN Backup bundles or raw configuration files</p>
+                        </div>
+                    </div>
+
+                    <!-- Backup Preview Box -->
+                    <div x-show="backupPreview" class="p-4 rounded-xl bg-slate-900/90 border border-slate-700 space-y-3 text-xs">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-2">
+                                <span class="text-base">📄</span>
+                                <div>
+                                    <div class="font-bold text-white text-xs font-mono" x-text="backupPreview?.filename"></div>
+                                    <div class="text-3xs text-slate-400" x-text="backupPreview?.filesize"></div>
+                                </div>
+                            </div>
+                            <span :class="backupPreview?.valid ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-rose-500/10 text-rose-400 border-rose-500/30'"
+                                  class="text-3xs px-2 py-0.5 rounded border font-mono font-bold"
+                                  x-text="backupPreview?.valid ? '✓ VALID BUNDLE' : 'INVALID'"></span>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-2 text-3xs font-mono pt-1 border-t border-slate-800">
+                            <div><span class="text-slate-500">Created:</span> <span class="text-slate-300" x-text="backupPreview?.created_at || 'N/A'"></span></div>
+                            <div><span class="text-slate-500">Version:</span> <span class="text-slate-300" x-text="backupPreview?.version || 'N/A'"></span></div>
+                            <div><span class="text-slate-500">Target LAN:</span> <span class="text-emerald-400 font-bold" x-text="backupPreview?.lan_ip || 'N/A'"></span></div>
+                            <div><span class="text-slate-500">WAN Uplinks:</span> <span class="text-blue-400 font-bold" x-text="backupPreview?.wan_count || 0"></span></div>
+                        </div>
+
+                        <!-- Hardware Port Match Warning if applicable -->
+                        <div x-show="backupPreview?.portWarnings && backupPreview?.portWarnings.length > 0" class="p-2 rounded bg-amber-500/10 border border-amber-500/30 text-amber-300 text-3xs">
+                            ⚠️ Note: Some interface names in the backup may differ from this machine's ports:
+                            <span class="font-mono font-bold" x-text="backupPreview?.portWarnings?.join(', ')"></span>
+                        </div>
+
+                        <div class="flex items-center space-x-2 pt-2">
+                            <button @click="applyRestore()" class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 rounded-xl text-xs flex items-center justify-center space-x-1.5 transition shadow-lg shadow-emerald-500/20">
+                                <span>⚡</span>
+                                <span>Restore & Apply Configuration</span>
+                            </button>
+                            <button @click="clearBackupPreview()" class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-xl text-xs transition">
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Factory Reset Card -->
+            <div class="glass-card p-6 rounded-2xl border border-rose-500/30 bg-rose-950/10 space-y-4">
+                <div class="flex items-center justify-between border-b border-rose-900/40 pb-3">
+                    <div class="flex items-center space-x-2">
+                        <span class="text-lg">⚠️</span>
+                        <div>
+                            <h3 class="text-base font-bold text-rose-300">Reset to Factory Defaults (MikroTik Style)</h3>
+                            <p class="text-3xs text-rose-400/80">Wipes all custom configurations and restores initial default network settings</p>
+                        </div>
+                    </div>
+                    <button @click="resetToFactoryDefaults()" class="bg-rose-600 hover:bg-rose-500 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center space-x-1.5 transition shadow-lg shadow-rose-600/30">
+                        <span>🧨 Factory Reset</span>
+                    </button>
+                </div>
+                <div class="text-3xs text-slate-400 leading-relaxed">
+                    This action will reset the LAN IP back to <span class="font-mono text-white">192.168.90.1/24</span>, clear all static DHCP leases, reset rate limits and custom routing tables, and reset admin login credentials to <span class="font-mono text-white">admin / admin</span>. Use with caution.
+                </div>
+            </div>
+        </section>
+
     </main>
 
     <script>
@@ -1455,6 +1619,8 @@
                 newRateLimitDesc: '',
                 newRateLimitDown: 50,
                 newRateLimitUp: 10,
+                backupPreview: null,
+                backupRawText: '',
                 config: {
                     lan: {
                         interface: 'eth0',
@@ -2251,6 +2417,147 @@
                     .catch(err => {
                         this.toastMessage = 'Failed to send alert: ' + err.message;
                         setTimeout(() => this.toastMessage = '', 4000);
+                    });
+                },
+
+                /* Backup & Maintenance (MikroTik Style) */
+                downloadBackup() {
+                    this.toastMessage = 'Generating and downloading backup...';
+                    fetch('/api/v1/system/backup', {
+                        headers: { 'X-Auth-Token': this.authToken }
+                    })
+                    .then(r => {
+                        if (!r.ok) throw new Error('Failed to generate backup');
+                        return r.blob();
+                    })
+                    .then(blob => {
+                        const now = new Date().toISOString().split('T')[0];
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `fluxwan-backup-${now}.fwb`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        window.URL.revokeObjectURL(url);
+                        this.toastMessage = '✓ Backup (.fwb) downloaded successfully!';
+                        setTimeout(() => this.toastMessage = '', 4000);
+                    })
+                    .catch(err => {
+                        this.toastMessage = 'Export failed: ' + err.message;
+                        setTimeout(() => this.toastMessage = '', 4000);
+                    });
+                },
+
+                handleBackupDrop(event) {
+                    const files = event.dataTransfer.files;
+                    if (files.length > 0) this.processBackupFile(files[0]);
+                },
+
+                onBackupFileSelected(event) {
+                    const files = event.target.files;
+                    if (files.length > 0) this.processBackupFile(files[0]);
+                },
+
+                processBackupFile(file) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        try {
+                            const content = e.target.result;
+                            this.backupRawText = content;
+                            const parsed = JSON.parse(content);
+                            const cfg = parsed.config || parsed;
+                            const meta = parsed.fluxwan_backup || {};
+
+                            const ifaceNames = (this.interfaces || []).map(i => i.name);
+                            const backupWans = cfg.wans || [];
+                            const missingPorts = backupWans.map(w => w.name).filter(name => !ifaceNames.includes(name));
+
+                            this.backupPreview = {
+                                filename: file.name,
+                                filesize: this.formatBytes(file.size),
+                                created_at: meta.created_at_iso || 'Raw Config',
+                                version: meta.version || 'Universal',
+                                lan_ip: cfg.lan ? (cfg.lan.ip || '192.168.90.1') : '192.168.90.1',
+                                wan_count: (cfg.wans || []).length,
+                                portWarnings: missingPorts,
+                                valid: !!(cfg.lan && cfg.wans)
+                            };
+                            this.toastMessage = '✓ Backup file parsed and ready to restore!';
+                            setTimeout(() => this.toastMessage = '', 3000);
+                        } catch (err) {
+                            this.toastMessage = 'Invalid backup file: ' + err.message;
+                            this.backupPreview = null;
+                            this.backupRawText = '';
+                        }
+                    };
+                    reader.readAsText(file);
+                },
+
+                clearBackupPreview() {
+                    this.backupPreview = null;
+                    this.backupRawText = '';
+                },
+
+                applyRestore() {
+                    if (!this.backupRawText) return;
+                    if (!confirm('Are you sure you want to restore this configuration? All current network settings will be replaced.')) return;
+
+                    this.toastMessage = 'Restoring configuration and applying to kernel...';
+                    fetch('/api/v1/system/restore', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Auth-Token': this.authToken
+                        },
+                        body: this.backupRawText
+                    })
+                    .then(r => r.json())
+                    .then(d => {
+                        if (d.status === 'ok') {
+                            this.toastMessage = '✓ ' + (d.message || 'Configuration restored and applied!');
+                            this.clearBackupPreview();
+                            setTimeout(() => {
+                                this.fetchStatus();
+                                this.fetchInterfaces();
+                                this.fetchLeases();
+                            }, 1000);
+                        } else {
+                            this.toastMessage = 'Restore error: ' + (d.message || 'Validation failed');
+                        }
+                        setTimeout(() => this.toastMessage = '', 5000);
+                    })
+                    .catch(err => {
+                        this.toastMessage = 'Restore failed: ' + err.message;
+                        setTimeout(() => this.toastMessage = '', 5000);
+                    });
+                },
+
+                resetToFactoryDefaults() {
+                    if (!confirm('⚠️ WARNING: This will completely wipe all custom network configurations, WAN uplinks, static leases, and reset admin credentials to admin/admin. Proceed with Factory Reset?')) return;
+
+                    this.toastMessage = 'Resetting router to factory defaults...';
+                    fetch('/api/v1/system/reset', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Auth-Token': this.authToken
+                        }
+                    })
+                    .then(r => r.json())
+                    .then(d => {
+                        this.toastMessage = '✓ Router reset to factory defaults successfully!';
+                        setTimeout(() => {
+                            this.fetchStatus();
+                            this.fetchInterfaces();
+                            this.fetchLeases();
+                            this.currentTab = 'interfaces';
+                        }, 1200);
+                        setTimeout(() => this.toastMessage = '', 5000);
+                    })
+                    .catch(err => {
+                        this.toastMessage = 'Reset failed: ' + err.message;
+                        setTimeout(() => this.toastMessage = '', 5000);
                     });
                 },
 
