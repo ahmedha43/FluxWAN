@@ -140,6 +140,16 @@ static void determine_role(const char *ifname, const fluxwan_config_t *config, i
     }
 }
 
+static bool is_interface_disabled(const char *ifname, const fluxwan_config_t *config) {
+    if (!config || !ifname) return false;
+    for (uint32_t i = 0; i < config->wan_count; i++) {
+        if (strcmp(config->wans[i].name, ifname) == 0) {
+            return !config->wans[i].enabled;
+        }
+    }
+    return false;
+}
+
 int net_discovery_scan(const fluxwan_config_t *config, iface_discovery_result_t *out_result) {
     if (!out_result) return -1;
     memset(out_result, 0, sizeof(iface_discovery_result_t));
@@ -162,48 +172,64 @@ int net_discovery_scan(const fluxwan_config_t *config, iface_discovery_result_t 
         /* Read MAC address */
         read_sysfs_string(p->name, "address", p->mac_addr, sizeof(p->mac_addr));
 
-        /* Automatically ensure interface is administratively UP so driver negotiates link and detects carrier */
+        bool disabled = is_interface_disabled(p->name, config);
+
+        /* Automatically ensure active interface is administratively UP so driver negotiates link,
+           and disabled interface is kept administratively DOWN */
         int s = socket(AF_INET, SOCK_DGRAM, 0);
         if (s >= 0) {
             struct ifreq ifr;
             memset(&ifr, 0, sizeof(ifr));
             strncpy(ifr.ifr_name, p->name, sizeof(ifr.ifr_name) - 1);
             if (ioctl(s, SIOCGIFFLAGS, &ifr) == 0) {
-                if (!(ifr.ifr_flags & IFF_UP)) {
-                    ifr.ifr_flags |= (IFF_UP | IFF_RUNNING);
-                    ioctl(s, SIOCSIFFLAGS, &ifr);
+                if (disabled) {
+                    if (ifr.ifr_flags & IFF_UP) {
+                        ifr.ifr_flags &= ~IFF_UP;
+                        ioctl(s, SIOCSIFFLAGS, &ifr);
+                    }
+                } else {
+                    if (!(ifr.ifr_flags & IFF_UP)) {
+                        ifr.ifr_flags |= (IFF_UP | IFF_RUNNING);
+                        ioctl(s, SIOCSIFFLAGS, &ifr);
+                    }
                 }
             }
             close(s);
         }
 
-        /* Read operational state and carrier */
-        char operstate[32];
-        read_sysfs_string(p->name, "operstate", operstate, sizeof(operstate));
-        p->is_up = (strcmp(operstate, "up") == 0 || strcmp(operstate, "unknown") == 0);
-
-        uint64_t carrier = read_sysfs_uint64(p->name, "carrier");
-        p->has_carrier = (carrier == 1 || p->is_up);
-        if (p->has_carrier) p->is_up = true;
-
-        /* Read physical negotiated link speed in Mbps (10, 100, 1000, 2500, 10000, 40000...) */
-        if (!p->has_carrier) {
+        if (disabled) {
+            p->is_up = false;
+            p->has_carrier = false;
             p->speed_mbps = 0;
         } else {
-            char speed_path[64];
-            snprintf(speed_path, sizeof(speed_path), "/tmp/fluxwan_speed_%s", p->name);
-            FILE *sf = fopen(speed_path, "r");
-            if (sf) {
-                uint32_t osp = 0;
-                if (fscanf(sf, "%u", &osp) == 1 && osp > 0) p->speed_mbps = osp;
-                fclose(sf);
-            }
-            if (p->speed_mbps == 0) {
-                uint64_t speed = read_sysfs_uint64(p->name, "speed");
-                if (speed > 0 && speed < 1000000) {
-                    p->speed_mbps = (uint32_t)speed;
-                } else {
-                    p->speed_mbps = 1000;
+            /* Read operational state and carrier */
+            char operstate[32];
+            read_sysfs_string(p->name, "operstate", operstate, sizeof(operstate));
+            p->is_up = (strcmp(operstate, "up") == 0 || strcmp(operstate, "unknown") == 0);
+
+            uint64_t carrier = read_sysfs_uint64(p->name, "carrier");
+            p->has_carrier = (carrier == 1 || p->is_up);
+            if (p->has_carrier) p->is_up = true;
+
+            /* Read physical negotiated link speed in Mbps (10, 100, 1000, 2500, 10000, 40000...) */
+            if (!p->has_carrier) {
+                p->speed_mbps = 0;
+            } else {
+                char speed_path[64];
+                snprintf(speed_path, sizeof(speed_path), "/tmp/fluxwan_speed_%s", p->name);
+                FILE *sf = fopen(speed_path, "r");
+                if (sf) {
+                    uint32_t osp = 0;
+                    if (fscanf(sf, "%u", &osp) == 1 && osp > 0) p->speed_mbps = osp;
+                    fclose(sf);
+                }
+                if (p->speed_mbps == 0) {
+                    uint64_t speed = read_sysfs_uint64(p->name, "speed");
+                    if (speed > 0 && speed < 1000000) {
+                        p->speed_mbps = (uint32_t)speed;
+                    } else {
+                        p->speed_mbps = 1000;
+                    }
                 }
             }
         }
