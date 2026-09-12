@@ -81,8 +81,6 @@ done
 ip link set "$LAN_IFACE" up 2>/dev/null || true
 # Standard Primary LAN Gateway (192.168.90.1 - Avoids any clash with ISP/Modem 192.168.1.1)
 ip addr add 192.168.90.1/24 dev "$LAN_IFACE" 2>/dev/null || ifconfig "$LAN_IFACE" 192.168.90.1 netmask 255.255.255.0 up 2>/dev/null || true
-ip addr add 192.168.155.100/24 dev "$LAN_IFACE" 2>/dev/null || true
-ip addr add 192.168.88.200/24 dev "$LAN_IFACE" 2>/dev/null || true
 
 # 7. Web Management Port 80 -> 8080 Redirection
 iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 8080 2>/dev/null || true

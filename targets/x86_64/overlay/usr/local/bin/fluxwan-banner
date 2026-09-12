@@ -11,20 +11,17 @@ echo "             High-Performance Multi-WAN Router Appliance              "
 echo "      Developed by Ahmed Al-Dulaimi (أحمد الدليمي) | GNU GPLv3       "
 echo "======================================================================"
 
-LAN_IPS=$(ip -4 addr show eth0 2>/dev/null | grep inet | awk '{print $2}' | cut -d/ -f1 | tr '\n' ' ')
-if [ -z "$LAN_IPS" ]; then
-    LAN_IPS="192.168.90.1 192.168.155.100 192.168.88.200"
+LAN_IP=$(ip -4 addr show eth0 2>/dev/null | grep inet | awk '{print $2}' | cut -d/ -f1 | head -n1)
+if [ -z "$LAN_IP" ]; then
+    LAN_IP="192.168.90.1"
 fi
 
-PRIMARY_IP=$(echo "$LAN_IPS" | awk '{print $1}')
-echo " [*] Primary Web UI      : http://$PRIMARY_IP:8080 (or http://$PRIMARY_IP)"
-echo " [*] All Reachable URLs  :"
-for tip in $LAN_IPS; do
-    echo "     -> http://$tip:8080"
-done
-echo " [*] SSH Access          : ssh root@$PRIMARY_IP (Password: admin)"
+echo " [*] Dedicated LAN IP    : $LAN_IP (Subnet: 255.255.255.0 / 24)"
+echo " [*] Web Management UI   : http://$LAN_IP:8080 (or http://$LAN_IP)"
+echo " [*] DHCP Client Pool    : 192.168.90.100 - 192.168.90.200 (Gateway: $LAN_IP)"
+echo " [*] SSH Terminal Access : ssh root@$LAN_IP (Password: admin)"
 echo " [*] Web UI Credentials  : Username: admin | Password: admin"
-echo " [*] Interface Status    :"
+echo " [*] Network Adapters    :"
 for iface in $(ls /sys/class/net 2>/dev/null | grep -v "lo"); do
     state=$(cat "/sys/class/net/$iface/operstate" 2>/dev/null || echo "unknown")
     mac=$(cat "/sys/class/net/$iface/address" 2>/dev/null || echo "")
