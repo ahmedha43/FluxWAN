@@ -51,8 +51,13 @@ TEST_KATRAN = test_katran_nextgen
 
 all: ui bpf $(TARGET) $(LAB_TARGET)
 
-ui:
+include/ui_assets.h: web/index.html scripts/embed_ui.py
 	@py scripts/embed_ui.py || python3 scripts/embed_ui.py
+
+ui: include/ui_assets.h
+
+src/web_server.o: src/web_server.c include/ui_assets.h
+	$(CC) $(CFLAGS) -c $< -o $@
 
 bpf: $(BPF_OBJS)
 

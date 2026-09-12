@@ -1,7 +1,10 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-or-later OR GPL-3.0-or-later
 /* ==========================================================================
  * FluxWAN - High Performance Stateless NAT46 / SIIT Translation Engine
  * Translates IPv4 synthetic traffic to Native IPv6 for Starlink CGNAT Bypass
+ *
+ * Copyright (C) 2026 Ahmed Al-Dulaimi (أحمد الدليمي). All rights reserved.
+ * Author: Ahmed Al-Dulaimi (أحمد الدليمي)
  * ========================================================================== */
 
 #include <linux/bpf.h>

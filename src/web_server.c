@@ -1,3 +1,17 @@
+/*
+ * FluxWAN - High-Performance Multi-WAN Load Balancing OS
+ *
+ * Copyright (C) 2026 Ahmed Al-Dulaimi (أحمد الدليمي). All rights reserved.
+ * Author: Ahmed Al-Dulaimi (أحمد الدليمي)
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 #include "web_server.h"
 #include "ui_assets.h"
 #include "config.h"

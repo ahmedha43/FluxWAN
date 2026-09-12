@@ -1,3 +1,17 @@
+/*
+ * FluxWAN - High-Performance Multi-WAN Load Balancing OS
+ *
+ * Copyright (C) 2026 Ahmed Al-Dulaimi (أحمد الدليمي). All rights reserved.
+ * Author: Ahmed Al-Dulaimi (أحمد الدليمي)
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 #ifndef FLUXWAN_H
 #define FLUXWAN_H
 
@@ -47,6 +61,9 @@ typedef int socket_t;
 #endif
 
 #define FLUXWAN_VERSION "1.2.3"
+#define FLUXWAN_AUTHOR "Ahmed Al-Dulaimi (أحمد الدليمي)"
+#define FLUXWAN_LICENSE "GNU GPLv3"
+#define FLUXWAN_COPYRIGHT "Copyright (C) 2026 Ahmed Al-Dulaimi. All rights reserved."
 #define MAX_WANS 8
 #define MAX_IFNAME_LEN 32
 #define MAX_LABEL_LEN 64

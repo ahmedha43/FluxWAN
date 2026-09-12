@@ -8,6 +8,7 @@ echo "    ██╔══╝  ██║     ██║   ██║ ██╔█�
 echo "    ██║     ███████╗╚██████╔╝██╔╝ ██╗╚███╔███╔╝██║  ██║██║ ╚████║     "
 echo "    ╚═╝     ╚══════╝ ╚═════╝ ╚═╝  ╚═╝ ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═══╝     "
 echo "             High-Performance Multi-WAN Router Appliance              "
+echo "      Developed by Ahmed Al-Dulaimi (أحمد الدليمي) | GNU GPLv3       "
 echo "======================================================================"
 
 LAN_IPS=$(ip -4 addr show eth0 2>/dev/null | grep inet | awk '{print $2}' | cut -d/ -f1 | tr '\n' ' ')

@@ -1,3 +1,17 @@
+/*
+ * FluxWAN - High-Performance Multi-WAN Load Balancing OS
+ *
+ * Copyright (C) 2026 Ahmed Al-Dulaimi (أحمد الدليمي). All rights reserved.
+ * Author: Ahmed Al-Dulaimi (أحمد الدليمي)
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 #include "fluxwan.h"
 #include "config.h"
 #include "netlink_manager.h"
@@ -32,7 +46,9 @@ int main(int argc, char *argv[]) {
     }
 
     printf("===============================================================\n");
-    printf("   FluxWAN - Bare-Metal x86 Linux Multi-WAN Router v%s   \n", FLUXWAN_VERSION);
+    printf("   FluxWAN - Bare-Metal Linux Multi-WAN Carrier Router v%s     \n", FLUXWAN_VERSION);
+    printf("   Developed by %s                     \n", FLUXWAN_AUTHOR);
+    printf("   License: %s | %s\n", FLUXWAN_LICENSE, FLUXWAN_COPYRIGHT);
     printf("===============================================================\n");
     setvbuf(stdout, NULL, _IONBF, 0);
 

@@ -1,3 +1,17 @@
+/*
+ * FluxWAN - High-Performance Multi-WAN Load Balancing OS
+ *
+ * Copyright (C) 2026 Ahmed Al-Dulaimi (أحمد الدليمي). All rights reserved.
+ * Author: Ahmed Al-Dulaimi (أحمد الدليمي)
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 #include "config.h"
 #include <ctype.h>
 
@@ -1000,6 +1014,8 @@ int config_export_backup(const fluxwan_config_t *config, char *out_json, size_t 
         "{\n"
         "  \"fluxwan_backup\": {\n"
         "    \"version\": \"%s\",\n"
+        "    \"author\": \"%s\",\n"
+        "    \"license\": \"%s\",\n"
         "    \"created_at\": %lld,\n"
         "    \"created_at_iso\": \"%s\",\n"
         "    \"hostname\": \"%s\",\n"
@@ -1011,6 +1027,8 @@ int config_export_backup(const fluxwan_config_t *config, char *out_json, size_t 
         "  \"config\": %s\n"
         "}\n",
         FLUXWAN_VERSION,
+        FLUXWAN_AUTHOR,
+        FLUXWAN_LICENSE,
         (long long)now,
         iso_time[0] ? iso_time : "2026-09-12T13:00:00Z",
         hostname,

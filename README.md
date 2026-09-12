@@ -3,7 +3,8 @@
 > **High-Performance Multi-WAN Load Balancing, Traffic Aggregation & Embedded Network Operating System**  
 > Powered by **Linux 6.6 LTS**, **eBPF XDP (eXpress Data Path)**, **Stateless NAT46 (SIIT)**, and a **Lightweight C Reactor Core**.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](LICENSE)
+[![Author: Ahmed Al-Dulaimi](https://img.shields.io/badge/Author-Ahmed%20Al--Dulaimi%20(%D8%A3%D8%AD%D9%85%D8%AF%20%D8%A7%D9%84%D8%AF%D9%84%D9%8A%D9%85%D9%8A)-emerald.svg)](https://github.com/ahmedha43)
 [![Architecture](https://img.shields.io/badge/Arch-ARM64%20%7C%20x86__64%20%7C%20MIPS-emerald.svg)]()
 [![Kernel](https://img.shields.io/badge/Linux-6.6%20LTS-orange.svg)]()
 [![Data Plane](https://img.shields.io/badge/Data%20Plane-eBPF%20XDP%20(277%20Mpps)-purple.svg)]()
@@ -178,5 +179,12 @@ Once booted, FluxWAN is accessible via browser:
 
 ---
 
+## 👨‍💻 Developer & Intellectual Property
+- **Lead Architect & Developer**: **Ahmed Al-Dulaimi (أحمد الدليمي)**
+- **Project Repository**: [FluxWAN on GitHub](https://github.com/ahmedha43/FluxWAN)
+- **Copyright**: Copyright (C) 2026 Ahmed Al-Dulaimi. All rights reserved.
+
+---
+
 ## 📄 License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This software is licensed under the **GNU General Public License v3.0 (GPLv3)**. See the [LICENSE](LICENSE) file for the full license terms.

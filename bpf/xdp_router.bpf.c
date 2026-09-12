@@ -1,6 +1,11 @@
 /* ===========================================================================
  * FluxWAN XDP Egress Multi-WAN Router — eBPF/XDP Kernel Program
  *
+ * Copyright (C) 2026 Ahmed Al-Dulaimi (أحمد الدليمي). All rights reserved.
+ * Author: Ahmed Al-Dulaimi (أحمد الدليمي)
+ * Licensed under the GNU General Public License v3.0 (GPLv3)
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
  * Architecture inspired by Facebook Katran (https://github.com/facebookincubator/katran)
  * Adapted for Egress Multi-WAN Gateway (vs Katran's Ingress L4 LB)
  *
