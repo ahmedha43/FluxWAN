@@ -324,8 +324,16 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
 
     int offset = snprintf(buf, max_len,
         "{\n"
+        "  \"system\": {\n"
+        "    \"version\": \"%s\",\n"
+        "    \"author\": \"%s\",\n"
+        "    \"license\": \"%s\",\n"
+        "    \"copyright\": \"%s\"\n"
+        "  },\n"
         "  \"lan\": { \"interface\": \"%s\", \"ip\": \"%s\", \"netmask\": \"%s\", \"dhcp_enabled\": %s },\n"
-        "  \"wans\": [\n", config->lan.name, lan_ip, lan_mask, config->lan.dhcp_enabled ? "true" : "false");
+        "  \"wans\": [\n",
+        FLUXWAN_VERSION, FLUXWAN_AUTHOR, FLUXWAN_LICENSE, FLUXWAN_COPYRIGHT,
+        config->lan.name, lan_ip, lan_mask, config->lan.dhcp_enabled ? "true" : "false");
 
     for (uint32_t i = 0; i < config->wan_count; i++) {
         const wan_config_t *w = &config->wans[i];

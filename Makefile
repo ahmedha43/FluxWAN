@@ -51,7 +51,7 @@ TEST_KATRAN = test_katran_nextgen
 
 all: ui bpf $(TARGET) $(LAB_TARGET)
 
-include/ui_assets.h: web/index.html scripts/embed_ui.py
+include/ui_assets.h: web/index.html scripts/embed_ui.py include/fluxwan.h
 	@py scripts/embed_ui.py || python3 scripts/embed_ui.py
 
 ui: include/ui_assets.h

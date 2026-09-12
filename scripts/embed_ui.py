@@ -3,19 +3,48 @@ import gzip
 import os
 import sys
 
+def get_header_metadata(header_path):
+    meta = {
+        "version": "1.2.3",
+        "author": "Ahmed Al-Dulaimi (أحمد الدليمي)",
+        "license": "GNU GPLv3"
+    }
+    if os.path.exists(header_path):
+        with open(header_path, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                if "#define FLUXWAN_VERSION" in line:
+                    parts = line.split('"')
+                    if len(parts) >= 2: meta["version"] = parts[1]
+                elif "#define FLUXWAN_AUTHOR" in line:
+                    parts = line.split('"')
+                    if len(parts) >= 2: meta["author"] = parts[1]
+                elif "#define FLUXWAN_LICENSE" in line:
+                    parts = line.split('"')
+                    if len(parts) >= 2: meta["license"] = parts[1]
+    return meta
+
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.abspath(os.path.join(script_dir, ".."))
     html_path = os.path.join(project_root, "web", "index.html")
+    header_path = os.path.join(project_root, "include", "fluxwan.h")
     out_h_path = os.path.join(project_root, "include", "ui_assets.h")
 
     if not os.path.exists(html_path):
         print(f"Error: {html_path} does not exist.")
         sys.exit(1)
 
-    with open(html_path, "rb") as f_in:
-        raw_bytes = f_in.read()
+    meta = get_header_metadata(header_path)
 
+    with open(html_path, "r", encoding="utf-8") as f_in:
+        html_content = f_in.read()
+
+    # Synchronize version, author, and license from include/fluxwan.h automatically
+    html_content = html_content.replace("__FLUXWAN_VERSION__", meta["version"])
+    html_content = html_content.replace("__FLUXWAN_AUTHOR__", meta["author"])
+    html_content = html_content.replace("__FLUXWAN_LICENSE__", meta["license"])
+
+    raw_bytes = html_content.encode("utf-8")
     gzipped_bytes = gzip.compress(raw_bytes)
 
     with open(out_h_path, "w") as f_out:

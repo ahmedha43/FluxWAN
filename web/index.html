@@ -1612,17 +1612,17 @@
                 <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
                 <span class="text-slate-300 font-medium tracking-wide">FluxWAN Carrier OS</span>
                 <span class="text-slate-600">•</span>
-                <span class="text-cyan-400 font-mono text-3xs bg-cyan-950/60 px-2 py-0.5 rounded border border-cyan-800/50">v1.2.3 LTS</span>
+                <span class="text-cyan-400 font-mono text-3xs bg-cyan-950/60 px-2 py-0.5 rounded border border-cyan-800/50" x-text="'v' + systemVersion + ' LTS'">v__FLUXWAN_VERSION__ LTS</span>
             </div>
             <div class="flex items-center gap-2 text-slate-400 text-xs">
                 <span>Designed & Engineered by</span>
                 <span class="text-white font-bold tracking-wide flex items-center gap-1.5">
-                    <span class="text-sky-400 font-black">⚡</span> Ahmed Al-Dulaimi (أحمد الدليمي)
+                    <span class="text-sky-400 font-black">⚡</span> <span x-text="systemAuthor">__FLUXWAN_AUTHOR__</span>
                 </span>
             </div>
             <div class="flex items-center gap-2 text-3xs text-slate-400 font-mono">
-                <span class="px-2 py-0.5 rounded bg-slate-900 border border-slate-700/60 text-emerald-400 font-semibold">GNU GPLv3 License</span>
-                <span>&copy; 2026 All Rights Reserved</span>
+                <span class="px-2 py-0.5 rounded bg-slate-900 border border-slate-700/60 text-emerald-400 font-semibold" x-text="systemLicense + ' License'">__FLUXWAN_LICENSE__ License</span>
+                <span x-text="'© ' + new Date().getFullYear() + ' All Rights Reserved'">&copy; 2026 All Rights Reserved</span>
             </div>
         </div>
     </footer>
@@ -1633,6 +1633,9 @@
                 currentTab: 'interfaces',
                 isEditing: false,
                 hasLoadedInitialConfig: false,
+                systemVersion: '__FLUXWAN_VERSION__',
+                systemAuthor: '__FLUXWAN_AUTHOR__',
+                systemLicense: '__FLUXWAN_LICENSE__',
                 interfaces: [],
                 newStaticMac: '',
                 newStaticIp: '',
@@ -2107,6 +2110,11 @@
                         return r.json();
                     })
                     .then(d => {
+                        if (d.system) {
+                            if (d.system.version) this.systemVersion = d.system.version;
+                            if (d.system.author) this.systemAuthor = d.system.author;
+                            if (d.system.license) this.systemLicense = d.system.license;
+                        }
                         const isFirst = !this.hasLoadedInitialConfig;
                         if (d.lan && (isFirst || !this.isEditing)) {
                             if (d.lan.interface) this.config.lan.interface = d.lan.interface;
