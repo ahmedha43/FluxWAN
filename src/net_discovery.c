@@ -230,7 +230,34 @@ int net_discovery_scan(const fluxwan_config_t *config, iface_discovery_result_t 
         out_result->count++;
     }
     closedir(dir);
-    LOG_INFO("Discovered %u network interfaces in /sys/class/net", out_result->count);
+
+    /* Sort interfaces logically: LAN first, then WANs in order, then unassigned */
+    if (out_result->count > 1) {
+        for (uint32_t i = 0; i < out_result->count - 1; i++) {
+            for (uint32_t j = i + 1; j < out_result->count; j++) {
+                physical_interface_t *ia = &out_result->interfaces[i];
+                physical_interface_t *ib = &out_result->interfaces[j];
+                bool swap = false;
+                if (ib->role == ROLE_LAN && ia->role != ROLE_LAN) swap = true;
+                else if (ia->role != ROLE_LAN && ib->role != ROLE_LAN) {
+                    if (ib->role == ROLE_WAN && ia->role != ROLE_WAN) swap = true;
+                    else if (ia->role == ROLE_WAN && ib->role == ROLE_WAN) {
+                        if (ib->wan_id < ia->wan_id) swap = true;
+                        else if (ib->wan_id == ia->wan_id && strcmp(ib->name, ia->name) < 0) swap = true;
+                    } else if (ia->role == ib->role && strcmp(ib->name, ia->name) < 0) {
+                        swap = true;
+                    }
+                }
+                if (swap) {
+                    physical_interface_t tmp = *ia;
+                    *ia = *ib;
+                    *ib = tmp;
+                }
+            }
+        }
+    }
+
+    LOG_INFO("Discovered and ordered %u network interfaces in /sys/class/net", out_result->count);
     return 0;
 
 #elif defined(_WIN32) || defined(_WIN64)

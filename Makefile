@@ -19,7 +19,8 @@ SRCS = src/main.c \
        src/net_discovery.c \
        src/net_apply.c \
        src/dhcp_server.c \
-       src/dns64_daemon.c
+       src/dns64_daemon.c \
+       src/diagnostics.c
 
 OBJS = $(SRCS:.c=.o)
 BPF_OBJS = bpf/xdp_router.bpf.o bpf/xdp_nat46.bpf.o

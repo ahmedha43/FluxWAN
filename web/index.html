@@ -25,7 +25,7 @@
                 </svg>
             </div>
             <div>
-                <h1 class="text-xl font-bold tracking-wide text-white">FluxWAN <span class="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full border border-blue-500/30">x86 Bare-Metal</span></h1>
+                <h1 class="text-xl font-bold tracking-wide text-white">FluxWAN <span class="text-xs bg-blue-500/20 text-blue-400 px-2.5 py-0.5 rounded-full border border-blue-500/30 whitespace-nowrap inline-block">x86 Bare-Metal</span></h1>
                 <p class="text-xs text-slate-400">High-Performance Multi-WAN Router & Port Manager</p>
             </div>
         </div>
@@ -463,6 +463,149 @@
                 </form>
             </div>
         </div>
+
+        <!-- ================= SPEEDTEST MODAL ================= -->
+        <div x-show="showSpeedtestModal" x-transition class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+            <div class="glass-card max-w-md w-full p-6 rounded-2xl border border-cyan-500/40 space-y-5 shadow-2xl bg-gradient-to-b from-slate-900 via-slate-900 to-cyan-950/40">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <div class="flex items-center space-x-2.5">
+                        <span class="text-xl">⚡</span>
+                        <div>
+                            <h3 class="text-base font-bold text-white">Line Speedtest (Independent)</h3>
+                            <span class="text-3xs text-cyan-400 font-mono" x-text="'Target Interface: ' + speedtestTarget + (speedtestLabel ? ' (' + speedtestLabel + ')' : '')"></span>
+                        </div>
+                    </div>
+                    <button @click="showSpeedtestModal = false" class="text-slate-400 hover:text-white text-sm px-2 py-1">✕</button>
+                </div>
+
+                <!-- Speedometer / Status Display -->
+                <div class="py-6 flex flex-col items-center justify-center space-y-3">
+                    <div class="relative flex items-center justify-center">
+                        <!-- Outer Glow Ring -->
+                        <div class="w-36 h-36 rounded-full border-4 flex items-center justify-center transition-all"
+                             :class="speedtestRunning ? 'border-cyan-500/50 animate-spin border-t-cyan-400 shadow-lg shadow-cyan-500/30' : 'border-slate-700 bg-slate-900/80'">
+                        </div>
+                        <div class="absolute flex flex-col items-center justify-center text-center">
+                            <span class="text-3xs uppercase tracking-wider text-slate-400 font-bold" x-text="speedtestRunning ? 'Testing...' : 'Download'"></span>
+                            <span class="text-2xl font-black font-mono text-cyan-300" x-text="speedtestRunning ? '...' : ((speedtestResult.download_mbps || 0).toFixed(1))">0.0</span>
+                            <span class="text-3xs font-bold text-slate-400">Mbps</span>
+                        </div>
+                    </div>
+                    <p class="text-xs text-slate-400 text-center font-mono" x-text="speedtestStatusMsg">Ready to test line throughput</p>
+                </div>
+
+                <!-- Speed Results Metric Cards -->
+                <div class="grid grid-cols-3 gap-3">
+                    <div class="bg-slate-950/80 p-3 rounded-xl border border-slate-800 text-center">
+                        <span class="text-3xs text-slate-400 block mb-0.5">Latency (Ping)</span>
+                        <span class="text-sm font-bold font-mono text-amber-400" x-text="speedtestResult.ping_ms ? (speedtestResult.ping_ms.toFixed(1) + ' ms') : '--'">--</span>
+                    </div>
+                    <div class="bg-slate-950/80 p-3 rounded-xl border border-slate-800 text-center">
+                        <span class="text-3xs text-cyan-400/90 block mb-0.5">Download</span>
+                        <span class="text-sm font-bold font-mono text-cyan-300" x-text="speedtestResult.download_mbps ? (speedtestResult.download_mbps.toFixed(1) + ' Mbps') : '--'">--</span>
+                    </div>
+                    <div class="bg-slate-950/80 p-3 rounded-xl border border-slate-800 text-center">
+                        <span class="text-3xs text-indigo-400/90 block mb-0.5">Upload</span>
+                        <span class="text-sm font-bold font-mono text-indigo-300" x-text="speedtestResult.upload_mbps ? (speedtestResult.upload_mbps.toFixed(1) + ' Mbps') : '--'">--</span>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="flex items-center space-x-3 pt-2">
+                    <button type="button" @click="runSpeedtest(speedtestTarget, speedtestLabel)" :disabled="speedtestRunning"
+                            :class="speedtestRunning ? 'opacity-50 cursor-not-allowed bg-slate-800 text-slate-400' : 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-lg shadow-cyan-500/25'"
+                            class="flex-1 py-2 rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5">
+                        <span x-show="!speedtestRunning">⚡ Start Speedtest</span>
+                        <span x-show="speedtestRunning">⏳ Measuring Throughput...</span>
+                    </button>
+                    <button type="button" @click="showSpeedtestModal = false" class="px-4 py-2 rounded-xl text-xs text-slate-300 hover:text-white border border-slate-700 bg-slate-800 transition">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= GAMING LATENCY OPTIMIZER MODAL ================= -->
+        <div x-show="showGamingModal" x-transition class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+            <div class="glass-card max-w-2xl w-full p-6 rounded-2xl border border-indigo-500/40 space-y-5 shadow-2xl bg-gradient-to-b from-slate-900 via-slate-900 to-indigo-950/40 flex flex-col max-h-[85vh]">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <div class="flex items-center space-x-2.5">
+                        <span class="text-xl">🎮</span>
+                        <div>
+                            <h3 class="text-base font-bold text-white">Gaming Route & Latency Analyzer</h3>
+                            <p class="text-3xs text-slate-400">Independent ping benchmarking across regional gaming clusters</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <button @click="fetchGamingAnalysis()" :disabled="gamingRunning" class="text-2xs bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-3 py-1 rounded-lg transition flex items-center space-x-1">
+                            <span :class="gamingRunning ? 'animate-spin' : ''">🔄</span>
+                            <span x-text="gamingRunning ? 'Benchmarking...' : 'Re-test'">Re-test</span>
+                        </button>
+                        <button @click="showGamingModal = false" class="text-slate-400 hover:text-white text-sm px-2 py-1">✕</button>
+                    </div>
+                </div>
+
+                <!-- Champion Banner -->
+                <div x-show="gamingData && gamingData.champion_wan_label" class="p-3.5 rounded-xl bg-gradient-to-r from-amber-500/20 via-indigo-950/40 to-slate-900 border border-amber-500/40 flex items-center justify-between">
+                    <div class="flex items-center space-x-2.5">
+                        <span class="text-2xl">🏆</span>
+                        <div>
+                            <span class="text-3xs uppercase tracking-wider text-amber-300 font-bold block">Best Line For Competitive Gaming</span>
+                            <span class="text-sm font-bold text-white" x-text="gamingData?.champion_wan_label || ''"></span>
+                            <span class="text-3xs text-slate-300 ml-2 font-mono" x-text="'(Average Ping: ' + (gamingData?.champion_avg_ping || 0).toFixed(1) + ' ms)'"></span>
+                        </div>
+                    </div>
+                    <button type="button" @click="applyGamingSteeringToChampion()" class="bg-amber-500 hover:bg-amber-400 text-black font-black text-2xs px-3 py-1.5 rounded-lg shadow transition">
+                        🚀 Route Games to this Line
+                    </button>
+                </div>
+
+                <!-- Gaming Benchmark Table -->
+                <div class="overflow-y-auto flex-1 border border-slate-800 rounded-xl">
+                    <table class="w-full text-left text-xs text-slate-300">
+                        <thead class="bg-slate-950 text-2xs text-slate-400 uppercase font-semibold sticky top-0">
+                            <tr>
+                                <th class="px-4 py-2.5">Game & Server</th>
+                                <th class="px-4 py-2.5">Region</th>
+                                <template x-for="wan in (gamingData?.wans || [])" :key="wan.id">
+                                    <th class="px-4 py-2.5 font-mono" :class="wan.id === gamingData?.champion_wan_id ? 'text-amber-300' : 'text-slate-300'">
+                                        <div class="flex items-center space-x-1">
+                                            <span x-show="wan.id === gamingData?.champion_wan_id">👑</span>
+                                            <span x-text="wan.label || wan.name"></span>
+                                        </div>
+                                    </th>
+                                </template>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800/80 text-3xs font-mono">
+                            <template x-for="(g, gIdx) in (gamingData?.games || [])" :key="g.name">
+                                <tr class="hover:bg-slate-800/30">
+                                    <td class="px-4 py-2.5 font-medium text-slate-200 flex items-center space-x-2">
+                                        <span x-text="g.icon"></span>
+                                        <span x-text="g.name"></span>
+                                    </td>
+                                    <td class="px-4 py-2.5 text-slate-400" x-text="g.region"></td>
+                                    <template x-for="wan in (gamingData?.wans || [])" :key="wan.id">
+                                        <td class="px-4 py-2.5 font-bold"
+                                            :class="getLatencyColorClass(wan.pings && wan.pings[gIdx])">
+                                            <span x-text="wan.pings && wan.pings[gIdx] ? (wan.pings[gIdx].toFixed(1) + ' ms') : '--'"></span>
+                                        </td>
+                                    </template>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Footer tip -->
+                <div class="flex items-center justify-between text-3xs text-slate-400 border-t border-slate-800 pt-2 font-mono">
+                    <span class="text-emerald-400">🟢 &lt; 50ms (Elite)</span>
+                    <span class="text-blue-400">🔵 50-80ms (Great)</span>
+                    <span class="text-amber-400">🟡 80-120ms (Fair)</span>
+                    <span class="text-rose-400">🔴 &gt; 120ms (Lag)</span>
+                </div>
+            </div>
+        </div>
         
         <!-- Toast Notification -->
         <div x-show="toastMessage" x-transition class="fixed bottom-6 right-6 z-50 bg-emerald-600 text-white px-5 py-3 rounded-xl shadow-2xl flex items-center space-x-2 font-semibold text-sm">
@@ -510,6 +653,65 @@
                 </button>
             </div>
 
+            <!-- Router Global Throughput & Telemetry Summary -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <!-- Live Total Download -->
+                <div class="glass-card p-4 rounded-2xl border border-cyan-500/30 bg-gradient-to-br from-cyan-950/40 via-slate-900 to-slate-900 flex items-center space-x-3.5 shadow-lg">
+                    <div class="p-3 rounded-xl bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <span class="text-3xs uppercase tracking-wider text-slate-400 block font-bold">Total WAN Download</span>
+                        <span class="text-lg font-black text-cyan-300 font-mono" x-text="getTotalWanDownloadSpeed()">0 bps</span>
+                        <span class="text-3xs text-cyan-400/80 block mt-0.5" x-text="'Cumulative: ' + formatBytes(getTotalWanRxBytes())"></span>
+                    </div>
+                </div>
+
+                <!-- Live Total Upload -->
+                <div class="glass-card p-4 rounded-2xl border border-indigo-500/30 bg-gradient-to-br from-indigo-950/40 via-slate-900 to-slate-900 flex items-center space-x-3.5 shadow-lg">
+                    <div class="p-3 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <span class="text-3xs uppercase tracking-wider text-slate-400 block font-bold">Total WAN Upload</span>
+                        <span class="text-lg font-black text-indigo-300 font-mono" x-text="getTotalWanUploadSpeed()">0 bps</span>
+                        <span class="text-3xs text-indigo-400/80 block mt-0.5" x-text="'Cumulative: ' + formatBytes(getTotalWanTxBytes())"></span>
+                    </div>
+                </div>
+
+                <!-- Active WAN Uplinks Pool -->
+                <div class="glass-card p-4 rounded-2xl border border-emerald-500/30 bg-gradient-to-br from-emerald-950/40 via-slate-900 to-slate-900 flex items-center space-x-3.5 shadow-lg">
+                    <div class="p-3 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <span class="text-3xs uppercase tracking-wider text-slate-400 block font-bold">WAN Health & Uplinks</span>
+                        <span class="text-lg font-black text-emerald-300 font-mono" x-text="getActiveWanCountText()">2 / 2 Active</span>
+                        <span class="text-3xs text-emerald-400/80 block mt-0.5">Maglev Balancing: 100%</span>
+                    </div>
+                </div>
+
+                <!-- Total Network Volume -->
+                <div class="glass-card p-4 rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-950/40 via-slate-900 to-slate-900 flex items-center space-x-3.5 shadow-lg">
+                    <div class="p-3 rounded-xl bg-purple-500/20 text-purple-400 border border-purple-500/30">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <span class="text-3xs uppercase tracking-wider text-slate-400 block font-bold">Total Router Volume</span>
+                        <span class="text-lg font-black text-purple-300 font-mono" x-text="formatBytes(getTotalRouterAllBytes())">0 B</span>
+                        <span class="text-3xs text-slate-400 block mt-0.5">Since System Boot</span>
+                    </div>
+                </div>
+            </div>
+
             <!-- Ports Grid -->
             <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
                 <template x-for="(iface, index) in interfaces" :key="iface.name">
@@ -551,15 +753,15 @@
                                       x-text="getPortRoleText(iface.name)">LAN GATEWAY</span>
                             </div>
 
-                            <!-- Hardware Specs -->
-                            <div class="space-y-2 text-xs text-slate-400 bg-slate-900/60 p-3 rounded-xl font-mono">
+                            <!-- Hardware Specs & Detailed Rx/Tx Telemetry -->
+                            <div class="space-y-2 text-xs text-slate-400 bg-slate-900/60 p-3.5 rounded-xl font-mono">
                                 <div class="flex justify-between">
                                     <span>MAC Address:</span>
                                     <span class="text-slate-200" x-text="iface.mac">52:54:00:12:34:56</span>
                                 </div>
                                 <div class="flex justify-between" x-show="iface.ip6">
                                     <span>IPv6 Address:</span>
-                                    <span class="text-emerald-400 font-bold truncate max-w-[180px]" x-text="iface.ip6">2a02:...</span>
+                                    <span class="text-emerald-400 font-bold truncate max-w-[150px]" :title="iface.ip6" x-text="iface.ip6">2a02:...</span>
                                 </div>
                                 <div class="flex justify-between">
                                     <span>Link Carrier:</span>
@@ -569,24 +771,37 @@
                                     <span>Port Link Speed:</span>
                                     <span :class="iface.has_carrier ? 'text-amber-400 font-bold' : 'text-slate-500'" x-text="formatLinkSpeed(iface.speed_mbps, iface.has_carrier)">1 Gbps</span>
                                 </div>
-                                <div class="flex justify-between">
-                                    <span>Rx Bandwidth:</span>
-                                    <span class="text-blue-400 font-bold" x-text="(iface.rx_speed || '0.0') + ' Mbps'">0.0 Mbps</span>
+                                <div class="flex justify-between border-t border-slate-800/80 pt-1.5 mt-1.5">
+                                    <span class="text-cyan-400 font-semibold">Live Download Rate:</span>
+                                    <span class="text-cyan-300 font-bold" x-text="formatDynamicBitrate(iface.rx_bps || 0)">0 bps</span>
                                 </div>
                                 <div class="flex justify-between">
-                                    <span>Tx Bandwidth:</span>
-                                    <span class="text-indigo-400 font-bold" x-text="(iface.tx_speed || '0.0') + ' Mbps'">0.0 Mbps</span>
+                                    <span class="text-indigo-400 font-semibold">Live Upload Rate:</span>
+                                    <span class="text-indigo-300 font-bold" x-text="formatDynamicBitrate(iface.tx_bps || 0)">0 bps</span>
                                 </div>
                                 <div class="flex justify-between border-t border-slate-800/80 pt-1.5 mt-1.5">
-                                    <span>Total Data:</span>
-                                    <span class="text-slate-300 font-bold" x-text="formatBytes((iface.rx_bytes || 0) + (iface.tx_bytes || 0))">0 B</span>
+                                    <span class="text-cyan-400/90 font-medium">Total Download (Rx):</span>
+                                    <span class="text-cyan-300 font-bold font-mono" x-text="formatBytes(iface.rx_bytes || 0)">0 B</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-indigo-400/90 font-medium">Total Upload (Tx):</span>
+                                    <span class="text-indigo-300 font-bold font-mono" x-text="formatBytes(iface.tx_bytes || 0)">0 B</span>
+                                </div>
+                                <div class="flex justify-between border-t border-slate-800/50 pt-1 text-3xs">
+                                    <span class="text-slate-400">Total Transferred:</span>
+                                    <span class="text-slate-200 font-bold font-mono" x-text="formatBytes((iface.rx_bytes || 0) + (iface.tx_bytes || 0))">0 B</span>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- Quick Toggle for WAN Port -->
+                        <!-- Actions for WAN Port: Speedtest & Enable/Disable -->
                         <template x-if="getWanByPortName(iface.name)">
-                            <div class="mt-3">
+                            <div class="mt-3 space-y-2">
+                                <button type="button" @click="openSpeedtestModal(iface.name, getWanByPortName(iface.name)?.label)"
+                                        class="w-full py-1.5 px-3 bg-gradient-to-r from-cyan-600/30 to-blue-600/30 hover:from-cyan-600/50 hover:to-blue-600/50 text-cyan-300 border border-cyan-500/30 rounded-lg text-2xs font-bold transition flex items-center justify-center space-x-1.5 shadow-sm">
+                                    <span>⚡</span>
+                                    <span>Run Speedtest</span>
+                                </button>
                                 <button type="button" @click="toggleWanEnabled(getWanByPortName(iface.name))"
                                         :class="getWanByPortName(iface.name).enabled !== false ? 'bg-rose-500/10 text-rose-400 border-rose-500/30 hover:bg-rose-500/20' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'"
                                         class="w-full py-1.5 px-3 rounded-lg text-2xs font-bold border transition-all flex items-center justify-center space-x-1.5 shadow-sm">
@@ -615,6 +830,10 @@
                     <p class="text-xs text-slate-400">Select physical ports for WAN uplinks. Ports selected as WAN will not appear in the LAN tab.</p>
                 </div>
                 <div class="flex items-center space-x-2">
+                    <button @click="openGamingAnalyzerModal()" class="bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 text-xs font-bold px-3.5 py-2 rounded-xl flex items-center space-x-1.5 transition shadow-sm">
+                        <span>🎮</span>
+                        <span>Gaming Latency Analyzer</span>
+                    </button>
                     <button @click="renewWanDhcp()" :disabled="renewingDhcp" class="bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/40 text-xs font-bold px-3.5 py-2 rounded-xl flex items-center space-x-1.5 transition">
                         <span :class="renewingDhcp ? 'animate-spin' : ''">🔄</span>
                         <span x-text="renewingDhcp ? 'Renewing DHCP...' : 'Renew WAN DHCP'">Renew WAN DHCP</span>
@@ -1067,58 +1286,80 @@
                     </div>
                 </div>
 
-                <!-- Connected LAN Clients (DHCP Leases Table) -->
+                <!-- Connected LAN Clients (Live Devices & Bandwidth Control) -->
                 <div class="glass-card p-6 rounded-2xl border border-slate-700 md:col-span-2 space-y-4">
                     <div class="flex items-center justify-between">
                         <div>
-                            <h3 class="text-base font-bold text-white">Active LAN Client Devices & Live Traffic</h3>
-                            <p class="text-3xs text-slate-400">Real-time per-client bandwidth usage and static IP reservation.</p>
+                            <h3 class="text-base font-bold text-white flex items-center space-x-2">
+                                <span>👥</span>
+                                <span>Active LAN Connected Devices & Live Traffic Control</span>
+                            </h3>
+                            <p class="text-3xs text-slate-400">Real-time per-client bandwidth monitor, 1-click speed limiter, and instant access blocking.</p>
                         </div>
-                        <span class="text-xs text-slate-400 font-mono" x-text="leases.length + ' devices online'">1 device</span>
+                        <div class="flex items-center space-x-2">
+                            <button @click="fetchLanClients()" class="text-2xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-lg border border-slate-700">🔄 Refresh</button>
+                            <span class="text-xs text-slate-400 font-mono" x-text="(lanClients.length || leases.length) + ' devices online'">1 device</span>
+                        </div>
                     </div>
 
                     <div class="overflow-x-auto">
                         <table class="w-full text-left text-xs text-slate-300">
                             <thead class="bg-slate-900 text-2xs text-slate-400 uppercase font-semibold">
                                 <tr>
-                                    <th class="px-3 py-2.5 rounded-l-lg">IP Address</th>
+                                    <th class="px-3 py-2.5 rounded-l-lg">Client IP</th>
                                     <th class="px-3 py-2.5">MAC Address</th>
-                                    <th class="px-3 py-2.5">Hostname</th>
-                                    <th class="px-3 py-2.5">Live Speed</th>
+                                    <th class="px-3 py-2.5">Device Hostname</th>
+                                    <th class="px-3 py-2.5">Live Rate</th>
                                     <th class="px-3 py-2.5">Total Data</th>
-                                    <th class="px-3 py-2.5">Status</th>
-                                    <th class="px-3 py-2.5 rounded-r-lg text-right">Actions</th>
+                                    <th class="px-3 py-2.5">Policy Status</th>
+                                    <th class="px-3 py-2.5 rounded-r-lg text-right">Instant Actions</th>
                                 </tr>
                             </thead>
-                            <tbody class="divide-y divide-slate-800 text-3xs">
-                                <template x-for="lease in leases" :key="lease.mac || lease.ip">
-                                    <tr class="hover:bg-slate-800/30">
-                                        <td class="px-3 py-2.5 font-mono font-bold text-blue-400" x-text="lease.ip"></td>
-                                        <td class="px-3 py-2.5 font-mono text-slate-400" x-text="lease.mac"></td>
-                                        <td class="px-3 py-2.5 font-medium text-slate-200" x-text="lease.hostname || 'LAN-Client'"></td>
-                                        <td class="px-3 py-2.5 font-mono">
-                                            <span class="text-blue-400">↓ <span x-text="((lease.rx_kbps || 0) / 1024).toFixed(1)"></span>M</span>
-                                            <span class="text-indigo-400 ml-1">↑ <span x-text="((lease.tx_kbps || 0) / 1024).toFixed(1)"></span>M</span>
+                            <tbody class="divide-y divide-slate-800 text-3xs font-mono">
+                                <template x-for="client in (lanClients.length > 0 ? lanClients : leases)" :key="client.mac || client.ip">
+                                    <tr class="hover:bg-slate-800/30 transition-colors" :class="client.is_blocked ? 'bg-rose-950/20' : ''">
+                                        <td class="px-3 py-2.5 font-bold text-blue-400" x-text="client.ip"></td>
+                                        <td class="px-3 py-2.5 text-slate-400" x-text="client.mac"></td>
+                                        <td class="px-3 py-2.5 font-sans font-medium text-slate-200">
+                                            <div class="flex items-center space-x-1.5">
+                                                <span>💻</span>
+                                                <span class="truncate max-w-[120px]" x-text="client.hostname || 'LAN-Device'"></span>
+                                            </div>
                                         </td>
-                                        <td class="px-3 py-2.5 font-mono text-slate-400" x-text="formatBytes((lease.rx_bytes || 0) + (lease.tx_bytes || 0))"></td>
                                         <td class="px-3 py-2.5">
-                                            <span :class="lease.is_static ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'"
-                                                  class="text-4xs px-2 py-0.5 rounded-full font-bold border"
-                                                  x-text="lease.is_static ? '📌 STATIC' : 'DYNAMIC'"></span>
+                                            <span class="text-cyan-400 font-bold">↓ <span x-text="formatDynamicBitrate((client.rx_kbps || 0) * 1000)"></span></span>
+                                            <span class="text-indigo-400 font-bold ml-1">↑ <span x-text="formatDynamicBitrate((client.tx_kbps || 0) * 1000)"></span></span>
                                         </td>
-                                        <td class="px-3 py-2.5 text-right">
-                                            <template x-if="!lease.is_static">
-                                                <button @click="makeLeaseStatic(lease)"
-                                                        class="px-2.5 py-1 rounded bg-blue-600/30 hover:bg-blue-600/50 text-blue-300 border border-blue-500/40 font-bold transition">
-                                                    📌 Make Static
+                                        <td class="px-3 py-2.5 text-slate-400" x-text="formatBytes((client.rx_bytes || 0) + (client.tx_bytes || 0))"></td>
+                                        <td class="px-3 py-2.5">
+                                            <div class="flex flex-wrap gap-1">
+                                                <span x-show="client.is_blocked" class="bg-rose-500/20 text-rose-400 border border-rose-500/30 text-4xs px-1.5 py-0.5 rounded font-bold">🚫 BLOCKED</span>
+                                                <span x-show="!client.is_blocked && client.is_limited" class="bg-amber-500/20 text-amber-300 border border-amber-500/30 text-4xs px-1.5 py-0.5 rounded font-bold" x-text="client.max_down_mbps + 'M LIMIT'"></span>
+                                                <span x-show="!client.is_blocked && !client.is_limited" class="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-4xs px-1.5 py-0.5 rounded font-bold">UNCAPPED</span>
+                                                <span x-show="client.is_static" class="bg-blue-500/20 text-blue-400 border border-blue-500/30 text-4xs px-1.5 py-0.5 rounded font-bold">📌 STATIC</span>
+                                            </div>
+                                        </td>
+                                        <td class="px-3 py-2.5 text-right font-sans">
+                                            <div class="flex items-center justify-end space-x-1.5">
+                                                <!-- Quick Speed Limit -->
+                                                <button type="button" @click="quickLimitClient(client)" title="Set Bandwidth Limit"
+                                                        class="px-2 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded text-4xs font-bold transition">
+                                                    ⚡ Limit
                                                 </button>
-                                            </template>
-                                            <template x-if="lease.is_static">
-                                                <button @click="removeStaticLease(lease.mac)"
-                                                        class="px-2.5 py-1 rounded bg-rose-600/30 hover:bg-rose-600/50 text-rose-300 border border-rose-500/40 font-bold transition">
-                                                    Release
+                                                <!-- Make Static -->
+                                                <template x-if="!client.is_static">
+                                                    <button type="button" @click="makeLeaseStatic(client)" title="Make IP Static"
+                                                            class="px-2 py-1 bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 border border-blue-500/30 rounded text-4xs font-bold transition">
+                                                        📌 Fix IP
+                                                    </button>
+                                                </template>
+                                                <!-- Block / Unblock Internet -->
+                                                <button type="button" @click="toggleClientBlock(client)"
+                                                        :class="client.is_blocked ? 'bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border-emerald-500/40' : 'bg-rose-600/30 hover:bg-rose-600/50 text-rose-300 border-rose-500/40'"
+                                                        class="px-2 py-1 rounded border text-4xs font-bold transition flex items-center space-x-1">
+                                                    <span x-text="client.is_blocked ? '✓ Unblock' : '🚫 Block'"></span>
                                                 </button>
-                                            </template>
+                                            </div>
                                         </td>
                                     </tr>
                                 </template>
@@ -1841,6 +2082,20 @@
                 upgrading: false,
                 rollingBack: false,
                 renewingDhcp: false,
+                showSpeedtestModal: false,
+                speedtestRunning: false,
+                speedtestTarget: 'eth1',
+                speedtestLabel: '',
+                speedtestStatusMsg: 'Ready to test line throughput',
+                speedtestResult: {
+                    ping_ms: 0,
+                    download_mbps: 0,
+                    upload_mbps: 0
+                },
+                showGamingModal: false,
+                gamingRunning: false,
+                gamingData: null,
+                lanClients: [],
 
                 initApp() {
                     /* Always verify session with server before loading anything */
@@ -1853,6 +2108,9 @@
                     setInterval(() => {
                         if (this.showLoginModal) return;
                         this.fetchInterfaces();
+                        if (this.currentTab === 'lan') {
+                            this.fetchLanClients();
+                        }
                         if (!this.isEditing) {
                             this.fetchStatus();
                         }
@@ -1878,6 +2136,7 @@
                             this.fetchInterfaces();
                             this.fetchStatus();
                             this.fetchLeases();
+                            this.fetchLanClients();
                             this.fetchLogs();
                             this.initChart();
                             this.checkForUpdates(false);
@@ -1914,6 +2173,7 @@
                             this.fetchInterfaces();
                             this.fetchStatus();
                             this.fetchLeases();
+                            this.fetchLanClients();
                             this.fetchLogs();
                             this.initChart();
                             this.checkForUpdates(false);
@@ -2142,11 +2402,53 @@
                 },
 
                 formatBytes(bytes) {
-                    if (!bytes || bytes === 0) return '0 B';
+                    if (!bytes || isNaN(bytes) || bytes <= 0) return '0 B';
                     const k = 1024;
                     const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
                     const i = Math.floor(Math.log(bytes) / Math.log(k));
                     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+                },
+
+                formatDynamicBitrate(bps) {
+                    if (!bps || isNaN(bps) || bps <= 0) return '0 bps';
+                    const b = Number(bps);
+                    if (b < 1000) return b.toFixed(0) + ' bps';
+                    if (b < 1000000) return (b / 1000).toFixed(1) + ' Kbps';
+                    if (b < 1000000000) return (b / 1000000).toFixed(2) + ' Mbps';
+                    return (b / 1000000000).toFixed(2) + ' Gbps';
+                },
+
+                getTotalWanDownloadSpeed() {
+                    const wanIfaces = this.interfaces.filter(i => this.isWanPort(i.name));
+                    const totalBps = wanIfaces.reduce((sum, i) => sum + (Number(i.rx_bps) || 0), 0);
+                    return this.formatDynamicBitrate(totalBps);
+                },
+
+                getTotalWanUploadSpeed() {
+                    const wanIfaces = this.interfaces.filter(i => this.isWanPort(i.name));
+                    const totalBps = wanIfaces.reduce((sum, i) => sum + (Number(i.tx_bps) || 0), 0);
+                    return this.formatDynamicBitrate(totalBps);
+                },
+
+                getTotalWanRxBytes() {
+                    const wanIfaces = this.interfaces.filter(i => this.isWanPort(i.name));
+                    return wanIfaces.reduce((sum, i) => sum + (Number(i.rx_bytes) || 0), 0);
+                },
+
+                getTotalWanTxBytes() {
+                    const wanIfaces = this.interfaces.filter(i => this.isWanPort(i.name));
+                    return wanIfaces.reduce((sum, i) => sum + (Number(i.tx_bytes) || 0), 0);
+                },
+
+                getTotalRouterAllBytes() {
+                    return this.interfaces.reduce((sum, i) => sum + (Number(i.rx_bytes) || 0) + (Number(i.tx_bytes) || 0), 0);
+                },
+
+                getActiveWanCountText() {
+                    if (!this.config.wans || this.config.wans.length === 0) return '0 / 0 Active';
+                    const total = this.config.wans.length;
+                    const active = this.config.wans.filter(w => w.enabled !== false && w.state !== 'DOWN').length;
+                    return `${active} / ${total} Active`;
                 },
 
                 formatSpeed(bytes) {
@@ -2180,6 +2482,13 @@
                     .then(d => {
                         if (d.interfaces) {
                             const now = Date.now();
+                            // Sort interfaces naturally: eth0 (LAN) first, then eth1, eth2, etc.
+                            d.interfaces.sort((a, b) => {
+                                if (a.name === 'eth0') return -1;
+                                if (b.name === 'eth0') return 1;
+                                return a.name.localeCompare(b.name, undefined, { numeric: true });
+                            });
+
                             d.interfaces.forEach(iface => {
                                 const prev = this.prevStats[iface.name];
                                 if (prev && prev.time) {
@@ -2187,19 +2496,27 @@
                                     if (dt > 0.5) {
                                         const rxDiff = iface.rx_bytes >= prev.rx ? (iface.rx_bytes - prev.rx) : 0;
                                         const txDiff = iface.tx_bytes >= prev.tx ? (iface.tx_bytes - prev.tx) : 0;
-                                        iface.rx_speed = ((rxDiff * 8) / (dt * 1000000)).toFixed(1);
-                                        iface.tx_speed = ((txDiff * 8) / (dt * 1000000)).toFixed(1);
+                                        iface.rx_bps = (rxDiff * 8) / dt;
+                                        iface.tx_bps = (txDiff * 8) / dt;
+                                        iface.rx_speed = (iface.rx_bps / 1000000).toFixed(1);
+                                        iface.tx_speed = (iface.tx_bps / 1000000).toFixed(1);
                                     } else {
+                                        iface.rx_bps = prev.rx_bps || 0;
+                                        iface.tx_bps = prev.tx_bps || 0;
                                         iface.rx_speed = prev.rx_speed || '0.0';
                                         iface.tx_speed = prev.tx_speed || '0.0';
                                     }
                                 } else {
+                                    iface.rx_bps = 0;
+                                    iface.tx_bps = 0;
                                     iface.rx_speed = '0.0';
                                     iface.tx_speed = '0.0';
                                 }
                                 this.prevStats[iface.name] = {
                                     rx: iface.rx_bytes,
                                     tx: iface.tx_bytes,
+                                    rx_bps: iface.rx_bps,
+                                    tx_bps: iface.tx_bps,
                                     rx_speed: iface.rx_speed,
                                     tx_speed: iface.tx_speed,
                                     time: now
@@ -3058,6 +3375,192 @@
                     link.click();
                     document.body.removeChild(link);
                     URL.revokeObjectURL(url);
+                },
+
+                /* Diagnostics & Speedtest */
+                openSpeedtestModal(ifaceName, wanLabel) {
+                    this.speedtestTarget = ifaceName || 'eth1';
+                    this.speedtestLabel = wanLabel || ifaceName;
+                    this.speedtestRunning = false;
+                    this.speedtestStatusMsg = 'Ready to test line throughput';
+                    this.speedtestResult = { ping_ms: 0, download_mbps: 0, upload_mbps: 0 };
+                    this.showSpeedtestModal = true;
+                },
+
+                runSpeedtest(ifaceName, wanLabel) {
+                    const target = ifaceName || this.speedtestTarget || 'eth1';
+                    this.speedtestRunning = true;
+                    this.speedtestStatusMsg = 'Binding to ' + target + ' & measuring latency...';
+                    this.speedtestResult = { ping_ms: 0, download_mbps: 0, upload_mbps: 0 };
+
+                    fetch('/api/v1/diagnostics/speedtest', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Auth-Token': this.authToken
+                        },
+                        body: JSON.stringify({ interface: target })
+                    })
+                    .then(r => {
+                        if (r.status === 401) { this.showLoginModal = true; throw new Error('unauth'); }
+                        return r.json();
+                    })
+                    .then(d => {
+                        this.speedtestRunning = false;
+                        if (d.success) {
+                            this.speedtestResult = {
+                                ping_ms: Number(d.ping_ms) || 0,
+                                download_mbps: Number(d.download_mbps) || 0,
+                                upload_mbps: Number(d.upload_mbps) || 0
+                            };
+                            this.speedtestStatusMsg = 'Test completed successfully via ' + target;
+                            this.toastMessage = '⚡ Speedtest on ' + (wanLabel || target) + ': ' + (d.download_mbps || 0).toFixed(1) + ' Mbps Down / ' + (d.upload_mbps || 0).toFixed(1) + ' Mbps Up';
+                            setTimeout(() => this.toastMessage = '', 4000);
+                        } else {
+                            this.speedtestStatusMsg = 'Speedtest failed: ' + (d.error || 'Unknown error');
+                        }
+                    })
+                    .catch(err => {
+                        this.speedtestRunning = false;
+                        this.speedtestStatusMsg = 'Speedtest request failed: ' + err.message;
+                    });
+                },
+
+                /* Gaming Route & Latency Optimizer */
+                openGamingAnalyzerModal() {
+                    this.showGamingModal = true;
+                    if (!this.gamingData) {
+                        this.fetchGamingAnalysis();
+                    }
+                },
+
+                fetchGamingAnalysis() {
+                    this.gamingRunning = true;
+                    fetch('/api/v1/diagnostics/gaming_ping', {
+                        headers: { 'X-Auth-Token': this.authToken }
+                    })
+                    .then(r => {
+                        if (r.status === 401) { this.showLoginModal = true; throw new Error('unauth'); }
+                        return r.json();
+                    })
+                    .then(d => {
+                        this.gamingRunning = false;
+                        if (d.success) {
+                            this.gamingData = d;
+                        }
+                    })
+                    .catch(() => {
+                        this.gamingRunning = false;
+                    });
+                },
+
+                applyGamingSteeringToChampion() {
+                    if (!this.gamingData || !this.gamingData.champion_wan_id) return;
+                    if (!this.config.app_steering) this.config.app_steering = {};
+                    this.config.app_steering.gaming_steering_enabled = true;
+                    this.config.app_steering.primary_gaming_wan_id = this.gamingData.champion_wan_id;
+                    this.toastMessage = '🎮 Gaming traffic routed to champion uplink: ' + (this.gamingData.champion_wan_label || ('WAN ' + this.gamingData.champion_wan_id));
+                    setTimeout(() => this.toastMessage = '', 4000);
+                    this.saveAndApply();
+                },
+
+                getLatencyColorClass(ping) {
+                    if (!ping || ping <= 0) return 'text-slate-500';
+                    if (ping < 50) return 'text-emerald-400 font-black';
+                    if (ping < 80) return 'text-cyan-400 font-bold';
+                    if (ping < 120) return 'text-amber-400';
+                    return 'text-rose-400';
+                },
+
+                /* LAN Clients Telemetry & Bandwidth Management */
+                fetchLanClients() {
+                    fetch('/api/v1/clients', {
+                        headers: { 'X-Auth-Token': this.authToken }
+                    })
+                    .then(r => {
+                        if (r.status === 401) { this.showLoginModal = true; throw new Error('unauth'); }
+                        return r.json();
+                    })
+                    .then(d => {
+                        if (d.clients) {
+                            this.lanClients = d.clients;
+                        }
+                    })
+                    .catch(() => {});
+                },
+
+                toggleClientBlock(client) {
+                    if (!client || !client.ip) return;
+                    const action = client.is_blocked ? 'unblock' : 'block';
+                    fetch('/api/v1/clients/block', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Auth-Token': this.authToken
+                        },
+                        body: JSON.stringify({ ip: client.ip, action: action })
+                    })
+                    .then(r => {
+                        if (r.status === 401) { this.showLoginModal = true; throw new Error('unauth'); }
+                        return r.json();
+                    })
+                    .then(d => {
+                        if (d.success) {
+                            client.is_blocked = (action === 'block');
+                            this.toastMessage = (client.hostname || client.ip) + (client.is_blocked ? ' 🚫 Internet Blocked!' : ' ✓ Internet Restored!');
+                            setTimeout(() => this.toastMessage = '', 3000);
+                            this.fetchLanClients();
+                        }
+                    })
+                    .catch(() => {});
+                },
+
+                quickLimitClient(client) {
+                    if (!client || !client.ip) return;
+                    const defaultDown = client.max_down_mbps || 20;
+                    const promptVal = prompt('Set Download Limit (Mbps) for ' + (client.hostname || client.ip) + ' (0 to remove limit):', defaultDown);
+                    if (promptVal === null) return;
+                    const downMbps = parseInt(promptVal, 10);
+                    if (isNaN(downMbps) || downMbps < 0) return;
+
+                    if (downMbps === 0) {
+                        fetch('/api/v1/ratelimits/delete', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'X-Auth-Token': this.authToken },
+                            body: JSON.stringify({ ip: client.ip })
+                        })
+                        .then(() => {
+                            if (this.config.lan.rate_limits) {
+                                this.config.lan.rate_limits = this.config.lan.rate_limits.filter(r => r.ip !== client.ip);
+                            }
+                            this.toastMessage = 'Limit removed for ' + (client.hostname || client.ip);
+                            setTimeout(() => this.toastMessage = '', 3000);
+                            this.fetchLanClients();
+                        });
+                    } else {
+                        const upMbps = Math.max(2, Math.round(downMbps / 4));
+                        const newRl = {
+                            ip: client.ip,
+                            description: (client.hostname || 'Client Limit').trim(),
+                            max_down_mbps: downMbps,
+                            max_up_mbps: upMbps,
+                            enabled: true
+                        };
+                        fetch('/api/v1/ratelimits', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'X-Auth-Token': this.authToken },
+                            body: JSON.stringify(newRl)
+                        })
+                        .then(() => {
+                            if (!this.config.lan.rate_limits) this.config.lan.rate_limits = [];
+                            const idx = this.config.lan.rate_limits.findIndex(r => r.ip === newRl.ip);
+                            if (idx >= 0) this.config.lan.rate_limits[idx] = newRl;
+                            else this.config.lan.rate_limits.push(newRl);
+                            this.toastMessage = '⚡ Rate limit set to ' + downMbps + ' Mbps Down / ' + upMbps + ' Mbps Up for ' + (client.hostname || client.ip);
+                            setTimeout(() => this.toastMessage = '', 3000);
+                            this.fetchLanClients();
+                        });
+                    }
                 },
 
                 formatUptime(sec) {
