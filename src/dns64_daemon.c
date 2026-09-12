@@ -179,6 +179,9 @@ dns64_ctx_t *dns64_init(fluxwan_config_t *config, int v4_map_fd, int v6_map_fd, 
         free(ctx);
         return NULL;
     }
+#if defined(__linux__)
+    fcntl(ctx->server_fd, F_SETFD, FD_CLOEXEC);
+#endif
 
     int opt = 1;
     setsockopt(ctx->server_fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt));
@@ -194,6 +197,11 @@ dns64_ctx_t *dns64_init(fluxwan_config_t *config, int v4_map_fd, int v6_map_fd, 
     }
 
     ctx->upstream_fd = socket(AF_INET, SOCK_DGRAM, 0);
+#if defined(__linux__)
+    if (IS_VALID_SOCK(ctx->upstream_fd)) {
+        fcntl(ctx->upstream_fd, F_SETFD, FD_CLOEXEC);
+    }
+#endif
     memset(&ctx->upstream_addr, 0, sizeof(ctx->upstream_addr));
     ctx->upstream_addr.sin_family = AF_INET;
     ctx->upstream_addr.sin_port = htons(53);

@@ -68,7 +68,7 @@ int main(int argc, char *argv[]) {
 #endif
 
     /* 1. Load Configuration */
-    fluxwan_config_t config;
+    static fluxwan_config_t config;
     if (config_load(config_path, &config) < 0) {
         LOG_ERROR("Fatal: Failed to load configuration from %s", config_path);
         return EXIT_FAILURE;

@@ -138,6 +138,7 @@ netlink_ctx_t *netlink_init(void) {
         LOG_WARN("Netlink socket creation failed (Not running as root or non-Linux kernel). Simulation mode active.");
         ctx->fd = -1;
     } else {
+        fcntl(ctx->fd, F_SETFD, FD_CLOEXEC);
         struct sockaddr_nl sa;
         memset(&sa, 0, sizeof(sa));
         sa.nl_family = AF_NETLINK;

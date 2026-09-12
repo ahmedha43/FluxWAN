@@ -90,6 +90,7 @@ prober_ctx_t *prober_init(fluxwan_config_t *config, wan_health_callback_t cb, vo
         ctx->raw_fd = -1;
     } else {
 #if !defined(_WIN32) && !defined(_WIN64)
+        fcntl(ctx->raw_fd, F_SETFD, FD_CLOEXEC);
         int flags = fcntl(ctx->raw_fd, F_GETFL, 0);
         if (flags >= 0) fcntl(ctx->raw_fd, F_SETFL, flags | O_NONBLOCK);
 #endif
@@ -151,6 +152,7 @@ int prober_send_probes(prober_ctx_t *ctx) {
             ctx->wan_send_fds[i] = (int)socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
             if (ctx->wan_send_fds[i] >= 0) {
 #if !defined(_WIN32) && !defined(_WIN64)
+                fcntl(ctx->wan_send_fds[i], F_SETFD, FD_CLOEXEC);
                 int flags = fcntl(ctx->wan_send_fds[i], F_GETFL, 0);
                 if (flags >= 0) fcntl(ctx->wan_send_fds[i], F_SETFL, flags | O_NONBLOCK);
 #if defined(SO_BINDTODEVICE)

@@ -115,6 +115,35 @@ static const char *find_matching_bracket(const char *start) {
     return NULL;
 }
 
+static const char *find_matching_brace(const char *start) {
+    if (!start || *start != '{') return NULL;
+    int depth = 0;
+    bool in_str = false;
+    bool escape = false;
+    for (const char *p = start; *p; p++) {
+        if (escape) {
+            escape = false;
+            continue;
+        }
+        if (*p == '\\') {
+            escape = true;
+            continue;
+        }
+        if (*p == '"') {
+            in_str = !in_str;
+            continue;
+        }
+        if (!in_str) {
+            if (*p == '{') depth++;
+            else if (*p == '}') {
+                depth--;
+                if (depth == 0) return p;
+            }
+        }
+    }
+    return NULL;
+}
+
 static bool parse_mac_str(const char *str, uint8_t *mac) {
     if (!str || !mac) return false;
     unsigned int m[6];
@@ -127,15 +156,25 @@ static bool parse_mac_str(const char *str, uint8_t *mac) {
 }
 
 int config_load(const char *config_path, fluxwan_config_t *out_config) {
-    if (!config_path || !out_config) return -1;
-    memset(out_config, 0, sizeof(fluxwan_config_t));
-    safe_str_copy(out_config->config_file_path, config_path, sizeof(out_config->config_file_path));
+    if (!out_config) return -1;
 
-    char *json = read_file_to_string(config_path);
+    char local_path[MAX_PATH_LEN] = {0};
+    if (config_path && config_path[0]) {
+        safe_str_copy(local_path, config_path, sizeof(local_path));
+    } else if (out_config->config_file_path[0]) {
+        safe_str_copy(local_path, out_config->config_file_path, sizeof(local_path));
+    } else {
+        safe_str_copy(local_path, "/opt/fluxwan/config/fluxwan.json", sizeof(local_path));
+    }
+
+    char *json = read_file_to_string(local_path);
     if (!json) {
-        LOG_ERROR("Failed to read configuration file: %s", config_path);
+        LOG_ERROR("Failed to read configuration file: %s", local_path);
         return -1;
     }
+
+    memset(out_config, 0, sizeof(fluxwan_config_t));
+    safe_str_copy(out_config->config_file_path, local_path, sizeof(out_config->config_file_path));
 
     /* Parse LAN block */
     const char *lan_pos = strstr(json, "\"lan\"");
@@ -1046,11 +1085,49 @@ int config_import_backup(const char *backup_json, fluxwan_config_t *out_config, 
         return -1;
     }
 
-    const char *cfg_body = backup_json;
+    /* Save current config_file_path and session_token to preserve them after restore */
+    char saved_path[MAX_PATH_LEN] = {0};
+    if (out_config->config_file_path[0]) {
+        safe_str_copy(saved_path, out_config->config_file_path, sizeof(saved_path));
+    } else {
+        safe_str_copy(saved_path, "/opt/fluxwan/config/fluxwan.json", sizeof(saved_path));
+    }
+
+    char saved_token[64] = {0};
+    if (out_config->auth.session_token[0]) {
+        safe_str_copy(saved_token, out_config->auth.session_token, sizeof(saved_token));
+    }
+
+    const char *cfg_body = NULL;
+    size_t cfg_body_len = 0;
+
     const char *cfg_key = strstr(backup_json, "\"config\"");
     if (cfg_key) {
         const char *brace = strchr(cfg_key, '{');
-        if (brace) cfg_body = brace;
+        if (brace) {
+            const char *brace_end = find_matching_brace(brace);
+            if (brace_end && brace_end >= brace) {
+                cfg_body = brace;
+                cfg_body_len = (size_t)(brace_end - brace + 1);
+            }
+        }
+    }
+
+    if (!cfg_body) {
+        /* User might have uploaded raw fluxwan.json */
+        const char *brace = strchr(backup_json, '{');
+        if (brace) {
+            const char *brace_end = find_matching_brace(brace);
+            if (brace_end && brace_end >= brace) {
+                cfg_body = brace;
+                cfg_body_len = (size_t)(brace_end - brace + 1);
+            }
+        }
+    }
+
+    if (!cfg_body || cfg_body_len == 0) {
+        if (err_msg && err_size > 0) snprintf(err_msg, err_size, "Invalid or missing JSON object in backup");
+        return -1;
     }
 
     const char *tmp_path = "/tmp/fluxwan_restore_tmp.json";
@@ -1058,34 +1135,52 @@ int config_import_backup(const char *backup_json, fluxwan_config_t *out_config, 
     tmp_path = "fluxwan_restore_tmp.json";
 #endif
 
-    FILE *f = fopen(tmp_path, "w");
+    FILE *f = fopen(tmp_path, "wb");
     if (!f) {
         if (err_msg && err_size > 0) snprintf(err_msg, err_size, "Unable to write temporary restore file");
         return -1;
     }
-    fputs(cfg_body, f);
+    fwrite(cfg_body, 1, cfg_body_len, f);
     fclose(f);
 
-    fluxwan_config_t test_cfg;
-    if (config_load(tmp_path, &test_cfg) != 0) {
+    /* Allocate test_cfg on HEAP to avoid massive stack overflow (>2.15 MB struct) */
+    fluxwan_config_t *test_cfg = calloc(1, sizeof(fluxwan_config_t));
+    if (!test_cfg) {
         remove(tmp_path);
+        if (err_msg && err_size > 0) snprintf(err_msg, err_size, "Out of memory during configuration restore");
+        return -1;
+    }
+
+    if (config_load(tmp_path, test_cfg) != 0) {
+        remove(tmp_path);
+        free(test_cfg);
         if (err_msg && err_size > 0) snprintf(err_msg, err_size, "Invalid or corrupted JSON configuration syntax");
         return -1;
     }
     remove(tmp_path);
 
-    if (test_cfg.lan.ip_addr == 0) {
+    if (test_cfg->lan.ip_addr == 0) {
+        free(test_cfg);
         if (err_msg && err_size > 0) snprintf(err_msg, err_size, "Backup is missing valid LAN IP configuration");
         return -1;
     }
 
     char validate_err[256] = {0};
-    if (!config_validate_wan_attachments(&test_cfg, validate_err, sizeof(validate_err))) {
+    if (!config_validate_wan_attachments(test_cfg, validate_err, sizeof(validate_err))) {
+        free(test_cfg);
         if (err_msg && err_size > 0) snprintf(err_msg, err_size, "%s", validate_err);
         return -1;
     }
 
-    memcpy(out_config, &test_cfg, sizeof(fluxwan_config_t));
+    /* Restore file path and active session token */
+    safe_str_copy(test_cfg->config_file_path, saved_path, sizeof(test_cfg->config_file_path));
+    if (saved_token[0]) {
+        safe_str_copy(test_cfg->auth.session_token, saved_token, sizeof(test_cfg->auth.session_token));
+    }
+
+    memcpy(out_config, test_cfg, sizeof(fluxwan_config_t));
+    free(test_cfg);
+
     if (err_msg && err_size > 0) snprintf(err_msg, err_size, "Configuration validated successfully");
     return 0;
 }

@@ -57,6 +57,7 @@ struct web_server_ctx {
     struct wan_manager_ctx *wan_mgr;
     time_t start_time;
     client_conn_t clients[MAX_CLIENTS];
+    char *req_buf;
 };
 
 static inline void safe_str_copy(char *dst, const char *src, size_t max_len) {
@@ -80,7 +81,8 @@ static bool parse_mac_str(const char *str, uint8_t *mac) {
 }
 
 static const char *get_config_target_path(const web_server_ctx_t *ctx) {
-    if (ctx && ctx->config && ctx->config->config_file_path[0]) {
+    if (ctx && ctx->config && ctx->config->config_file_path[0] &&
+        strstr(ctx->config->config_file_path, "tmp") == NULL) {
         return ctx->config->config_file_path;
     }
 #if defined(__linux__)
@@ -206,6 +208,11 @@ web_server_ctx_t *web_server_init(fluxwan_config_t *config, netlink_ctx_t *nl, d
     ctx->nl = nl;
     ctx->dhcp = dhcp;
     ctx->start_time = time(NULL);
+    ctx->req_buf = malloc(131072);
+    if (!ctx->req_buf) {
+        free(ctx);
+        return NULL;
+    }
 
     ctx->listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (!IS_VALID_SOCK(ctx->listen_fd)) {
@@ -213,6 +220,9 @@ web_server_ctx_t *web_server_init(fluxwan_config_t *config, netlink_ctx_t *nl, d
         free(ctx);
         return NULL;
     }
+#if defined(__linux__)
+    fcntl(ctx->listen_fd, F_SETFD, FD_CLOEXEC);
+#endif
 
     int opt = 1;
     setsockopt(ctx->listen_fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt));
@@ -248,6 +258,7 @@ void web_server_close(web_server_ctx_t *ctx) {
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (IS_VALID_SOCK(ctx->clients[i].fd)) CLOSE_SOCK(ctx->clients[i].fd);
     }
+    if (ctx->req_buf) free(ctx->req_buf);
     free(ctx);
 }
 
@@ -262,6 +273,9 @@ socket_t web_server_accept_client(web_server_ctx_t *ctx) {
 
     socket_t client_fd = accept(ctx->listen_fd, (struct sockaddr *)&client_addr, &addrlen);
     if (!IS_VALID_SOCK(client_fd)) return INVALID_SOCKET;
+#if defined(__linux__)
+    fcntl(client_fd, F_SETFD, FD_CLOEXEC);
+#endif
 
     set_socket_timeout(client_fd, 3000);
 
@@ -945,6 +959,7 @@ static void handle_pcap_export(web_server_ctx_t *ctx, socket_t client_fd, const 
 #if defined(__linux__)
     int sock = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
     if (sock >= 0) {
+        fcntl(sock, F_SETFD, FD_CLOEXEC);
         struct timeval tv = { .tv_sec = 0, .tv_usec = 300000 }; /* 300ms timeout */
         setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
@@ -1230,12 +1245,14 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
 
     if (!ctx || !IS_VALID_SOCK(client_fd)) return -1;
 
-    char req[8192];
-    ssize_t n = recv(client_fd, req, sizeof(req) - 1, 0);
+    char *req = ctx->req_buf;
+    if (!req) return -1;
+    size_t max_req = 131072;
+    ssize_t n = recv(client_fd, req, (int)(max_req - 1), 0);
     if (n <= 0) {
 #if defined(_WIN32) || defined(_WIN64)
         Sleep(30);
-        n = recv(client_fd, req, sizeof(req) - 1, 0);
+        n = recv(client_fd, req, (int)(max_req - 1), 0);
 #endif
     }
     if (n <= 0) {
@@ -1256,11 +1273,11 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
         if (!cl_pos) cl_pos = strstr(req, "content-length:");
         if (cl_pos) {
             int expected_len = atoi(cl_pos + 15);
-            while (expected_len > 0 && body_len < (size_t)expected_len && n < (ssize_t)(sizeof(req) - 1)) {
+            while (expected_len > 0 && body_len < (size_t)expected_len && n < (ssize_t)(max_req - 1)) {
 #if defined(_WIN32) || defined(_WIN64)
                 Sleep(10);
 #endif
-                ssize_t more = recv(client_fd, req + n, (int)(sizeof(req) - 1 - n), 0);
+                ssize_t more = recv(client_fd, req + n, (int)(max_req - 1 - n), 0);
                 if (more <= 0) break;
                 n += more;
                 body_len += more;
@@ -2030,20 +2047,25 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
         if (body) {
             body += 4;
             while (*body == ' ' || *body == '\t' || *body == '\r' || *body == '\n') body++;
-            fluxwan_config_t restored_cfg;
-            if (config_import_backup(body, &restored_cfg, err_msg, sizeof(err_msg)) == 0) {
-                const char *save_path = get_config_target_path(ctx);
-                if (config_save(save_path, &restored_cfg) < 0) {
-                    save_path = "/opt/fluxwan/config/fluxwan.json";
-                    config_save(save_path, &restored_cfg);
+            fluxwan_config_t *restored_cfg = calloc(1, sizeof(fluxwan_config_t));
+            if (restored_cfg) {
+                char save_path[MAX_PATH_LEN];
+                safe_str_copy(save_path, get_config_target_path(ctx), sizeof(save_path));
+                safe_str_copy(restored_cfg->config_file_path, save_path, sizeof(restored_cfg->config_file_path));
+                if (config_import_backup(body, restored_cfg, err_msg, sizeof(err_msg)) == 0) {
+                    if (config_save(save_path, restored_cfg) < 0) {
+                        safe_str_copy(save_path, "/opt/fluxwan/config/fluxwan.json", sizeof(save_path));
+                        config_save(save_path, restored_cfg);
+                    }
+                    memcpy(ctx->config, restored_cfg, sizeof(fluxwan_config_t));
+                    net_apply_configuration(ctx->config, ctx->nl);
+                    if (ctx->wan_mgr) wan_manager_rebalance(ctx->wan_mgr);
+                    if (ctx->dhcp) dhcp_server_reload_config(ctx->dhcp, ctx->config);
+                    success = true;
+                    LOG_INFO("[System] Configuration restored successfully from backup.");
+                    wan_manager_add_log("INFO", "Configuration restored from backup bundle and applied to kernel");
                 }
-                config_load(save_path, ctx->config);
-                net_apply_configuration(ctx->config, ctx->nl);
-                if (ctx->wan_mgr) wan_manager_rebalance(ctx->wan_mgr);
-                if (ctx->dhcp) dhcp_server_reload_config(ctx->dhcp, ctx->config);
-                success = true;
-                LOG_INFO("[System] Configuration restored successfully from backup.");
-                wan_manager_add_log("INFO", "Configuration restored from backup bundle and applied to kernel");
+                free(restored_cfg);
             }
         }
         char resp_body[512];
@@ -2065,17 +2087,22 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
                 strlen(rb), rb);
             send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
         }
-        fluxwan_config_t default_cfg;
-        config_reset_to_defaults(&default_cfg);
-        const char *save_path = get_config_target_path(ctx);
-        if (config_save(save_path, &default_cfg) < 0) {
-            save_path = "/opt/fluxwan/config/fluxwan.json";
-            config_save(save_path, &default_cfg);
+        fluxwan_config_t *default_cfg = calloc(1, sizeof(fluxwan_config_t));
+        if (default_cfg) {
+            config_reset_to_defaults(default_cfg);
+            char save_path[MAX_PATH_LEN];
+            safe_str_copy(save_path, get_config_target_path(ctx), sizeof(save_path));
+            safe_str_copy(default_cfg->config_file_path, save_path, sizeof(default_cfg->config_file_path));
+            if (config_save(save_path, default_cfg) < 0) {
+                safe_str_copy(save_path, "/opt/fluxwan/config/fluxwan.json", sizeof(save_path));
+                config_save(save_path, default_cfg);
+            }
+            memcpy(ctx->config, default_cfg, sizeof(fluxwan_config_t));
+            net_apply_configuration(ctx->config, ctx->nl);
+            if (ctx->wan_mgr) wan_manager_rebalance(ctx->wan_mgr);
+            if (ctx->dhcp) dhcp_server_reload_config(ctx->dhcp, ctx->config);
+            free(default_cfg);
         }
-        config_load(save_path, ctx->config);
-        net_apply_configuration(ctx->config, ctx->nl);
-        if (ctx->wan_mgr) wan_manager_rebalance(ctx->wan_mgr);
-        if (ctx->dhcp) dhcp_server_reload_config(ctx->dhcp, ctx->config);
 
         LOG_WARN("[System] Router reset to factory default configuration!");
         wan_manager_add_log("WARN", "Router reset to factory default settings");
@@ -2108,61 +2135,65 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
             body += 4;
             while (*body == ' ' || *body == '\t' || *body == '\r' || *body == '\n') body++;
             if (*body == '{') {
-                /* Create temporary copy to validate */
-                fluxwan_config_t test_cfg;
-                FILE *f_tmp = fopen("/tmp/fluxwan_test_cfg.json", "w");
-                if (f_tmp) {
-                    fputs(body, f_tmp);
-                    fclose(f_tmp);
-                }
-                if (config_load("/tmp/fluxwan_test_cfg.json", &test_cfg) == 0) {
-                    /* Protect existing WANs if client payload sent empty WAN list */
-                    if (test_cfg.wan_count == 0 && ctx->config->wan_count > 0) {
-                        LOG_WARN("[Web] Incoming apply payload had 0 WANs. Preserving existing %u WAN uplinks.", ctx->config->wan_count);
-                        test_cfg.wan_count = ctx->config->wan_count;
-                        memcpy(test_cfg.wans, ctx->config->wans, sizeof(wan_config_t) * ctx->config->wan_count);
+                /* Create temporary copy on heap to validate */
+                fluxwan_config_t *test_cfg = calloc(1, sizeof(fluxwan_config_t));
+                if (test_cfg) {
+                    FILE *f_tmp = fopen("/tmp/fluxwan_test_cfg.json", "w");
+                    if (f_tmp) {
+                        fputs(body, f_tmp);
+                        fclose(f_tmp);
                     }
-                    /* Ensure LAN settings are valid */
-                    if (test_cfg.lan.ip_addr == 0) {
-                        test_cfg.lan.ip_addr = ctx->config->lan.ip_addr ? ctx->config->lan.ip_addr : str_to_ip("192.168.90.1");
-                    }
-                    if (test_cfg.lan.netmask == 0) {
-                        test_cfg.lan.netmask = ctx->config->lan.netmask ? ctx->config->lan.netmask : str_to_ip("255.255.255.0");
-                    }
-                    if (test_cfg.lan.name[0] == '\0') {
-                        safe_str_copy(test_cfg.lan.name, ctx->config->lan.name[0] ? ctx->config->lan.name : "eth0", sizeof(test_cfg.lan.name));
-                    }
+                    if (config_load("/tmp/fluxwan_test_cfg.json", test_cfg) == 0) {
+                        /* Protect existing WANs if client payload sent empty WAN list */
+                        if (test_cfg->wan_count == 0 && ctx->config->wan_count > 0) {
+                            LOG_WARN("[Web] Incoming apply payload had 0 WANs. Preserving existing %u WAN uplinks.", ctx->config->wan_count);
+                            test_cfg->wan_count = ctx->config->wan_count;
+                            memcpy(test_cfg->wans, ctx->config->wans, sizeof(wan_config_t) * ctx->config->wan_count);
+                        }
+                        /* Ensure LAN settings are valid */
+                        if (test_cfg->lan.ip_addr == 0) {
+                            test_cfg->lan.ip_addr = ctx->config->lan.ip_addr ? ctx->config->lan.ip_addr : str_to_ip("192.168.90.1");
+                        }
+                        if (test_cfg->lan.netmask == 0) {
+                            test_cfg->lan.netmask = ctx->config->lan.netmask ? ctx->config->lan.netmask : str_to_ip("255.255.255.0");
+                        }
+                        if (test_cfg->lan.name[0] == '\0') {
+                            safe_str_copy(test_cfg->lan.name, ctx->config->lan.name[0] ? ctx->config->lan.name : "eth0", sizeof(test_cfg->lan.name));
+                        }
 
-                    char err_msg[256] = {0};
-                    if (!config_validate_wan_attachments(&test_cfg, err_msg, sizeof(err_msg))) {
-                        LOG_WARN("[Web] Configuration rejected: %s", err_msg);
-                        wan_manager_add_log("WARN", "Configuration rejected: %s", err_msg);
+                        char err_msg[256] = {0};
+                        if (!config_validate_wan_attachments(test_cfg, err_msg, sizeof(err_msg))) {
+                            LOG_WARN("[Web] Configuration rejected: %s", err_msg);
+                            wan_manager_add_log("WARN", "Configuration rejected: %s", err_msg);
 
-                        char resp_body[512];
-                        snprintf(resp_body, sizeof(resp_body),
-                                 "{\"status\":\"error\",\"message\":\"%s\"}", err_msg);
-                        char resp[1024];
-                        int len = snprintf(resp, sizeof(resp),
-                            "HTTP/1.1 400 Bad Request\r\n"
-                            "Content-Type: application/json\r\n"
-                            "Access-Control-Allow-Origin: *\r\n"
-                            "Content-Length: %zu\r\n"
-                            "Connection: close\r\n\r\n%s",
-                            strlen(resp_body), resp_body);
-                        send(client_fd, resp, len, 0);
-                        close_client_socket(client_fd);
-                        return 0;
-                    }
+                            char resp_body[512];
+                            snprintf(resp_body, sizeof(resp_body),
+                                     "{\"status\":\"error\",\"message\":\"%s\"}", err_msg);
+                            char resp[1024];
+                            int len = snprintf(resp, sizeof(resp),
+                                "HTTP/1.1 400 Bad Request\r\n"
+                                "Content-Type: application/json\r\n"
+                                "Access-Control-Allow-Origin: *\r\n"
+                                "Content-Length: %zu\r\n"
+                                "Connection: close\r\n\r\n%s",
+                                strlen(resp_body), resp_body);
+                            send(client_fd, resp, len, 0);
+                            close_client_socket(client_fd);
+                            free(test_cfg);
+                            return 0;
+                        }
 
-                    /* Validation passed: save cleanly using config_save */
-                    const char *save_path = get_config_target_path(ctx);
-                    if (config_save(save_path, &test_cfg) < 0) {
-                        save_path = "/opt/fluxwan/config/fluxwan.json";
-                        config_save(save_path, &test_cfg);
+                        /* Validation passed: save cleanly using config_save */
+                        const char *save_path = get_config_target_path(ctx);
+                        if (config_save(save_path, test_cfg) < 0) {
+                            save_path = "/opt/fluxwan/config/fluxwan.json";
+                            config_save(save_path, test_cfg);
+                        }
+                        LOG_INFO("[Web] Updated %s with new validated settings from UI", save_path);
+                        wan_manager_add_log("INFO", "Configuration validated and saved to %s", save_path);
+                        config_load(save_path, ctx->config);
                     }
-                    LOG_INFO("[Web] Updated %s with new validated settings from UI", save_path);
-                    wan_manager_add_log("INFO", "Configuration validated and saved to %s", save_path);
-                    config_load(save_path, ctx->config);
+                    free(test_cfg);
                 }
             }
         }

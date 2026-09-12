@@ -50,6 +50,7 @@ static inline int clock_gettime(int clk_id, struct timespec *tp) {
 }
 #else
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>

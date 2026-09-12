@@ -258,6 +258,9 @@ dhcp_server_ctx_t *dhcp_server_init(const fluxwan_config_t *config) {
         LOG_WARN("Could not create DHCP UDP socket (Running without root or port 67 busy). Passive mode active.");
         ctx->sock_fd = INVALID_SOCKET;
     } else {
+#if defined(__linux__)
+        fcntl(ctx->sock_fd, F_SETFD, FD_CLOEXEC);
+#endif
         int opt = 1;
         setsockopt(ctx->sock_fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt));
         setsockopt(ctx->sock_fd, SOL_SOCKET, SO_BROADCAST, (const char *)&opt, sizeof(opt));
