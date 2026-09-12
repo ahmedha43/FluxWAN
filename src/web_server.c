@@ -394,6 +394,9 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
     ip_to_str(config->lan.ip_addr, lan_ip, sizeof(lan_ip));
     ip_to_str(config->lan.netmask, lan_mask, sizeof(lan_mask));
 
+    char active_ver[32] = FLUXWAN_VERSION;
+    get_active_system_version(active_ver, sizeof(active_ver));
+
     int offset = snprintf(buf, max_len,
         "{\n"
         "  \"system\": {\n"
@@ -404,7 +407,7 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
         "  },\n"
         "  \"lan\": { \"interface\": \"%s\", \"ip\": \"%s\", \"netmask\": \"%s\", \"dhcp_enabled\": %s },\n"
         "  \"wans\": [\n",
-        FLUXWAN_VERSION, FLUXWAN_AUTHOR, FLUXWAN_LICENSE, FLUXWAN_COPYRIGHT,
+        active_ver, FLUXWAN_AUTHOR, FLUXWAN_LICENSE, FLUXWAN_COPYRIGHT,
         config->lan.name, lan_ip, lan_mask, config->lan.dhcp_enabled ? "true" : "false");
 
     for (uint32_t i = 0; i < config->wan_count; i++) {
@@ -832,6 +835,8 @@ static void build_json_debug_report(web_server_ctx_t *ctx, char *buf, size_t max
     /* Build raw ASCII text report first */
     char raw_report[8192];
     int r_off = 0;
+    char active_ver[32] = FLUXWAN_VERSION;
+    get_active_system_version(active_ver, sizeof(active_ver));
     r_off += snprintf(raw_report + r_off, sizeof(raw_report) - r_off,
         "================================================================================\n"
         "           FLUXWAN MULTI-WAN ROUTER — LIVE SYSTEM DIAGNOSTIC REPORT             \n"
@@ -853,7 +858,7 @@ static void build_json_debug_report(web_server_ctx_t *ctx, char *buf, size_t max
         "--------------------------------------------------------------------------------\n"
         "ID  Port    Label            Type   IP / Gateway          MTU   RTT  Loss State    Weight\n"
         "--------------------------------------------------------------------------------\n",
-        FLUXWAN_VERSION,
+        active_ver,
         (unsigned long long)uptime_sec,
         (unsigned long long)(uptime_sec / 3600),
         (unsigned long long)((uptime_sec % 3600) / 60),
@@ -973,7 +978,7 @@ static void build_json_debug_report(web_server_ctx_t *ctx, char *buf, size_t max
         "  \"active_connections\": %u,\n"
         "  \"raw_report\": \"%s\"\n"
         "}\n",
-        FLUXWAN_VERSION, (unsigned long long)uptime_sec, active_conns, escaped_report);
+        active_ver, (unsigned long long)uptime_sec, active_conns, escaped_report);
 }
 
 static bool is_request_authorized(const fluxwan_config_t *config, const char *req) {

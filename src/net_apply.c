@@ -103,77 +103,92 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
         if (w_ifidx <= 0) w_ifidx = w->ifindex;
 
         /* Set WAN interface administratively UP or DOWN based on enabled state */
-#if defined(__linux__)
-        char wan_up[128];
         if (w->enabled) {
+#if defined(__linux__)
+            char wan_up[128];
             snprintf(wan_up, sizeof(wan_up), "ip link set %s up 2>/dev/null || true", w->name);
-        } else {
-            snprintf(wan_up, sizeof(wan_up), "ip link set %s down 2>/dev/null || true", w->name);
-        }
-        safe_system(wan_up);
+            safe_system(wan_up);
 
-        char tbl_f[64];
-        snprintf(tbl_f, sizeof(tbl_f), "/run/fluxwan_table_%s", w->name);
-        FILE *tf = fopen(tbl_f, "w");
-        if (tf) { fprintf(tf, "%u\n", w->table_id); fclose(tf); }
-
-        if (!w->enabled || w->type != WAN_TYPE_DHCP) {
-            char stop_dhcp[256];
-            snprintf(stop_dhcp, sizeof(stop_dhcp),
-                     "if [ -f /run/udhcpc_%s.pid ]; then kill $(cat /run/udhcpc_%s.pid 2>/dev/null) 2>/dev/null || true; rm -f /run/udhcpc_%s.pid /run/fluxwan_wan_%s.lease; fi",
-                     w->name, w->name, w->name, w->name);
-            safe_system(stop_dhcp);
-        }
+            char tbl_f[64];
+            snprintf(tbl_f, sizeof(tbl_f), "/run/fluxwan_table_%s", w->name);
+            FILE *tf = fopen(tbl_f, "w");
+            if (tf) { fprintf(tf, "%u\n", w->table_id); fclose(tf); }
 #endif
 
-        if (nl) {
-            if (w_ifidx > 0) netlink_set_interface_state(nl, w_ifidx, w->enabled);
-            if (w->type == WAN_TYPE_STATIC && w->ip_addr != 0 && w_ifidx > 0) {
-                netlink_set_interface_ip(nl, w_ifidx, w->ip_addr, w->netmask);
-            }
+            if (nl) {
+                if (w_ifidx > 0) netlink_set_interface_state(nl, w_ifidx, true);
+                if (w->type == WAN_TYPE_STATIC && w->ip_addr != 0 && w_ifidx > 0) {
+                    netlink_set_interface_ip(nl, w_ifidx, w->ip_addr, w->netmask);
+                }
 
-            /* Create Policy Route Table & Rule */
-            uint32_t fwmark = 0x100 + i + 1;
-            netlink_add_ip_rule(nl, fwmark, w->table_id, 1000 + i);
-            if (w->gateway != 0) {
-                netlink_add_default_route(nl, w->table_id, w->gateway, w_ifidx);
+                /* Create Policy Route Table & Rule */
+                uint32_t fwmark = 0x100 + i + 1;
+                netlink_add_ip_rule(nl, fwmark, w->table_id, 1000 + i);
+                if (w->gateway != 0) {
+                    netlink_add_default_route(nl, w->table_id, w->gateway, w_ifidx);
+                }
             }
-        }
 
 #if defined(__linux__)
-        if (w->gateway != 0) {
-            char route_cmd[512];
-            snprintf(route_cmd, sizeof(route_cmd),
-                     "ip route replace default via %s dev %s table %u proto static 2>/dev/null || true; "
-                     "ip rule del oif %s table %u 2>/dev/null || true; "
-                     "ip rule add oif %s table %u pref 100 2>/dev/null || true; "
-                     "ip route replace default via %s dev %s metric %u 2>/dev/null || true",
-                     wan_gw, w->name, w->table_id,
-                     w->name, w->table_id,
-                     w->name, w->table_id,
-                     wan_gw, w->name, 100 + i + 1);
-            safe_system(route_cmd);
+            if (w->gateway != 0) {
+                char route_cmd[512];
+                snprintf(route_cmd, sizeof(route_cmd),
+                         "ip route replace default via %s dev %s table %u proto static 2>/dev/null || true; "
+                         "ip rule del oif %s table %u 2>/dev/null || true; "
+                         "ip rule add oif %s table %u pref 100 2>/dev/null || true; "
+                         "ip route replace default via %s dev %s metric %u 2>/dev/null || true",
+                         wan_gw, w->name, w->table_id,
+                         w->name, w->table_id,
+                         w->name, w->table_id,
+                         wan_gw, w->name, 100 + i + 1);
+                safe_system(route_cmd);
 
-            char rp_cmd[256];
-            snprintf(rp_cmd, sizeof(rp_cmd),
-                     "sysctl -w net.ipv4.conf.%s.rp_filter=0 >/dev/null 2>&1 || true; "
-                     "sysctl -w net.ipv4.conf.%s.arp_ignore=1 >/dev/null 2>&1 || true; "
-                     "sysctl -w net.ipv4.conf.%s.arp_announce=2 >/dev/null 2>&1 || true",
-                     w->name, w->name, w->name);
-            safe_system(rp_cmd);
-        }
+                char rp_cmd[256];
+                snprintf(rp_cmd, sizeof(rp_cmd),
+                         "sysctl -w net.ipv4.conf.%s.rp_filter=0 >/dev/null 2>&1 || true; "
+                         "sysctl -w net.ipv4.conf.%s.arp_ignore=1 >/dev/null 2>&1 || true; "
+                         "sysctl -w net.ipv4.conf.%s.arp_announce=2 >/dev/null 2>&1 || true",
+                         w->name, w->name, w->name);
+                safe_system(rp_cmd);
+            }
 #endif
 
-        /* Enable NAT Masquerade for this WAN */
-        net_apply_wan_nat(w->name, true);
-        if (w->type == WAN_TYPE_PPPOE) {
-            char ppp_if[16];
-            snprintf(ppp_if, sizeof(ppp_if), "ppp%u", i);
-            net_apply_wan_nat(ppp_if, true);
-        }
+            /* Enable NAT Masquerade for this WAN */
+            net_apply_wan_nat(w->name, true);
+            if (w->type == WAN_TYPE_PPPOE) {
+                char ppp_if[16];
+                snprintf(ppp_if, sizeof(ppp_if), "ppp%u", i);
+                net_apply_wan_nat(ppp_if, true);
+            }
 
-        /* Apply MSS Clamping for PPPoE / Low MTU links */
-        apply_mss_clamping(w);
+            /* Apply MSS Clamping for PPPoE / Low MTU links */
+            apply_mss_clamping(w);
+
+        } else {
+            /* WAN is DISABLED: Completely halt routing, kill DHCP, drop NAT, and bring link down */
+#if defined(__linux__)
+            char wan_down[512];
+            snprintf(wan_down, sizeof(wan_down),
+                     "ip link set %s down 2>/dev/null || true; "
+                     "ip route del default dev %s 2>/dev/null || true; "
+                     "ip route flush table %u 2>/dev/null || true; "
+                     "ip rule del oif %s 2>/dev/null || true; "
+                     "ip rule del table %u 2>/dev/null || true; "
+                     "if [ -f /run/udhcpc_%s.pid ]; then kill $(cat /run/udhcpc_%s.pid 2>/dev/null) 2>/dev/null || true; rm -f /run/udhcpc_%s.pid /run/fluxwan_wan_%s.lease; fi",
+                     w->name, w->name, w->table_id, w->name, w->table_id,
+                     w->name, w->name, w->name, w->name);
+            safe_system(wan_down);
+#endif
+            if (nl && w_ifidx > 0) {
+                netlink_set_interface_state(nl, w_ifidx, false);
+            }
+            net_apply_wan_nat(w->name, false);
+            if (w->type == WAN_TYPE_PPPOE) {
+                char ppp_if[16];
+                snprintf(ppp_if, sizeof(ppp_if), "ppp%u", i);
+                net_apply_wan_nat(ppp_if, false);
+            }
+        }
     }
 
 #if defined(__linux__)
@@ -187,10 +202,10 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
     safe_system("iptables -t mangle -A PREROUTING -d 192.168.0.0/16 -j RETURN 2>/dev/null || true");
     safe_system("iptables -t mangle -A PREROUTING -d 172.16.0.0/12 -j RETURN 2>/dev/null || true");
 
-    /* Calculate total active dynamic weight */
+    /* Calculate total active dynamic weight (strictly exclude disabled WANs) */
     uint32_t total_active_weight = 0;
     for (uint32_t i = 0; i < config->wan_count; i++) {
-        if (config->wans[i].state != WAN_STATE_DOWN && config->wans[i].dynamic_weight > 0) {
+        if (config->wans[i].enabled && config->wans[i].state != WAN_STATE_DOWN && config->wans[i].dynamic_weight > 0) {
             total_active_weight += config->wans[i].dynamic_weight;
         }
     }
@@ -199,7 +214,7 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
         uint32_t remaining_weight = total_active_weight;
         for (uint32_t i = 0; i < config->wan_count; i++) {
             const wan_config_t *w = &config->wans[i];
-            if (w->state == WAN_STATE_DOWN || w->dynamic_weight == 0) continue;
+            if (!w->enabled || w->state == WAN_STATE_DOWN || w->dynamic_weight == 0) continue;
 
             uint32_t fwmark = 0x100 + i + 1;
             char cmd[512];

@@ -715,10 +715,11 @@
             <!-- Ports Grid -->
             <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
                 <template x-for="(iface, index) in interfaces" :key="iface.name">
-                    <div class="glass-card port-card p-6 rounded-2xl relative border flex flex-col justify-between"
+                    <div class="glass-card port-card p-6 rounded-2xl relative border flex flex-col justify-between transition-all"
                          :class="{
                             'border-blue-500/40 bg-blue-950/20': isLanPort(iface.name),
-                            'border-indigo-500/40 bg-indigo-950/20': isWanPort(iface.name),
+                            'border-indigo-500/40 bg-indigo-950/20': isWanPort(iface.name) && (!getWanByPortName(iface.name) || getWanByPortName(iface.name).enabled !== false),
+                            'border-rose-500/40 bg-rose-950/15 opacity-75 grayscale-[20%]': getWanByPortName(iface.name) && getWanByPortName(iface.name).enabled === false,
                             'border-slate-700': !isLanPort(iface.name) && !isWanPort(iface.name)
                          }">
                         <div>
@@ -747,10 +748,11 @@
                                 <span class="text-2xs font-bold px-2.5 py-0.5 rounded-full uppercase"
                                       :class="{
                                         'bg-blue-500/20 text-blue-400 border border-blue-500/30': isLanPort(iface.name),
-                                        'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30': isWanPort(iface.name),
+                                        'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30': isWanPort(iface.name) && (!getWanByPortName(iface.name) || getWanByPortName(iface.name).enabled !== false),
+                                        'bg-rose-500/20 text-rose-400 border border-rose-500/30': getWanByPortName(iface.name) && getWanByPortName(iface.name).enabled === false,
                                         'bg-slate-800 text-slate-400 border border-slate-700': !isLanPort(iface.name) && !isWanPort(iface.name)
                                       }"
-                                      x-text="getPortRoleText(iface.name)">LAN GATEWAY</span>
+                                      x-text="getWanByPortName(iface.name) && getWanByPortName(iface.name).enabled === false ? '⛔ LINE DISABLED' : getPortRoleText(iface.name)">LAN GATEWAY</span>
                             </div>
 
                             <!-- Hardware Specs & Detailed Rx/Tx Telemetry -->
@@ -773,18 +775,24 @@
                                 </div>
                                 <div class="flex justify-between border-t border-slate-800/80 pt-1.5 mt-1.5">
                                     <span class="text-cyan-400 font-semibold">Live Download Rate:</span>
-                                    <span class="text-cyan-300 font-bold" x-text="formatDynamicBitrate(iface.rx_bps || 0)">0 bps</span>
+                                    <span class="text-cyan-300 font-bold" x-text="getWanByPortName(iface.name) && getWanByPortName(iface.name).enabled === false ? '0 bps (Halted)' : formatDynamicBitrate(iface.rx_bps || 0)">0 bps</span>
                                 </div>
                                 <div class="flex justify-between">
                                     <span class="text-indigo-400 font-semibold">Live Upload Rate:</span>
-                                    <span class="text-indigo-300 font-bold" x-text="formatDynamicBitrate(iface.tx_bps || 0)">0 bps</span>
+                                    <span class="text-indigo-300 font-bold" x-text="getWanByPortName(iface.name) && getWanByPortName(iface.name).enabled === false ? '0 bps (Halted)' : formatDynamicBitrate(iface.tx_bps || 0)">0 bps</span>
                                 </div>
                                 <div class="flex justify-between border-t border-slate-800/80 pt-1.5 mt-1.5">
-                                    <span class="text-cyan-400/90 font-medium">Total Download (Rx):</span>
+                                    <div class="flex items-center space-x-1">
+                                        <span class="text-cyan-400/90 font-medium">Total Download (Rx):</span>
+                                        <span x-show="getWanByPortName(iface.name) && getWanByPortName(iface.name).enabled === false" class="text-4xs text-amber-400/90 font-mono font-normal">(Paused)</span>
+                                    </div>
                                     <span class="text-cyan-300 font-bold font-mono" x-text="formatBytes(iface.rx_bytes || 0)">0 B</span>
                                 </div>
                                 <div class="flex justify-between">
-                                    <span class="text-indigo-400/90 font-medium">Total Upload (Tx):</span>
+                                    <div class="flex items-center space-x-1">
+                                        <span class="text-indigo-400/90 font-medium">Total Upload (Tx):</span>
+                                        <span x-show="getWanByPortName(iface.name) && getWanByPortName(iface.name).enabled === false" class="text-4xs text-amber-400/90 font-mono font-normal">(Paused)</span>
+                                    </div>
                                     <span class="text-indigo-300 font-bold font-mono" x-text="formatBytes(iface.tx_bytes || 0)">0 B</span>
                                 </div>
                                 <div class="flex justify-between border-t border-slate-800/50 pt-1 text-3xs">
@@ -2418,25 +2426,31 @@
                     return (b / 1000000000).toFixed(2) + ' Gbps';
                 },
 
+                isWanPortActive(ifname) {
+                    if (!this.config.wans) return false;
+                    const wan = this.config.wans.find(w => w.name === ifname);
+                    return wan && wan.enabled !== false && wan.state !== 'DOWN';
+                },
+
                 getTotalWanDownloadSpeed() {
-                    const wanIfaces = this.interfaces.filter(i => this.isWanPort(i.name));
+                    const wanIfaces = this.interfaces.filter(i => this.isWanPortActive(i.name));
                     const totalBps = wanIfaces.reduce((sum, i) => sum + (Number(i.rx_bps) || 0), 0);
                     return this.formatDynamicBitrate(totalBps);
                 },
 
                 getTotalWanUploadSpeed() {
-                    const wanIfaces = this.interfaces.filter(i => this.isWanPort(i.name));
+                    const wanIfaces = this.interfaces.filter(i => this.isWanPortActive(i.name));
                     const totalBps = wanIfaces.reduce((sum, i) => sum + (Number(i.tx_bps) || 0), 0);
                     return this.formatDynamicBitrate(totalBps);
                 },
 
                 getTotalWanRxBytes() {
-                    const wanIfaces = this.interfaces.filter(i => this.isWanPort(i.name));
+                    const wanIfaces = this.interfaces.filter(i => this.isWanPortActive(i.name));
                     return wanIfaces.reduce((sum, i) => sum + (Number(i.rx_bytes) || 0), 0);
                 },
 
                 getTotalWanTxBytes() {
-                    const wanIfaces = this.interfaces.filter(i => this.isWanPort(i.name));
+                    const wanIfaces = this.interfaces.filter(i => this.isWanPortActive(i.name));
                     return wanIfaces.reduce((sum, i) => sum + (Number(i.tx_bytes) || 0), 0);
                 },
 
@@ -2490,19 +2504,22 @@
                             });
 
                             d.interfaces.forEach(iface => {
+                                const wan = this.getWanByPortName(iface.name);
+                                const isWanDisabled = (wan && wan.enabled === false);
+
                                 const prev = this.prevStats[iface.name];
                                 if (prev && prev.time) {
                                     const dt = (now - prev.time) / 1000;
                                     if (dt > 0.5) {
                                         const rxDiff = iface.rx_bytes >= prev.rx ? (iface.rx_bytes - prev.rx) : 0;
                                         const txDiff = iface.tx_bytes >= prev.tx ? (iface.tx_bytes - prev.tx) : 0;
-                                        iface.rx_bps = (rxDiff * 8) / dt;
-                                        iface.tx_bps = (txDiff * 8) / dt;
+                                        iface.rx_bps = isWanDisabled ? 0 : ((rxDiff * 8) / dt);
+                                        iface.tx_bps = isWanDisabled ? 0 : ((txDiff * 8) / dt);
                                         iface.rx_speed = (iface.rx_bps / 1000000).toFixed(1);
                                         iface.tx_speed = (iface.tx_bps / 1000000).toFixed(1);
                                     } else {
-                                        iface.rx_bps = prev.rx_bps || 0;
-                                        iface.tx_bps = prev.tx_bps || 0;
+                                        iface.rx_bps = isWanDisabled ? 0 : (prev.rx_bps || 0);
+                                        iface.tx_bps = isWanDisabled ? 0 : (prev.tx_bps || 0);
                                         iface.rx_speed = prev.rx_speed || '0.0';
                                         iface.tx_speed = prev.tx_speed || '0.0';
                                     }
