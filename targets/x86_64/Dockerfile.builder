@@ -34,7 +34,10 @@ RUN apk update && apk add --no-cache \
     iptables \
     conntrack-tools \
     ethtool \
-    util-linux
+    util-linux \
+    curl \
+    libnl3-dev \
+    libmnl-dev
 
 WORKDIR /workspace
 
