@@ -9,6 +9,7 @@ case "$1" in
         ip addr flush dev "$interface" 2>/dev/null || true
         ip link set "$interface" up 2>/dev/null || true
         rm -f "/run/fluxwan_wan_${interface}.lease"
+        ip route del default dev "$interface" 2>/dev/null || true
         ;;
     bound|renew)
         PREFIX=24
@@ -49,6 +50,7 @@ EOF
         [ -z "$TABLE_ID" ] && TABLE_ID=101
         if [ -n "$router" ]; then
             ip route replace default via "$router" dev "$interface" table "$TABLE_ID" proto static 2>/dev/null || true
+            ip route replace default via "$router" dev "$interface" metric "$TABLE_ID" 2>/dev/null || true
         fi
 
         sysctl -w net.ipv4.conf.${interface}.rp_filter=2 >/dev/null 2>&1 || true
