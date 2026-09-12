@@ -116,6 +116,7 @@
                 <button @click="login()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded-xl text-xs transition">
                     Sign In
                 </button>
+                <p class="text-3xs text-slate-500 text-center">Default: <span class="font-mono text-slate-400 font-semibold">admin / admin</span></p>
             </div>
         </div>
 
@@ -2074,7 +2075,7 @@
                 terminalCmdHistory: [],
                 terminalCmdIdx: -1,
                 terminalLoading: false,
-                loginUsername: '',
+                loginUsername: 'admin',
                 loginPassword: '',
                 loginError: '',
                 authToken: '',
@@ -2109,12 +2110,9 @@
                     /* Always verify session with server before loading anything */
                     this.verifySession();
 
-                    /* Auto-refresh telemetry every 3 seconds.
-                     * fetchStatus() only updates config.wans when the user
-                     * is NOT actively editing (isEditing === false).
-                     * This prevents new WAN/LAN entries from disappearing. */
+                    /* Auto-refresh telemetry every 3 seconds ONLY when authenticated. */
                     setInterval(() => {
-                        if (this.showLoginModal) return;
+                        if (this.showLoginModal || !this.authToken) return;
                         this.fetchInterfaces();
                         if (this.currentTab === 'lan') {
                             this.fetchLanClients();
@@ -2127,7 +2125,11 @@
 
                 verifySession() {
                     const stored = localStorage.getItem('fluxwan_token');
-                    if (!stored) { this.showLoginModal = true; return; }
+                    if (!stored) {
+                        this.authToken = '';
+                        this.showLoginModal = true;
+                        return;
+                    }
 
                     /* Ping a protected endpoint to check if session is still valid */
                     fetch('/api/v1/status', {
@@ -2151,10 +2153,14 @@
                         }
                     })
                     .catch(() => {
-                        /* Network error — still load UI but stay logged in if token exists */
-                        this.authToken = stored;
-                        this.showLoginModal = false;
-                        this.initChart();
+                        if (stored && stored.length > 5) {
+                            this.authToken = stored;
+                            this.showLoginModal = false;
+                            this.initChart();
+                        } else {
+                            this.authToken = '';
+                            this.showLoginModal = true;
+                        }
                     });
                 },
 
@@ -2486,11 +2492,12 @@
                 },
 
                 fetchInterfaces() {
+                    if (!this.authToken || this.showLoginModal) return;
                     fetch('/api/v1/interfaces', {
                         headers: { 'X-Auth-Token': this.authToken }
                     })
                     .then(r => {
-                        if (r.status === 401) { this.showLoginModal = true; throw new Error('unauth'); }
+                        if (r.status === 401) { this.authToken = ''; this.showLoginModal = true; throw new Error('unauth'); }
                         return r.json();
                     })
                     .then(d => {
@@ -2590,11 +2597,12 @@
                 },
 
                 fetchStatus() {
+                    if (!this.authToken || this.showLoginModal) return;
                     fetch('/api/v1/status', {
                         headers: { 'X-Auth-Token': this.authToken }
                     })
                     .then(r => {
-                        if (r.status === 401) { this.showLoginModal = true; throw new Error('unauth'); }
+                        if (r.status === 401) { this.authToken = ''; this.showLoginModal = true; throw new Error('unauth'); }
                         return r.json();
                     })
                     .then(d => {
@@ -2671,11 +2679,12 @@
                 },
 
                 fetchLeases() {
+                    if (!this.authToken || this.showLoginModal) return;
                     fetch('/api/v1/dhcp/leases', {
                         headers: { 'X-Auth-Token': this.authToken }
                     })
                     .then(r => {
-                        if (r.status === 401) { this.showLoginModal = true; throw new Error('unauth'); }
+                        if (r.status === 401) { this.authToken = ''; this.showLoginModal = true; throw new Error('unauth'); }
                         return r.json();
                     })
                     .then(d => { if (d.leases) this.leases = d.leases; })
@@ -3452,17 +3461,21 @@
                 },
 
                 fetchGamingAnalysis() {
+                    if (!this.authToken || this.showLoginModal) {
+                        this.showLoginModal = true;
+                        return;
+                    }
                     this.gamingRunning = true;
                     fetch('/api/v1/diagnostics/gaming_ping', {
                         headers: { 'X-Auth-Token': this.authToken }
                     })
                     .then(r => {
-                        if (r.status === 401) { this.showLoginModal = true; throw new Error('unauth'); }
+                        if (r.status === 401) { this.authToken = ''; this.showLoginModal = true; throw new Error('unauth'); }
                         return r.json();
                     })
                     .then(d => {
                         this.gamingRunning = false;
-                        if (d.success) {
+                        if (d && (d.success || d.status === 'ok')) {
                             this.gamingData = d;
                         }
                     })
@@ -3491,11 +3504,12 @@
 
                 /* LAN Clients Telemetry & Bandwidth Management */
                 fetchLanClients() {
+                    if (!this.authToken || this.showLoginModal) return;
                     fetch('/api/v1/clients', {
                         headers: { 'X-Auth-Token': this.authToken }
                     })
                     .then(r => {
-                        if (r.status === 401) { this.showLoginModal = true; throw new Error('unauth'); }
+                        if (r.status === 401) { this.authToken = ''; this.showLoginModal = true; throw new Error('unauth'); }
                         return r.json();
                     })
                     .then(d => {
