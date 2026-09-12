@@ -61,7 +61,7 @@ typedef int socket_t;
 #define INVALID_SOCKET (-1)
 #endif
 
-#define FLUXWAN_VERSION "1.2.4"
+#define FLUXWAN_VERSION "1.2.5"
 #define FLUXWAN_AUTHOR "Ahmed Al-Dulaimi (أحمد الدليمي)"
 #define FLUXWAN_LICENSE "GNU GPLv3"
 #define FLUXWAN_COPYRIGHT "Copyright (C) 2026 Ahmed Al-Dulaimi. All rights reserved."
@@ -322,6 +322,16 @@ typedef struct {
     uint32_t primary_voip_wan_id;     /* 0=Auto lowest Jitter, or specific WAN ID */
 } app_steering_t;
 
+/* L7 Deep Packet Inspection (DPI) & QoS Policy */
+typedef struct {
+    bool enabled;                     /* Master DPI engine switch */
+    bool p2p_throttle_enabled;        /* Automatically throttle BitTorrent/P2P traffic */
+    uint32_t p2p_throttle_rate_kbps;  /* Throttling ceiling (e.g. 512 Kbps) */
+    bool voip_priority_enabled;       /* Expedited Forwarding (DSCP EF) for Zoom/Teams/Calls */
+    bool gaming_priority_enabled;     /* Low-latency queueing (DSCP CS5) for Games */
+    bool streaming_balance_enabled;   /* Dynamic distribution for YouTube/TikTok/Netflix */
+} dpi_config_t;
+
 /* Telegram Failover Alert Bot */
 typedef struct {
     bool enabled;
@@ -376,6 +386,7 @@ typedef struct {
     web_config_t web;
     auth_config_t auth;
     nat46_config_t nat46;
+    dpi_config_t dpi;
     char config_file_path[MAX_PATH_LEN];
 } fluxwan_config_t;
 

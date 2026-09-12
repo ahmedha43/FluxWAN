@@ -9,6 +9,7 @@ BPF_CFLAGS ?= -O2 -g -target bpf -D__TARGET_ARCH_x86 -Iinclude -I/usr/include/x8
 
 SRCS = src/main.c \
        src/config.c \
+       src/dyn_buf.c \
        src/netlink_manager.c \
        src/bpf_loader.c \
        src/prober.c \
@@ -27,6 +28,7 @@ BPF_OBJS = bpf/xdp_router.bpf.o bpf/xdp_nat46.bpf.o
 
 LAB_SRCS = tests/lab_runner.c \
            src/config.c \
+           src/dyn_buf.c \
            src/netlink_manager.c \
            src/bpf_loader.c \
            src/prober.c \

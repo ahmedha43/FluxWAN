@@ -1,24 +1,27 @@
 {
-  "latest_version": "1.2.4",
+  "latest_version": "1.2.5",
   "channel": "stable",
-  "release_date": "2026-09-12",
+  "release_date": "2026-09-13",
   "min_compatible_version": "1.2.0",
   "changelog": [
-    "Carrier-Grade Online Automatic Update (OTA) & Zero-Downtime Hot-Patch engine",
-    "Hardened backup restoration against stack overflow and socket leakage",
-    "Enhanced Meta Katran Maglev consistent hashing balance stability",
-    "Optimized Web UI real-time throughput monitoring and terminal interface"
+    "Enterprise UI redesign with left sidebar navigation and compact topbar",
+    "Hardware telemetry topbar: CPU %, RAM usage, Load average, Uptime, and live Clock/Date",
+    "Dynamic memory buffer (dyn_buf) preventing buffer overflow and JSON truncation",
+    "Carrier-grade Prometheus metrics exporter (/api/v1/metrics) for Grafana/Zabbix",
+    "Automated brute-force login protection rate-limiter (HTTP 429 Too Many Requests)",
+    "Layer-7 Deep Packet Inspection (DPI) application classification and traffic shaping"
   ],
   "packages": {
     "core": {
       "url": "https://raw.githubusercontent.com/ahmedha43/FluxWAN/main/dist/fluxwan",
-      "sha256": "b2a6b657186c7996567657e3b18af7c4a182a8bc99051e8a6002cec7c9074e7e",
-      "size_bytes": 234752
+      "sha256": "8d1117db126ee797d9ea01ab3e703d7d893dad064a34fd76cb6b233edbac2155",
+      "size_bytes": 266256
     },
     "full_iso": {
-      "url": "https://github.com/ahmedha43/FluxWAN/releases/download/v1.2.4/fluxwan-os-x86_64.iso",
+      "url": "https://github.com/ahmedha43/FluxWAN/releases/download/v1.2.5/fluxwan-os-x86_64.iso",
       "sha256": "c8406acaf8180cf0d11b0857bb3cc46a4f8c756273779fa4b06761071a6b7bfe",
       "size_bytes": 226492416
     }
   }
 }
+

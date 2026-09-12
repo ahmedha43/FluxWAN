@@ -18,6 +18,8 @@
 #include "net_apply.h"
 #include "wan_manager.h"
 #include "diagnostics.h"
+#include "dyn_buf.h"
+#include <pthread.h>
 #include <fcntl.h>
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <poll.h>
@@ -569,7 +571,8 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
         "  \"qos\": { \"enabled\": %s, \"algorithm\": \"%s\", \"bandwidth_down_mbps\": %u, \"bandwidth_up_mbps\": %u, \"diffserv4\": %s },\n"
         "  \"dns\": { \"adblock_enabled\": %s, \"fast_dns_enabled\": %s, \"primary_dns\": \"%s\", \"secondary_dns\": \"%s\" },\n"
         "  \"app_steering\": { \"gaming_steering_enabled\": %s, \"voip_steering_enabled\": %s, \"bulk_balancing_enabled\": %s, \"primary_gaming_wan_id\": %u, \"primary_voip_wan_id\": %u },\n"
-        "  \"telegram\": { \"enabled\": %s, \"bot_token\": \"%s\", \"chat_id\": \"%s\", \"notify_on_failover\": %s, \"notify_on_recovery\": %s },\n",
+        "  \"telegram\": { \"enabled\": %s, \"bot_token\": \"%s\", \"chat_id\": \"%s\", \"notify_on_failover\": %s, \"notify_on_recovery\": %s },\n"
+        "  \"dpi\": { \"enabled\": %s, \"p2p_throttle_enabled\": %s, \"p2p_throttle_rate_kbps\": %u, \"voip_priority_enabled\": %s, \"gaming_priority_enabled\": %s, \"streaming_balance_enabled\": %s },\n",
         config->lan.qos.enabled ? "true" : "false",
         config->lan.qos.algorithm[0] ? config->lan.qos.algorithm : "cake",
         config->lan.qos.bandwidth_down_mbps, config->lan.qos.bandwidth_up_mbps,
@@ -587,9 +590,97 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
         config->telegram.bot_token,
         config->telegram.chat_id,
         config->telegram.notify_on_failover ? "true" : "false",
-        config->telegram.notify_on_recovery ? "true" : "false");
+        config->telegram.notify_on_recovery ? "true" : "false",
+        config->dpi.enabled ? "true" : "false",
+        config->dpi.p2p_throttle_enabled ? "true" : "false",
+        config->dpi.p2p_throttle_rate_kbps,
+        config->dpi.voip_priority_enabled ? "true" : "false",
+        config->dpi.gaming_priority_enabled ? "true" : "false",
+        config->dpi.streaming_balance_enabled ? "true" : "false");
 
-    snprintf(buf + offset, max_len - offset, "  \"sticky_count\": %u\n}\n", get_real_active_connections());
+    /* ===== System Telemetry: CPU, RAM, Uptime, Time ===== */
+
+    /* --- Uptime from /proc/uptime --- */
+    double uptime_secs = 0.0;
+    {
+        FILE *f = fopen("/proc/uptime", "r");
+        if (f) { fscanf(f, "%lf", &uptime_secs); fclose(f); }
+    }
+
+    /* --- CPU usage from /proc/stat (delta between reads) --- */
+    static unsigned long long prev_user=0, prev_nice=0, prev_sys=0,
+                               prev_idle=0, prev_iowait=0, prev_irq=0,
+                               prev_sirq=0, prev_steal=0;
+    unsigned long long cpu_pct = 0;
+    {
+        FILE *f = fopen("/proc/stat", "r");
+        if (f) {
+            char line[256];
+            if (fgets(line, sizeof(line), f)) {
+                unsigned long long u=0,n=0,s=0,id=0,iw=0,ir=0,si=0,st=0;
+                sscanf(line, "cpu %llu %llu %llu %llu %llu %llu %llu %llu",
+                       &u, &n, &s, &id, &iw, &ir, &si, &st);
+                unsigned long long total = (u-prev_user)+(n-prev_nice)+(s-prev_sys)+
+                                           (id-prev_idle)+(iw-prev_iowait)+(ir-prev_irq)+
+                                           (si-prev_sirq)+(st-prev_steal);
+                unsigned long long idle  = (id-prev_idle)+(iw-prev_iowait);
+                if (total > 0) {
+                    cpu_pct = (total > idle) ? ((total - idle) * 100ULL / total) : 0;
+                    if (cpu_pct > 100) cpu_pct = 100;
+                }
+                prev_user=u; prev_nice=n; prev_sys=s; prev_idle=id;
+                prev_iowait=iw; prev_irq=ir; prev_sirq=si; prev_steal=st;
+            }
+            fclose(f);
+        }
+    }
+
+    /* --- RAM from /proc/meminfo (kB) --- */
+    unsigned long long mem_total_kb=0, mem_avail_kb=0;
+    {
+        FILE *f = fopen("/proc/meminfo", "r");
+        if (f) {
+            char line[128]; unsigned long long val;
+            while (fgets(line, sizeof(line), f)) {
+                if      (sscanf(line, "MemTotal: %llu kB", &val) == 1) mem_total_kb = val;
+                else if (sscanf(line, "MemAvailable: %llu kB", &val) == 1) mem_avail_kb = val;
+            }
+            fclose(f);
+        }
+    }
+    unsigned long long mem_used_kb  = (mem_total_kb > mem_avail_kb) ? (mem_total_kb - mem_avail_kb) : 0;
+    unsigned long long mem_pct      = (mem_total_kb > 0) ? (mem_used_kb * 100ULL / mem_total_kb) : 0;
+
+    /* --- Load averages from /proc/loadavg --- */
+    float load1=0.0f, load5=0.0f, load15=0.0f;
+    {
+        FILE *f = fopen("/proc/loadavg", "r");
+        if (f) { fscanf(f, "%f %f %f", &load1, &load5, &load15); fclose(f); }
+    }
+
+    /* --- Current epoch time --- */
+    time_t now_epoch = time(NULL);
+
+    snprintf(buf + offset, max_len - offset,
+        "  \"sticky_count\": %u,\n"
+        "  \"sysinfo\": {\n"
+        "    \"uptime_sec\": %llu,\n"
+        "    \"cpu_pct\": %llu,\n"
+        "    \"mem_total_kb\": %llu,\n"
+        "    \"mem_used_kb\": %llu,\n"
+        "    \"mem_pct\": %llu,\n"
+        "    \"load1\": %.2f,\n"
+        "    \"load5\": %.2f,\n"
+        "    \"load15\": %.2f,\n"
+        "    \"epoch\": %lld\n"
+        "  }\n"
+        "}\n",
+        get_real_active_connections(),
+        (unsigned long long)uptime_secs,
+        cpu_pct,
+        mem_total_kb, mem_used_kb, mem_pct,
+        (double)load1, (double)load5, (double)load15,
+        (long long)now_epoch);
 }
 
 static void build_json_dhcp_leases(dhcp_server_ctx_t *dhcp, char *buf, size_t max_len) {
@@ -622,6 +713,365 @@ static void build_json_dhcp_leases(dhcp_server_ctx_t *dhcp, char *buf, size_t ma
             (i == count - 1) ? "" : ",");
     }
     snprintf(buf + offset, max_len - offset, "  ]\n}\n");
+}
+
+typedef struct {
+    char id[24];
+    char name[32];
+    char category[32];
+    char icon[24];
+    char priority[24];
+    uint64_t bytes;
+    uint64_t packets;
+    uint64_t last_bytes;
+    time_t last_time;
+    uint32_t rate_kbps;
+} dpi_app_item_t;
+
+static dpi_app_item_t g_dpi_apps[8] = {
+    { "youtube",    "YouTube",        "Video Streaming", "video",          "Normal",    0, 0, 0, 0, 0 },
+    { "tiktok",     "TikTok",         "Social Video",    "film",           "Normal",    0, 0, 0, 0, 0 },
+    { "netflix",    "Netflix",        "Video Streaming", "tv",             "Normal",    0, 0, 0, 0, 0 },
+    { "zoom",       "Zoom",           "VoIP & Meetings", "phone-call",     "High (EF)", 0, 0, 0, 0, 0 },
+    { "teams",      "Teams & Skype",  "VoIP Calls",      "users",          "High (EF)", 0, 0, 0, 0, 0 },
+    { "steam",      "Steam & Games",  "Online Gaming",   "crosshair",      "Fast (CS5)",0, 0, 0, 0, 0 },
+    { "bittorrent", "BitTorrent P2P", "P2P Transfers",   "download-cloud", "Low (CS1)", 0, 0, 0, 0, 0 },
+    { "other",      "Web & Other",    "General Traffic", "globe",          "Normal",    0, 0, 0, 0, 0 }
+};
+
+static void build_json_dpi_stats(web_server_ctx_t *ctx, char *buf, size_t max_len) {
+    if (!ctx || !buf || max_len == 0) return;
+    fluxwan_config_t *config = ctx->config;
+
+#if defined(__linux__)
+    FILE *fp = popen("iptables -t mangle -L FLUXWAN_DPI_ACCT -v -n -x 2>/dev/null", "r");
+    if (fp) {
+        char line[512];
+        while (fgets(line, sizeof(line), fp)) {
+            unsigned long long pkts = 0, bytes = 0;
+            if (sscanf(line, "%llu %llu", &pkts, &bytes) == 2) {
+                if (strstr(line, "/* YouTube */")) {
+                    g_dpi_apps[0].bytes = bytes; g_dpi_apps[0].packets = pkts;
+                } else if (strstr(line, "/* TikTok */")) {
+                    g_dpi_apps[1].bytes = bytes; g_dpi_apps[1].packets = pkts;
+                } else if (strstr(line, "/* Netflix */")) {
+                    g_dpi_apps[2].bytes = bytes; g_dpi_apps[2].packets = pkts;
+                } else if (strstr(line, "/* Zoom */")) {
+                    g_dpi_apps[3].bytes = bytes; g_dpi_apps[3].packets = pkts;
+                } else if (strstr(line, "/* Teams */")) {
+                    g_dpi_apps[4].bytes = bytes; g_dpi_apps[4].packets = pkts;
+                } else if (strstr(line, "/* Steam */")) {
+                    g_dpi_apps[5].bytes = bytes; g_dpi_apps[5].packets = pkts;
+                } else if (strstr(line, "/* BitTorrent */")) {
+                    g_dpi_apps[6].bytes = bytes; g_dpi_apps[6].packets = pkts;
+                } else if (strstr(line, "/* Other */")) {
+                    g_dpi_apps[7].bytes = bytes; g_dpi_apps[7].packets = pkts;
+                }
+            }
+        }
+        pclose(fp);
+    }
+#endif
+
+    time_t now = time(NULL);
+    uint64_t total_bytes = 0;
+    uint64_t total_pkts = 0;
+    uint32_t total_rate = 0;
+
+    for (int i = 0; i < 8; i++) {
+        if (g_dpi_apps[i].last_time > 0 && now > g_dpi_apps[i].last_time) {
+            uint64_t diff_bytes = (g_dpi_apps[i].bytes >= g_dpi_apps[i].last_bytes) ? 
+                                  (g_dpi_apps[i].bytes - g_dpi_apps[i].last_bytes) : 0;
+            time_t diff_sec = now - g_dpi_apps[i].last_time;
+            if (diff_sec > 0) {
+                g_dpi_apps[i].rate_kbps = (uint32_t)((diff_bytes * 8) / (diff_sec * 1000));
+            }
+        }
+        g_dpi_apps[i].last_bytes = g_dpi_apps[i].bytes;
+        g_dpi_apps[i].last_time = now;
+
+        total_bytes += g_dpi_apps[i].bytes;
+        total_pkts += g_dpi_apps[i].packets;
+        total_rate += g_dpi_apps[i].rate_kbps;
+    }
+
+    int offset = snprintf(buf, max_len,
+        "{\n"
+        "  \"status\": \"ok\",\n"
+        "  \"enabled\": %s,\n"
+        "  \"p2p_throttle_enabled\": %s,\n"
+        "  \"p2p_throttle_rate_kbps\": %u,\n"
+        "  \"voip_priority_enabled\": %s,\n"
+        "  \"gaming_priority_enabled\": %s,\n"
+        "  \"streaming_balance_enabled\": %s,\n"
+        "  \"total_bytes\": %llu,\n"
+        "  \"total_packets\": %llu,\n"
+        "  \"total_rate_kbps\": %u,\n"
+        "  \"apps\": [\n",
+        config->dpi.enabled ? "true" : "false",
+        config->dpi.p2p_throttle_enabled ? "true" : "false",
+        config->dpi.p2p_throttle_rate_kbps,
+        config->dpi.voip_priority_enabled ? "true" : "false",
+        config->dpi.gaming_priority_enabled ? "true" : "false",
+        config->dpi.streaming_balance_enabled ? "true" : "false",
+        (unsigned long long)total_bytes,
+        (unsigned long long)total_pkts,
+        total_rate);
+
+    for (int i = 0; i < 8; i++) {
+        double pct = (total_bytes > 0) ? ((double)g_dpi_apps[i].bytes * 100.0 / (double)total_bytes) : 0.0;
+        const char *prio = g_dpi_apps[i].priority;
+        if (strcmp(g_dpi_apps[i].id, "bittorrent") == 0 && config->dpi.p2p_throttle_enabled) {
+            prio = "Throttled";
+        }
+        offset += snprintf(buf + offset, max_len - offset,
+            "    {\n"
+            "      \"id\": \"%s\",\n"
+            "      \"name\": \"%s\",\n"
+            "      \"category\": \"%s\",\n"
+            "      \"icon\": \"%s\",\n"
+            "      \"priority\": \"%s\",\n"
+            "      \"bytes\": %llu,\n"
+            "      \"packets\": %llu,\n"
+            "      \"rate_kbps\": %u,\n"
+            "      \"percentage\": %.1f\n"
+            "    }%s\n",
+            g_dpi_apps[i].id,
+            g_dpi_apps[i].name,
+            g_dpi_apps[i].category,
+            g_dpi_apps[i].icon,
+            prio,
+            (unsigned long long)g_dpi_apps[i].bytes,
+            (unsigned long long)g_dpi_apps[i].packets,
+            g_dpi_apps[i].rate_kbps,
+            pct,
+            (i == 7) ? "" : ",");
+    }
+
+    snprintf(buf + offset, max_len - offset, "  ]\n}\n");
+}
+
+/* ===== Safe HTTP Dynamic Buffer Response Helper ===== */
+static void send_dyn_buf_response(socket_t client_fd, const char *content_type, const dyn_buf_t *body) {
+    if (!body || !body->data) return;
+    dyn_buf_t resp;
+    dyn_buf_init(&resp, body->len + 256);
+    dyn_buf_printf(&resp,
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: %s\r\n"
+        "Access-Control-Allow-Origin: *\r\n"
+        "Content-Length: %zu\r\n"
+        "Connection: close\r\n\r\n",
+        content_type, body->len);
+    dyn_buf_append_len(&resp, body->data, body->len);
+    send(client_fd, resp.data, (int)resp.len, 0);
+    dyn_buf_free(&resp);
+}
+
+/* ===== Login Brute-Force Rate Limiter ===== */
+typedef struct {
+    uint32_t ip;
+    int failed_attempts;
+    time_t lockout_until;
+} login_tracker_t;
+
+#define MAX_LOGIN_TRACKERS 64
+static login_tracker_t g_login_trackers[MAX_LOGIN_TRACKERS];
+static pthread_mutex_t g_login_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static bool login_is_locked_out(uint32_t ip, time_t now) {
+    if (ip == 0) return false;
+    pthread_mutex_lock(&g_login_lock);
+    for (int i = 0; i < MAX_LOGIN_TRACKERS; i++) {
+        if (g_login_trackers[i].ip == ip) {
+            if (g_login_trackers[i].lockout_until > now) {
+                pthread_mutex_unlock(&g_login_lock);
+                return true;
+            }
+            if (g_login_trackers[i].lockout_until <= now && g_login_trackers[i].lockout_until != 0) {
+                g_login_trackers[i].failed_attempts = 0;
+                g_login_trackers[i].lockout_until = 0;
+            }
+            break;
+        }
+    }
+    pthread_mutex_unlock(&g_login_lock);
+    return false;
+}
+
+static void login_record_failure(uint32_t ip, time_t now) {
+    if (ip == 0) return;
+    pthread_mutex_lock(&g_login_lock);
+    int slot = -1;
+    for (int i = 0; i < MAX_LOGIN_TRACKERS; i++) {
+        if (g_login_trackers[i].ip == ip) { slot = i; break; }
+        if (slot < 0 && (g_login_trackers[i].ip == 0 || g_login_trackers[i].lockout_until < now - 3600)) {
+            slot = i;
+        }
+    }
+    if (slot >= 0) {
+        g_login_trackers[slot].ip = ip;
+        g_login_trackers[slot].failed_attempts++;
+        if (g_login_trackers[slot].failed_attempts >= 5) {
+            g_login_trackers[slot].lockout_until = now + 300; /* Lockout 5 minutes */
+        }
+    }
+    pthread_mutex_unlock(&g_login_lock);
+}
+
+static void login_record_success(uint32_t ip) {
+    if (ip == 0) return;
+    pthread_mutex_lock(&g_login_lock);
+    for (int i = 0; i < MAX_LOGIN_TRACKERS; i++) {
+        if (g_login_trackers[i].ip == ip) {
+            g_login_trackers[i].failed_attempts = 0;
+            g_login_trackers[i].lockout_until = 0;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&g_login_lock);
+}
+
+/* ===== Carrier-Grade Prometheus Metrics Exporter ===== */
+static void build_prometheus_metrics(web_server_ctx_t *ctx, dyn_buf_t *buf) {
+    if (!ctx || !ctx->config || !buf) return;
+    fluxwan_config_t *config = ctx->config;
+
+    char active_ver[32] = FLUXWAN_VERSION;
+    get_active_system_version(active_ver, sizeof(active_ver));
+
+    dyn_buf_printf(buf, "# HELP fluxwan_info FluxWAN system information\n");
+    dyn_buf_printf(buf, "# TYPE fluxwan_info gauge\n");
+    dyn_buf_printf(buf, "fluxwan_info{version=\"%s\",author=\"%s\",license=\"%s\"} 1\n\n",
+                   active_ver, FLUXWAN_AUTHOR, FLUXWAN_LICENSE);
+
+    /* System Uptime */
+    double uptime_secs = 0.0;
+    {
+        FILE *f = fopen("/proc/uptime", "r");
+        if (f) { fscanf(f, "%lf", &uptime_secs); fclose(f); }
+    }
+    dyn_buf_printf(buf, "# HELP fluxwan_uptime_seconds Router uptime in seconds\n");
+    dyn_buf_printf(buf, "# TYPE fluxwan_uptime_seconds counter\n");
+    dyn_buf_printf(buf, "fluxwan_uptime_seconds %.1f\n\n", uptime_secs);
+
+    /* CPU usage from /proc/stat */
+    static unsigned long long p_user=0, p_nice=0, p_sys=0, p_idle=0, p_iowait=0, p_irq=0, p_sirq=0, p_steal=0;
+    unsigned long long cpu_pct = 0;
+    {
+        FILE *f = fopen("/proc/stat", "r");
+        if (f) {
+            char line[256];
+            if (fgets(line, sizeof(line), f)) {
+                unsigned long long u=0,n=0,s=0,id=0,iw=0,ir=0,si=0,st=0;
+                sscanf(line, "cpu %llu %llu %llu %llu %llu %llu %llu %llu",
+                       &u, &n, &s, &id, &iw, &ir, &si, &st);
+                unsigned long long total = (u-p_user)+(n-p_nice)+(s-p_sys)+
+                                           (id-p_idle)+(iw-p_iowait)+(ir-p_irq)+
+                                           (si-p_sirq)+(st-p_steal);
+                unsigned long long idle  = (id-p_idle)+(iw-p_iowait);
+                if (total > 0) {
+                    cpu_pct = (total > idle) ? ((total - idle) * 100ULL / total) : 0;
+                    if (cpu_pct > 100) cpu_pct = 100;
+                }
+                p_user=u; p_nice=n; p_sys=s; p_idle=id;
+                p_iowait=iw; p_irq=ir; p_sirq=si; p_steal=st;
+            }
+            fclose(f);
+        }
+    }
+    dyn_buf_printf(buf, "# HELP fluxwan_cpu_usage_percent Current CPU utilization percentage\n");
+    dyn_buf_printf(buf, "# TYPE fluxwan_cpu_usage_percent gauge\n");
+    dyn_buf_printf(buf, "fluxwan_cpu_usage_percent %llu\n\n", cpu_pct);
+
+    /* Memory from /proc/meminfo */
+    unsigned long long mem_total_kb=0, mem_avail_kb=0;
+    {
+        FILE *f = fopen("/proc/meminfo", "r");
+        if (f) {
+            char line[128]; unsigned long long val;
+            while (fgets(line, sizeof(line), f)) {
+                if      (sscanf(line, "MemTotal: %llu kB", &val) == 1) mem_total_kb = val;
+                else if (sscanf(line, "MemAvailable: %llu kB", &val) == 1) mem_avail_kb = val;
+            }
+            fclose(f);
+        }
+    }
+    unsigned long long mem_used_kb = (mem_total_kb > mem_avail_kb) ? (mem_total_kb - mem_avail_kb) : 0;
+    dyn_buf_printf(buf, "# HELP fluxwan_memory_used_bytes Used memory in bytes\n");
+    dyn_buf_printf(buf, "# TYPE fluxwan_memory_used_bytes gauge\n");
+    dyn_buf_printf(buf, "fluxwan_memory_used_bytes %llu\n\n", mem_used_kb * 1024ULL);
+
+    dyn_buf_printf(buf, "# HELP fluxwan_memory_total_bytes Total system memory in bytes\n");
+    dyn_buf_printf(buf, "# TYPE fluxwan_memory_total_bytes gauge\n");
+    dyn_buf_printf(buf, "fluxwan_memory_total_bytes %llu\n\n", mem_total_kb * 1024ULL);
+
+    /* Load Averages */
+    float load1=0.0f, load5=0.0f, load15=0.0f;
+    {
+        FILE *f = fopen("/proc/loadavg", "r");
+        if (f) { fscanf(f, "%f %f %f", &load1, &load5, &load15); fclose(f); }
+    }
+    dyn_buf_printf(buf, "# HELP fluxwan_load1 1-minute system load average\n");
+    dyn_buf_printf(buf, "# TYPE fluxwan_load1 gauge\n");
+    dyn_buf_printf(buf, "fluxwan_load1 %.2f\n\n", load1);
+
+    /* Active Tracked Flows */
+    dyn_buf_printf(buf, "# HELP fluxwan_active_connections Tracked active NAT flows\n");
+    dyn_buf_printf(buf, "# TYPE fluxwan_active_connections gauge\n");
+    dyn_buf_printf(buf, "fluxwan_active_connections %u\n\n", get_real_active_connections());
+
+    /* WAN Uplinks Telemetry */
+    dyn_buf_printf(buf, "# HELP fluxwan_wan_state WAN health state (1=healthy, 2=degraded, 0=down)\n");
+    dyn_buf_printf(buf, "# TYPE fluxwan_wan_state gauge\n");
+    for (uint32_t i = 0; i < config->wan_count; i++) {
+        const wan_config_t *w = &config->wans[i];
+        int st = 0;
+        if (w->state == WAN_STATE_HEALTHY) st = 1;
+        else if (w->state == WAN_STATE_DEGRADED) st = 2;
+        dyn_buf_printf(buf, "fluxwan_wan_state{id=\"%u\",name=\"%s\",label=\"%s\"} %d\n",
+                       w->id, w->name, w->label[0] ? w->label : w->name, st);
+    }
+    dyn_buf_printf(buf, "\n");
+
+    dyn_buf_printf(buf, "# HELP fluxwan_wan_rtt_seconds WAN round-trip latency in seconds\n");
+    dyn_buf_printf(buf, "# TYPE fluxwan_wan_rtt_seconds gauge\n");
+    for (uint32_t i = 0; i < config->wan_count; i++) {
+        const wan_config_t *w = &config->wans[i];
+        dyn_buf_printf(buf, "fluxwan_wan_rtt_seconds{id=\"%u\",name=\"%s\"} %.4f\n",
+                       w->id, w->name, (double)w->metrics.rtt_ms / 1000.0);
+    }
+    dyn_buf_printf(buf, "\n");
+
+    dyn_buf_printf(buf, "# HELP fluxwan_wan_packet_loss_ratio WAN packet loss ratio (0.0 to 1.0)\n");
+    dyn_buf_printf(buf, "# TYPE fluxwan_wan_packet_loss_ratio gauge\n");
+    for (uint32_t i = 0; i < config->wan_count; i++) {
+        const wan_config_t *w = &config->wans[i];
+        dyn_buf_printf(buf, "fluxwan_wan_packet_loss_ratio{id=\"%u\",name=\"%s\"} %.2f\n",
+                       w->id, w->name, (double)w->metrics.packet_loss_pct / 100.0);
+    }
+    dyn_buf_printf(buf, "\n");
+
+    /* DPI Application Breakdown */
+    dyn_buf_printf(buf, "# HELP fluxwan_dpi_app_bytes_total L7 DPI traffic volume per application\n");
+    dyn_buf_printf(buf, "# TYPE fluxwan_dpi_app_bytes_total counter\n");
+    for (int i = 0; i < 8; i++) {
+        if (g_dpi_apps[i].id[0]) {
+            dyn_buf_printf(buf, "fluxwan_dpi_app_bytes_total{app=\"%s\",category=\"%s\"} %llu\n",
+                           g_dpi_apps[i].id, g_dpi_apps[i].category, (unsigned long long)g_dpi_apps[i].bytes);
+        }
+    }
+    dyn_buf_printf(buf, "\n");
+
+    dyn_buf_printf(buf, "# HELP fluxwan_dpi_app_rate_kbps L7 DPI active bandwidth rate in Kbps\n");
+    dyn_buf_printf(buf, "# TYPE fluxwan_dpi_app_rate_kbps gauge\n");
+    for (int i = 0; i < 8; i++) {
+        if (g_dpi_apps[i].id[0]) {
+            dyn_buf_printf(buf, "fluxwan_dpi_app_rate_kbps{app=\"%s\"} %u\n",
+                           g_dpi_apps[i].id, g_dpi_apps[i].rate_kbps);
+        }
+    }
+    dyn_buf_printf(buf, "\n");
 }
 
 static void build_json_clients(web_server_ctx_t *ctx, char *buf, size_t max_len) {
@@ -1475,7 +1925,34 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
         }
     }
 
+    /* Extract client IP for security tracking and rate limiting */
+    uint32_t peer_ip = 0;
+#if !defined(_WIN32) && !defined(_WIN64)
+    struct sockaddr_in peer_addr;
+    socklen_t peer_len = sizeof(peer_addr);
+    if (getpeername(client_fd, (struct sockaddr *)&peer_addr, &peer_len) == 0) {
+        peer_ip = peer_addr.sin_addr.s_addr;
+    }
+#endif
+
     if (strstr(req, "POST /api/v1/login") != NULL) {
+        time_t now = time(NULL);
+        if (login_is_locked_out(peer_ip, now)) {
+            const char *resp_body = "{\"status\":\"error\",\"message\":\"Too many failed attempts. Temporary lockout for 5 minutes.\"}";
+            char resp[512];
+            int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 429 Too Many Requests\r\n"
+                "Content-Type: application/json\r\n"
+                "Access-Control-Allow-Origin: *\r\n"
+                "Retry-After: 300\r\n"
+                "Content-Length: %zu\r\n"
+                "Connection: close\r\n\r\n%s",
+                strlen(resp_body), resp_body);
+            send(client_fd, resp, len, 0);
+            close_client_socket(client_fd);
+            return 0;
+        }
+
         const char *body = strstr(req, "\r\n\r\n");
         char user[64] = "", pass[64] = "";
         if (body) {
@@ -1490,6 +1967,7 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
         bool ok = (strcmp(user, expected_user) == 0 && strcmp(pass, expected_pass) == 0);
         char resp[512];
         if (ok) {
+            login_record_success(peer_ip);
             char resp_body[256];
             snprintf(resp_body, sizeof(resp_body),
                      "{\"status\":\"ok\",\"token\":\"%s\",\"username\":\"%s\"}",
@@ -1506,6 +1984,7 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
             send(client_fd, resp, len, 0);
             wan_manager_add_log("INFO", "Admin user '%s' logged in successfully to Web UI", user);
         } else {
+            login_record_failure(peer_ip, now);
             const char *resp_body = "{\"status\":\"error\",\"message\":\"Invalid username or password\"}";
             int len = snprintf(resp, sizeof(resp),
                 "HTTP/1.1 401 Unauthorized\r\n"
@@ -1529,7 +2008,7 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
         char json_buf[8192];
         build_json_interfaces(ctx->config, json_buf, sizeof(json_buf));
 
-        char resp[8500];
+        char resp[9000];
         int len = snprintf(resp, sizeof(resp),
             "HTTP/1.1 200 OK\r\n"
             "Content-Type: application/json\r\n"
@@ -1548,19 +2027,30 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
                 strlen(rb), rb);
             send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
         }
-        char json_buf[16384];
-        build_json_status(ctx, json_buf, sizeof(json_buf));
-
-        char resp[17000];
-        int len = snprintf(resp, sizeof(resp),
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Type: application/json\r\n"
-            "Access-Control-Allow-Origin: *\r\n"
-            "Content-Length: %zu\r\n"
-            "Connection: close\r\n\r\n%s",
-            strlen(json_buf), json_buf);
-
-        send(client_fd, resp, (int)len, 0);
+        dyn_buf_t sbuf;
+        dyn_buf_init(&sbuf, 32768);
+        char *temp_json = malloc(65536);
+        if (temp_json) {
+            build_json_status(ctx, temp_json, 65536);
+            dyn_buf_append(&sbuf, temp_json);
+            free(temp_json);
+        }
+        send_dyn_buf_response(client_fd, "application/json", &sbuf);
+        dyn_buf_free(&sbuf);
+        close_client_socket(client_fd);
+    } else if (strstr(req, "GET /api/v1/metrics") != NULL || strstr(req, "GET /metrics") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "Unauthorized\n";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: text/plain\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        dyn_buf_t mbuf;
+        dyn_buf_init(&mbuf, 8192);
+        build_prometheus_metrics(ctx, &mbuf);
+        send_dyn_buf_response(client_fd, "text/plain; version=0.0.4; charset=utf-8", &mbuf);
+        dyn_buf_free(&mbuf);
         close_client_socket(client_fd);
     } else if (strstr(req, "GET /api/v1/debug") != NULL) {
         if (!is_request_authorized(ctx->config, req)) {
@@ -2113,6 +2603,46 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
             net_apply_app_steering(ctx->config);
         }
         const char *rb = "{\"status\":\"ok\",\"message\":\"Application steering updated\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd);
+    } else if (strstr(req, "GET /api/v1/dpi/stats") != NULL || strstr(req, "GET /api/v1/dpi") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        char json_buf[8192];
+        build_json_dpi_stats(ctx, json_buf, sizeof(json_buf));
+        char resp[8500]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(json_buf), json_buf);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd);
+    } else if (strstr(req, "POST /api/v1/dpi/policy") != NULL || strstr(req, "POST /api/v1/dpi") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        if (body) {
+            body += 4;
+            ctx->config->dpi.enabled = extract_json_bool(body, "enabled", ctx->config->dpi.enabled);
+            ctx->config->dpi.p2p_throttle_enabled = extract_json_bool(body, "p2p_throttle_enabled", ctx->config->dpi.p2p_throttle_enabled);
+            ctx->config->dpi.p2p_throttle_rate_kbps = (uint32_t)extract_json_int(body, "p2p_throttle_rate_kbps", ctx->config->dpi.p2p_throttle_rate_kbps);
+            ctx->config->dpi.voip_priority_enabled = extract_json_bool(body, "voip_priority_enabled", ctx->config->dpi.voip_priority_enabled);
+            ctx->config->dpi.gaming_priority_enabled = extract_json_bool(body, "gaming_priority_enabled", ctx->config->dpi.gaming_priority_enabled);
+            ctx->config->dpi.streaming_balance_enabled = extract_json_bool(body, "streaming_balance_enabled", ctx->config->dpi.streaming_balance_enabled);
+            config_save(get_config_target_path(ctx), ctx->config);
+            config_load(get_config_target_path(ctx), ctx->config);
+            net_apply_dpi(ctx->config);
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"DPI traffic policies updated\"}";
         char resp[256]; int len = snprintf(resp, sizeof(resp),
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
             strlen(rb), rb);

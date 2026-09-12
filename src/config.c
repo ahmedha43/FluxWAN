@@ -589,6 +589,24 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
         out_config->app_steering.bulk_balancing_enabled = true;
     }
 
+    /* Parse L7 Deep Packet Inspection (DPI) block */
+    const char *dpi_pos = strstr(json, "\"dpi\"");
+    if (dpi_pos) {
+        out_config->dpi.enabled = extract_json_bool(dpi_pos, "enabled", true);
+        out_config->dpi.p2p_throttle_enabled = extract_json_bool(dpi_pos, "p2p_throttle_enabled", false);
+        out_config->dpi.p2p_throttle_rate_kbps = (uint32_t)extract_json_int(dpi_pos, "p2p_throttle_rate_kbps", 512);
+        out_config->dpi.voip_priority_enabled = extract_json_bool(dpi_pos, "voip_priority_enabled", true);
+        out_config->dpi.gaming_priority_enabled = extract_json_bool(dpi_pos, "gaming_priority_enabled", true);
+        out_config->dpi.streaming_balance_enabled = extract_json_bool(dpi_pos, "streaming_balance_enabled", true);
+    } else {
+        out_config->dpi.enabled = true;
+        out_config->dpi.p2p_throttle_enabled = false;
+        out_config->dpi.p2p_throttle_rate_kbps = 512;
+        out_config->dpi.voip_priority_enabled = true;
+        out_config->dpi.gaming_priority_enabled = true;
+        out_config->dpi.streaming_balance_enabled = true;
+    }
+
     /* Parse Telegram Bot Alerts block */
     const char *tg_pos = strstr(json, "\"telegram\"");
     if (tg_pos) {
@@ -906,6 +924,14 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
     fprintf(f, "    \"synthetic_prefix\": \"%s\",\n", config->nat46.synthetic_prefix);
     fprintf(f, "    \"upstream_dns\": \"%s\",\n", config->nat46.upstream_dns);
     fprintf(f, "    \"starlink_wan_name\": \"%s\"\n", config->nat46.starlink_wan_name);
+    fprintf(f, "  },\n");
+    fprintf(f, "  \"dpi\": {\n");
+    fprintf(f, "    \"enabled\": %s,\n", config->dpi.enabled ? "true" : "false");
+    fprintf(f, "    \"p2p_throttle_enabled\": %s,\n", config->dpi.p2p_throttle_enabled ? "true" : "false");
+    fprintf(f, "    \"p2p_throttle_rate_kbps\": %u,\n", config->dpi.p2p_throttle_rate_kbps);
+    fprintf(f, "    \"voip_priority_enabled\": %s,\n", config->dpi.voip_priority_enabled ? "true" : "false");
+    fprintf(f, "    \"gaming_priority_enabled\": %s,\n", config->dpi.gaming_priority_enabled ? "true" : "false");
+    fprintf(f, "    \"streaming_balance_enabled\": %s\n", config->dpi.streaming_balance_enabled ? "true" : "false");
     fprintf(f, "  }\n");
     fprintf(f, "}\n");
 
@@ -1295,6 +1321,14 @@ int config_reset_to_defaults(fluxwan_config_t *out_config) {
     safe_str_copy(out_config->nat46.synthetic_prefix, "198.18.0.0/15", sizeof(out_config->nat46.synthetic_prefix));
     safe_str_copy(out_config->nat46.upstream_dns, "1.1.1.1", sizeof(out_config->nat46.upstream_dns));
     safe_str_copy(out_config->nat46.starlink_wan_name, "veth_wan2", sizeof(out_config->nat46.starlink_wan_name));
+
+    /* DPI Defaults */
+    out_config->dpi.enabled = true;
+    out_config->dpi.p2p_throttle_enabled = false;
+    out_config->dpi.p2p_throttle_rate_kbps = 512;
+    out_config->dpi.voip_priority_enabled = true;
+    out_config->dpi.gaming_priority_enabled = true;
+    out_config->dpi.streaming_balance_enabled = true;
 
     return 0;
 }

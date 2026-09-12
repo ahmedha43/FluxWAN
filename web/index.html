@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FluxWAN - Router & Multi-WAN Appliance</title>
+    <title>FluxWAN - Router &amp; Multi-WAN Appliance</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -13,82 +13,329 @@
         .port-card { transition: all 0.2s ease-in-out; }
         .port-card:hover { transform: translateY(-2px); border-color: rgba(59, 130, 246, 0.4); }
     </style>
-</head>
-<body x-data="fluxRouterApp()" x-init="initApp()" class="min-h-screen flex flex-col">
+    <style>
+        /* ===== PROFESSIONAL SIDEBAR LAYOUT ===== */
+        :root {
+            --sidebar-w: 220px;
+            --topbar-h: 52px;
+            --c-bg: #080c14;
+            --c-sidebar: #0d1220;
+            --c-border: rgba(255,255,255,0.06);
+            --c-hover: rgba(255,255,255,0.05);
+            --c-active: rgba(59,130,246,0.15);
+            --c-active-border: rgba(59,130,246,0.4);
+        }
+        * { box-sizing: border-box; }
+        html, body { height: 100%; overflow: hidden; }
+        body { display: flex; flex-direction: column; background: var(--c-bg); }
 
-    <!-- Top Navigation Header -->
-    <header class="glass-card sticky top-0 z-50 border-b border-slate-700/50 px-6 py-4 flex items-center justify-between">
-        <div class="flex items-center space-x-4">
-            <div class="bg-gradient-to-r from-blue-600 to-indigo-600 p-2.5 rounded-xl shadow-lg shadow-blue-500/25">
-                <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+        /* Topbar */
+        #topbar {
+            height: var(--topbar-h);
+            min-height: var(--topbar-h);
+            background: #0d1220;
+            border-bottom: 1px solid var(--c-border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 16px;
+            z-index: 100;
+            flex-shrink: 0;
+        }
+
+        /* App shell below topbar */
+        #app-shell {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* Sidebar */
+        #sidebar {
+            width: var(--sidebar-w);
+            min-width: var(--sidebar-w);
+            background: var(--c-sidebar);
+            border-inline-end: 1px solid var(--c-border);
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            overflow-x: hidden;
+            flex-shrink: 0;
+        }
+        #sidebar::-webkit-scrollbar { width: 3px; }
+        #sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+        .sidebar-section-label {
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: #475569;
+            padding: 16px 14px 4px;
+        }
+        .sidebar-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 14px;
+            font-size: 12px;
+            font-weight: 500;
+            color: #94a3b8;
+            cursor: pointer;
+            border-radius: 0;
+            transition: all 0.15s;
+            border-inline-start: 2px solid transparent;
+            user-select: none;
+        }
+        .sidebar-item:hover {
+            background: var(--c-hover);
+            color: #e2e8f0;
+        }
+        .sidebar-item.active {
+            background: var(--c-active);
+            color: #60a5fa;
+            border-inline-start-color: #3b82f6;
+            font-weight: 600;
+        }
+        .sidebar-item .nav-icon { font-size: 15px; flex-shrink: 0; width: 20px; text-align: center; }
+        .sidebar-item .nav-badge {
+            margin-inline-start: auto;
+            font-size: 9px;
+            font-weight: 700;
+            background: rgba(239,68,68,0.2);
+            color: #f87171;
+            border: 1px solid rgba(239,68,68,0.3);
+            padding: 1px 5px;
+            border-radius: 999px;
+        }
+
+        /* Main content area */
+        #main-content {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding: 20px 24px;
+            scroll-behavior: smooth;
+        }
+        #main-content::-webkit-scrollbar { width: 5px; }
+        #main-content::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
+
+        /* Topbar stats */
+        .topbar-stat {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 10px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid var(--c-border);
+            border-radius: 6px;
+            font-size: 11px;
+            font-family: monospace;
+        }
+        .topbar-stat .label { color: #64748b; }
+        .topbar-stat .value { color: #e2e8f0; font-weight: 600; }
+
+        /* Topbar action button */
+        .topbar-btn {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 10px;
+            font-size: 11px;
+            font-weight: 600;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.15s;
+            border: 1px solid transparent;
+            background: transparent;
+        }
+
+        /* Sidebar bottom info */
+        #sidebar-footer {
+            margin-top: auto;
+            padding: 10px 14px;
+            border-top: 1px solid var(--c-border);
+            font-size: 10px;
+            color: #475569;
+        }
+
+        /* Misc */
+        .text-3xs { font-size: 10px; }
+        .text-4xs { font-size: 9px; }
+        .text-2xs { font-size: 11px; }
+        .scrollbar-thin::-webkit-scrollbar { height: 3px; }
+        .scrollbar-thin::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+    </style>
+</head>
+<body x-data="fluxRouterApp()" x-init="initApp()" :dir="currentLang === 'ar' ? 'rtl' : 'ltr'" :lang="currentLang">
+
+    <!-- ===== TOP BAR ===== -->
+    <div id="topbar">
+        <!-- Brand -->
+        <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
+            <div style="background:linear-gradient(135deg,#2563eb,#4f46e5);padding:5px 8px;border-radius:8px;display:flex;align-items:center;justify-content:center">
+                <svg style="width:16px;height:16px;fill:none;stroke:white" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 10V3L4 14h7v7l9-11h-7z"/>
                 </svg>
             </div>
             <div>
-                <h1 class="text-xl font-bold tracking-wide text-white">FluxWAN <span class="text-xs bg-blue-500/20 text-blue-400 px-2.5 py-0.5 rounded-full border border-blue-500/30 whitespace-nowrap inline-block">x86 Bare-Metal</span></h1>
-                <p class="text-xs text-slate-400">High-Performance Multi-WAN Router & Port Manager</p>
+                <div style="font-size:13px;font-weight:800;letter-spacing:0.03em;color:white;line-height:1.1" x-text="t('app_title')">FluxWAN</div>
+                <div style="font-size:9px;color:#475569;font-weight:500;line-height:1" x-text="t('app_subtitle')">Multi-WAN Router</div>
             </div>
+            <span style="font-size:9px;font-family:monospace;background:rgba(59,130,246,0.15);color:#60a5fa;border:1px solid rgba(59,130,246,0.3);padding:2px 7px;border-radius:999px;font-weight:700;margin-inline-start:4px" x-text="'v' + systemVersion"></span>
         </div>
 
-        <!-- Navigation Tabs -->
-        <nav class="flex flex-wrap gap-1.5 bg-slate-900/90 p-1.5 rounded-xl border border-slate-800">
-            <button @click="currentTab = 'interfaces'" :class="currentTab === 'interfaces' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'" class="px-3.5 py-2 text-xs font-bold rounded-lg transition flex items-center space-x-1.5">
-                <span>🔌</span>
-                <span>Interfaces</span>
-            </button>
-            <button @click="currentTab = 'wan'" :class="currentTab === 'wan' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'" class="px-3.5 py-2 text-xs font-bold rounded-lg transition flex items-center space-x-1.5">
-                <span>🌐</span>
-                <span>WAN Uplinks</span>
-            </button>
-            <button @click="currentTab = 'groups'" :class="currentTab === 'groups' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'" class="px-3.5 py-2 text-xs font-bold rounded-lg transition flex items-center space-x-1.5">
-                <span>🔀</span>
-                <span>WAN Groups & PBR</span>
-            </button>
-            <button @click="currentTab = 'lan'" :class="currentTab === 'lan' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'" class="px-3.5 py-2 text-xs font-bold rounded-lg transition flex items-center space-x-1.5">
-                <span>🏠</span>
-                <span>LAN & DHCP</span>
-            </button>
-            <button @click="currentTab = 'qos'" :class="currentTab === 'qos' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'" class="px-3.5 py-2 text-xs font-bold rounded-lg transition flex items-center space-x-1.5">
-                <span>⚡</span>
-                <span>QoS & Limits</span>
-            </button>
-            <button @click="currentTab = 'services'" :class="currentTab === 'services' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'" class="px-3.5 py-2 text-xs font-bold rounded-lg transition flex items-center space-x-1.5">
-                <span>🛡️</span>
-                <span>Services & Alerts</span>
-            </button>
-            <button @click="currentTab = 'backup'" :class="currentTab === 'backup' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'" class="px-3.5 py-2 text-xs font-bold rounded-lg transition flex items-center space-x-1.5">
-                <span>📦</span>
-                <span>Backup & System</span>
-            </button>
-        </nav>
 
-        <div class="flex items-center space-x-3">
-            <button @click="openDebugModal()" class="bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-xs font-semibold px-3.5 py-2 rounded-xl border border-amber-500/30 flex items-center space-x-1.5 transition shadow-sm hover:shadow-amber-500/10" title="وضع ديباك الشامل لمراقبة كافة حالات النظام">
+        <!-- ===== DEVICE SYSTEM TELEMETRY STRIP (CPU, RAM, LOAD, UPTIME, TIME & DATE) ===== -->
+        <div style="display:flex;align-items:center;gap:8px;flex:1;overflow-x:auto;padding:0 14px;justify-content:center" class="scrollbar-thin">
+
+            <!-- CPU -->
+            <div class="topbar-stat" style="position:relative;overflow:hidden;padding:5px 12px;gap:6px">
+                <span style="font-size:12px">🖥️</span>
+                <span class="label" style="font-weight:700">CPU</span>
+                <span style="font-weight:800;font-family:monospace;font-size:12px"
+                      :style="(sysinfo.cpu_pct||0) > 80 ? 'color:#f87171' : (sysinfo.cpu_pct||0) > 50 ? 'color:#fbbf24' : 'color:#34d399'"
+                      x-text="(sysinfo.cpu_pct||0) + '%'">0%</span>
+                <!-- mini bar -->
+                <div style="position:absolute;bottom:0;left:0;height:2px;background:rgba(255,255,255,0.06);width:100%">
+                    <div style="height:100%;transition:width 0.8s ease"
+                         :style="'width:' + (sysinfo.cpu_pct||0) + '%;background:' + ((sysinfo.cpu_pct||0)>80?'#f87171':(sysinfo.cpu_pct||0)>50?'#fbbf24':'#34d399')"></div>
+                </div>
+            </div>
+
+            <!-- RAM -->
+            <div class="topbar-stat" style="position:relative;overflow:hidden;padding:5px 12px;gap:6px">
+                <span style="font-size:12px">🧠</span>
+                <span class="label" style="font-weight:700">RAM</span>
+                <span style="font-weight:800;font-family:monospace;font-size:12px"
+                      :style="(sysinfo.mem_pct||0) > 85 ? 'color:#f87171' : (sysinfo.mem_pct||0) > 65 ? 'color:#fbbf24' : 'color:#60a5fa'"
+                      x-text="sysinfo.mem_used_kb ? Math.round(sysinfo.mem_used_kb/1024) + 'M' : '0M'">0M</span>
+                <span class="label" style="font-family:monospace" x-text="'/ ' + Math.round((sysinfo.mem_total_kb||0)/1024) + 'M'"></span>
+                <span style="font-size:10px;font-family:monospace;font-weight:600;color:#94a3b8" x-text="'(' + (sysinfo.mem_pct||0) + '%)'"></span>
+                <!-- mini bar -->
+                <div style="position:absolute;bottom:0;left:0;height:2px;background:rgba(255,255,255,0.06);width:100%">
+                    <div style="height:100%;transition:width 0.8s ease"
+                         :style="'width:' + (sysinfo.mem_pct||0) + '%;background:' + ((sysinfo.mem_pct||0)>85?'#f87171':(sysinfo.mem_pct||0)>65?'#fbbf24':'#60a5fa')"></div>
+                </div>
+            </div>
+
+            <!-- Load Average -->
+            <div class="topbar-stat" style="padding:5px 12px;gap:6px">
+                <span style="font-size:12px">⚡</span>
+                <span class="label" style="font-weight:700">Load</span>
+                <span style="color:#c4b5fd;font-weight:700;font-family:monospace;font-size:12px"
+                      x-text="(sysinfo.load1||0).toFixed(2) + ', ' + (sysinfo.load5||0).toFixed(2) + ', ' + (sysinfo.load15||0).toFixed(2)">0.00, 0.00, 0.00</span>
+            </div>
+
+            <!-- Divider -->
+            <div style="width:1px;height:22px;background:rgba(255,255,255,0.08);flex-shrink:0"></div>
+
+            <!-- Uptime -->
+            <div class="topbar-stat" style="padding:5px 12px;gap:6px">
+                <span style="font-size:12px">⏱</span>
+                <span class="label" style="font-weight:700" x-text="currentLang==='ar'?'تشغيل:':'Uptime:'">Uptime:</span>
+                <span style="color:#86efac;font-weight:800;font-family:monospace;font-size:12px" x-text="formatUptime(sysinfo.uptime_sec||0)">0s</span>
+            </div>
+
+            <!-- Divider -->
+            <div style="width:1px;height:22px;background:rgba(255,255,255,0.08);flex-shrink:0"></div>
+
+            <!-- Live Clock + Date -->
+            <div class="topbar-stat" style="gap:8px;padding:4px 12px">
+                <span style="font-size:13px">🕐</span>
+                <div style="display:flex;flex-direction:column;align-items:flex-start;line-height:1.15">
+                    <span style="color:#e2e8f0;font-weight:800;font-family:monospace;font-size:12px;letter-spacing:0.04em" x-text="liveClock">00:00:00</span>
+                    <span style="color:#94a3b8;font-family:system-ui,-apple-system,sans-serif;font-size:10px;font-weight:500" x-text="liveDate">Jan 1 2026</span>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Right Actions -->
+        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+            <button @click="toggleLanguage()" class="topbar-btn" style="background:rgba(99,102,241,0.1);border-color:rgba(99,102,241,0.3);color:#a5b4fc">
+                <span>🌐</span>
+                <span x-text="currentLang==='ar'?'EN':'عربي'"></span>
+            </button>
+            <button @click="openDebugModal()" class="topbar-btn" style="background:rgba(245,158,11,0.1);border-color:rgba(245,158,11,0.25);color:#fbbf24" :title="t('btn_debug')">
                 <span>🐞</span>
-                <span>Debug</span>
+                <span class="hidden md:inline" x-text="t('btn_debug')"></span>
             </button>
-            <button @click="openTerminalModal()" class="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-semibold px-3.5 py-2 rounded-xl border border-emerald-500/30 flex items-center space-x-1.5 transition shadow-sm hover:shadow-emerald-500/10" title="موجّه أوامر لينكس المباشر (Terminal Shell)">
+            <button @click="openTerminalModal()" class="topbar-btn" style="background:rgba(16,185,129,0.1);border-color:rgba(16,185,129,0.25);color:#34d399" :title="t('btn_terminal')">
                 <span>💻</span>
-                <span>Terminal</span>
+                <span class="hidden md:inline" x-text="t('btn_terminal')"></span>
             </button>
-            <button @click="showLogsModal = true; fetchLogs()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold px-3.5 py-2 rounded-xl border border-slate-700 flex items-center space-x-1.5 transition">
+            <button @click="showLogsModal=true;fetchLogs()" class="topbar-btn" style="background:rgba(100,116,139,0.1);border-color:rgba(100,116,139,0.25);color:#94a3b8">
                 <span>📜</span>
-                <span>Logs</span>
+                <span class="hidden md:inline" x-text="t('btn_logs')"></span>
             </button>
-            <button @click="logout()" class="text-slate-400 hover:text-rose-400 text-xs font-semibold px-2 py-1.5 transition" title="Logout">
+            <button @click="logout()" class="topbar-btn" style="background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.2);color:#f87171">
                 <span>🔒</span>
             </button>
-            <button @click="saveAndApply()" class="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold px-5 py-2.5 rounded-xl shadow-lg shadow-emerald-500/20 flex items-center space-x-2 transition">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+            <button @click="saveAndApply()" style="display:flex;align-items:center;gap:6px;padding:6px 14px;background:linear-gradient(135deg,#059669,#0d9488);color:white;font-size:12px;font-weight:700;border-radius:7px;border:none;cursor:pointer;box-shadow:0 2px 12px rgba(5,150,105,0.3)">
+                <svg style="width:14px;height:14px;fill:none;stroke:currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
                 </svg>
-                <span>Save & Apply</span>
+                <span x-text="t('btn_save_apply')"></span>
             </button>
         </div>
-    </header>
+    </div>
 
-    <!-- Main Content Area -->
-    <main class="max-w-7xl mx-auto px-6 py-8 flex-1 w-full space-y-8">
+    <!-- ===== APP SHELL ===== -->
+    <div id="app-shell">
+
+        <!-- ===== SIDEBAR ===== -->
+        <nav id="sidebar">
+            <div class="sidebar-section-label" x-text="currentLang==='ar'?'الشبكة':'NETWORK'"></div>
+            <div class="sidebar-item" :class="currentTab==='interfaces'?'active':''" @click="currentTab='interfaces'">
+                <span class="nav-icon">🔌</span>
+                <span x-text="t('tab_interfaces')">Interfaces</span>
+            </div>
+            <div class="sidebar-item" :class="currentTab==='wan'?'active':''" @click="currentTab='wan'">
+                <span class="nav-icon">🌐</span>
+                <span x-text="t('tab_wan')">WAN Uplinks</span>
+                <span class="nav-badge" x-show="config.wans && config.wans.filter(w=>w.state==='DOWN'||w.enabled===false).length > 0" x-text="config.wans.filter(w=>w.state==='DOWN'||w.enabled===false).length"></span>
+            </div>
+            <div class="sidebar-item" :class="currentTab==='groups'?'active':''" @click="currentTab='groups'">
+                <span class="nav-icon">🔀</span>
+                <span x-text="t('tab_groups')">WAN Groups</span>
+            </div>
+            <div class="sidebar-section-label" x-text="currentLang==='ar'?'الشبكة المحلية':'LAN'"></div>
+            <div class="sidebar-item" :class="currentTab==='lan'?'active':''" @click="currentTab='lan'">
+                <span class="nav-icon">🏠</span>
+                <span x-text="t('tab_lan')">LAN &amp; DHCP</span>
+            </div>
+            <div class="sidebar-section-label" x-text="currentLang==='ar'?'جودة الخدمة':'TRAFFIC'"></div>
+            <div class="sidebar-item" :class="currentTab==='qos'?'active':''" @click="currentTab='qos'">
+                <span class="nav-icon">⚡</span>
+                <span x-text="t('tab_qos')">QoS &amp; Limits</span>
+            </div>
+            <div class="sidebar-item" :class="currentTab==='dpi'?'active':''" @click="currentTab='dpi';fetchDpiStats()">
+                <span class="nav-icon">🎯</span>
+                <span x-text="t('tab_dpi')">L7 DPI &amp; Apps</span>
+            </div>
+            <div class="sidebar-section-label" x-text="currentLang==='ar'?'النظام':'SYSTEM'"></div>
+            <div class="sidebar-item" :class="currentTab==='services'?'active':''" @click="currentTab='services'">
+                <span class="nav-icon">🛡️</span>
+                <span x-text="t('tab_services')">Services &amp; Alerts</span>
+            </div>
+            <div class="sidebar-item" :class="currentTab==='backup'?'active':''" @click="currentTab='backup'">
+                <span class="nav-icon">📦</span>
+                <span x-text="t('tab_backup')">Backup &amp; System</span>
+            </div>
+            <div id="sidebar-footer">
+                <div style="display:flex;align-items:center;gap:5px;margin-bottom:4px">
+                    <span style="width:6px;height:6px;background:#10b981;border-radius:50%;display:inline-block;box-shadow:0 0 5px #10b981;animation:pulse 2s infinite"></span>
+                    <span style="color:#64748b;font-size:9px;font-weight:600" x-text="currentLang==='ar'?'النظام يعمل':'System Online'">System Online</span>
+                </div>
+                <div style="font-size:9px;color:#334155;font-family:monospace" x-text="'LAN: ' + (config.lan.ip || '192.168.90.1')">LAN: 192.168.90.1</div>
+                <div style="font-size:9px;color:#334155;font-family:monospace" x-text="'WANs: ' + (config.wans ? config.wans.length : 0) + ' lines'">WANs: 0 lines</div>
+            </div>
+        </nav>
+
+        <!-- ===== MAIN CONTENT ===== -->
+        <main id="main-content">
         
         <!-- Login Modal -->
         <div x-show="showLoginModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
@@ -1578,6 +1825,241 @@
             </div>
         </section>
 
+        <!-- ================= TAB: L7 DPI & APPLICATION CLASSIFICATION ================= -->
+        <section x-show="currentTab === 'dpi'" class="space-y-8">
+            <!-- Header Card -->
+            <div class="glass-card p-6 rounded-2xl border border-slate-700 space-y-4">
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                    <div class="flex items-center space-x-3 rtl:space-x-reverse">
+                        <div class="bg-gradient-to-r from-purple-600 to-indigo-600 p-3 rounded-xl shadow-lg shadow-purple-500/20 text-white text-xl">
+                            🎯
+                        </div>
+                        <div>
+                            <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                                <span x-text="t('dpi_title')">L7 Deep Packet Inspection & App Classifier</span>
+                                <span class="text-xs bg-emerald-500/20 text-emerald-400 px-2.5 py-0.5 rounded-full border border-emerald-500/30 font-mono">Netfilter String/Hex L7</span>
+                            </h2>
+                            <p class="text-xs text-slate-400" x-text="t('dpi_subtitle')">Real-time application recognition via TLS SNI & protocol signatures. Intelligent QoS and P2P suppression.</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-3 rtl:space-x-reverse">
+                        <button @click="fetchDpiStats()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold px-3.5 py-2 rounded-xl border border-slate-700 flex items-center space-x-1.5 rtl:space-x-reverse transition">
+                            <span>🔄</span>
+                            <span x-text="t('refresh')">Refresh</span>
+                        </button>
+                        <label class="flex items-center space-x-2 rtl:space-x-reverse cursor-pointer bg-slate-900/80 px-3.5 py-2 rounded-xl border border-slate-800">
+                            <input type="checkbox" x-model="dpiStats.enabled" class="rounded border-slate-700 text-indigo-600 focus:ring-indigo-500">
+                            <span class="text-xs font-bold text-white" x-text="t('dpi_master_enable')">Enable DPI Engine</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Top Telemetry Metrics -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2">
+                    <div class="bg-slate-900/60 p-4 rounded-xl border border-slate-800/80 space-y-1">
+                        <div class="text-xs text-slate-400" x-text="t('dpi_total_detected')">Identified Traffic</div>
+                        <div class="text-xl font-black text-indigo-400 font-mono" x-text="formatBytes(dpiStats.total_bytes || 0)">0 B</div>
+                    </div>
+                    <div class="bg-slate-900/60 p-4 rounded-xl border border-slate-800/80 space-y-1">
+                        <div class="text-xs text-slate-400" x-text="t('dpi_total_packets')">Total Packets</div>
+                        <div class="text-xl font-black text-cyan-400 font-mono" x-text="(dpiStats.total_packets || 0).toLocaleString() + ' pkts'">0 pkts</div>
+                    </div>
+                    <div class="bg-slate-900/60 p-4 rounded-xl border border-slate-800/80 space-y-1">
+                        <div class="text-xs text-slate-400" x-text="t('dpi_total_rate')">Active DPI Bandwidth</div>
+                        <div class="text-xl font-black text-emerald-400 font-mono" x-text="(dpiStats.total_rate_kbps > 1024 ? (dpiStats.total_rate_kbps / 1024).toFixed(1) + ' Mbps' : (dpiStats.total_rate_kbps || 0) + ' Kbps')">0 Kbps</div>
+                    </div>
+                    <div class="bg-slate-900/60 p-4 rounded-xl border border-slate-800/80 space-y-1">
+                        <div class="text-xs text-slate-400">P2P Suppression</div>
+                        <div class="text-sm font-bold flex items-center gap-1.5 pt-1">
+                            <span :class="dpiStats.p2p_throttle_enabled ? 'text-rose-400' : 'text-slate-500'" x-text="dpiStats.p2p_throttle_enabled ? ('Active (' + dpiStats.p2p_throttle_rate_kbps + ' Kbps)') : 'Off (Unrestricted)'"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Bandwidth Distribution Progress Bar -->
+                <div class="space-y-2 pt-2">
+                    <div class="flex items-center justify-between text-xs text-slate-400">
+                        <span x-text="t('dpi_live_breakdown')">Live Application Bandwidth Breakdown</span>
+                        <span class="font-mono text-slate-500">100% Normalized</span>
+                    </div>
+                    <div class="h-3 w-full bg-slate-800 rounded-full overflow-hidden flex shadow-inner">
+                        <template x-for="(app, idx) in (dpiStats.apps || [])" :key="app.id">
+                            <div :style="'width: ' + (app.percentage || 0) + '%;'"
+                                 :class="app.id === 'youtube' ? 'bg-red-500' :
+                                         app.id === 'tiktok' ? 'bg-pink-500' :
+                                         app.id === 'netflix' ? 'bg-rose-600' :
+                                         app.id === 'zoom' ? 'bg-blue-500' :
+                                         app.id === 'teams' ? 'bg-purple-500' :
+                                         app.id === 'steam' ? 'bg-indigo-500' :
+                                         app.id === 'bittorrent' ? 'bg-amber-500' : 'bg-slate-600'"
+                                 class="h-full transition-all duration-500"
+                                 :title="app.name + ': ' + (app.percentage || 0).toFixed(1) + '%'"></div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Applications Real-time Table Grid -->
+            <div class="glass-card rounded-2xl border border-slate-700 overflow-hidden">
+                <div class="p-5 border-b border-slate-800 flex items-center justify-between">
+                    <h3 class="text-sm font-bold text-white flex items-center gap-2">
+                        <span>📊</span>
+                        <span x-text="t('dpi_live_breakdown')">Live Application Bandwidth Breakdown</span>
+                    </h3>
+                    <span class="text-xs text-slate-400">Inspecting TLS SNI & Netfilter Heuristics</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left rtl:text-right text-xs">
+                        <thead class="bg-slate-900/80 text-slate-400 font-semibold border-b border-slate-800">
+                            <tr>
+                                <th class="py-3 px-4" x-text="t('dpi_app')">Application</th>
+                                <th class="py-3 px-4" x-text="t('dpi_category')">Category</th>
+                                <th class="py-3 px-4" x-text="t('dpi_volume')">Data Volume</th>
+                                <th class="py-3 px-4" x-text="t('dpi_packets_col')">Packets</th>
+                                <th class="py-3 px-4" x-text="t('dpi_current_speed')">Current Rate</th>
+                                <th class="py-3 px-4" x-text="t('dpi_share')">Share</th>
+                                <th class="py-3 px-4" x-text="t('dpi_policy_status')">QoS Policy</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800/60 font-medium">
+                            <template x-for="app in (dpiStats.apps || [])" :key="app.id">
+                                <tr class="hover:bg-slate-800/40 transition">
+                                    <td class="py-3 px-4 flex items-center space-x-2.5 rtl:space-x-reverse font-bold text-white">
+                                        <span class="text-base" x-text="app.id === 'youtube' ? '▶️' :
+                                                                       app.id === 'tiktok' ? '🎵' :
+                                                                       app.id === 'netflix' ? '🎬' :
+                                                                       app.id === 'zoom' ? '📞' :
+                                                                       app.id === 'teams' ? '👥' :
+                                                                       app.id === 'steam' ? '🎮' :
+                                                                       app.id === 'bittorrent' ? '📥' : '🌐'"></span>
+                                        <span x-text="app.name"></span>
+                                    </td>
+                                    <td class="py-3 px-4 text-slate-400" x-text="app.category"></td>
+                                    <td class="py-3 px-4 font-mono text-indigo-300 font-bold" x-text="formatBytes(app.bytes || 0)"></td>
+                                    <td class="py-3 px-4 font-mono text-slate-400" x-text="(app.packets || 0).toLocaleString()"></td>
+                                    <td class="py-3 px-4 font-mono font-bold" :class="app.rate_kbps > 0 ? 'text-emerald-400' : 'text-slate-500'" x-text="(app.rate_kbps > 1024 ? (app.rate_kbps / 1024).toFixed(1) + ' Mbps' : (app.rate_kbps || 0) + ' Kbps')"></td>
+                                    <td class="py-3 px-4">
+                                        <div class="flex items-center space-x-2 rtl:space-x-reverse">
+                                            <div class="w-16 bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                                                <div class="bg-indigo-500 h-full rounded-full" :style="'width: ' + (app.percentage || 0) + '%;'"></div>
+                                            </div>
+                                            <span class="font-mono text-slate-400 text-[11px]" x-text="(app.percentage || 0).toFixed(1) + '%'"></span>
+                                        </div>
+                                    </td>
+                                    <td class="py-3 px-4">
+                                        <span :class="app.priority.includes('EF') ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' :
+                                                      app.priority.includes('CS5') ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' :
+                                                      app.priority.includes('Throttled') ? 'bg-rose-500/20 text-rose-400 border-rose-500/30' :
+                                                      app.priority.includes('CS1') ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' :
+                                                      'bg-slate-800 text-slate-400 border-slate-700'"
+                                              class="px-2 py-0.5 rounded-md border text-[11px] font-bold"
+                                              x-text="app.priority"></span>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Smart Prioritization & Throttling Policies Card -->
+            <div class="glass-card p-6 rounded-2xl border border-slate-700 space-y-6">
+                <div class="border-b border-slate-800 pb-3">
+                    <h3 class="text-sm font-bold text-white flex items-center gap-2">
+                        <span>⚡</span>
+                        <span x-text="t('dpi_policies_title')">Smart Traffic Prioritization & Throttling Policies</span>
+                    </h3>
+                    <p class="text-xs text-slate-400">Configure kernel-level DSCP priorities and P2P bandwidth controls.</p>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- VoIP Boost Policy -->
+                    <div class="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-3">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-2.5 rtl:space-x-reverse">
+                                <span class="text-lg">📞</span>
+                                <div>
+                                    <h4 class="text-xs font-bold text-white" x-text="t('dpi_voip_title')">VoIP & Conferencing Boost</h4>
+                                    <span class="text-[11px] text-emerald-400 font-mono">DSCP EF (46) - Urgent Queue</span>
+                                </div>
+                            </div>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" x-model="dpiStats.voip_priority_enabled" class="sr-only peer">
+                                <div class="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                            </label>
+                        </div>
+                        <p class="text-xs text-slate-400" x-text="t('dpi_voip_desc')">Applies Expedited Forwarding (EF) to Zoom and Teams and steers them to lowest jitter links.</p>
+                    </div>
+
+                    <!-- Gaming Boost Policy -->
+                    <div class="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-3">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-2.5 rtl:space-x-reverse">
+                                <span class="text-lg">🎮</span>
+                                <div>
+                                    <h4 class="text-xs font-bold text-white" x-text="t('dpi_gaming_title')">Competitive Gaming Priority</h4>
+                                    <span class="text-[11px] text-blue-400 font-mono">DSCP CS5 (40) - Lowest Latency</span>
+                                </div>
+                            </div>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" x-model="dpiStats.gaming_priority_enabled" class="sr-only peer">
+                                <div class="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                            </label>
+                        </div>
+                        <p class="text-xs text-slate-400" x-text="t('dpi_gaming_desc')">Applies CS5 tagging to Steam and game connections, prioritizing low ping and zero queue delay.</p>
+                    </div>
+
+                    <!-- BitTorrent Throttling Policy -->
+                    <div class="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-3">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-2.5 rtl:space-x-reverse">
+                                <span class="text-lg">📥</span>
+                                <div>
+                                    <h4 class="text-xs font-bold text-white" x-text="t('dpi_p2p_title')">BitTorrent & P2P Auto-Throttling</h4>
+                                    <span class="text-[11px] text-amber-400 font-mono">DSCP CS1 (Scavenger)</span>
+                                </div>
+                            </div>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" x-model="dpiStats.p2p_throttle_enabled" class="sr-only peer">
+                                <div class="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-600"></div>
+                            </label>
+                        </div>
+                        <p class="text-xs text-slate-400" x-text="t('dpi_p2p_desc')">Automatically caps torrent swarms to prevent link saturation and bufferbloat.</p>
+                        <div class="flex items-center gap-3 pt-1">
+                            <span class="text-xs text-slate-300 font-semibold" x-text="t('dpi_p2p_ceiling')">Max P2P Bandwidth Ceiling (Kbps):</span>
+                            <input type="number" x-model.number="dpiStats.p2p_throttle_rate_kbps" min="64" max="100000" step="64" class="w-28 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-amber-300 font-mono focus:border-amber-500 focus:outline-none">
+                        </div>
+                    </div>
+
+                    <!-- Streaming Balancing Policy -->
+                    <div class="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-3">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-2.5 rtl:space-x-reverse">
+                                <span class="text-lg">🎬</span>
+                                <div>
+                                    <h4 class="text-xs font-bold text-white" x-text="t('dpi_stream_title')">Smart Streaming Balancing</h4>
+                                    <span class="text-[11px] text-purple-400 font-mono">Dynamic Multi-Uplink Distribute</span>
+                                </div>
+                            </div>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" x-model="dpiStats.streaming_balance_enabled" class="sr-only peer">
+                                <div class="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+                            </label>
+                        </div>
+                        <p class="text-xs text-slate-400" x-text="t('dpi_stream_desc')">Distribute high-bandwidth video streams (YouTube/Netflix/TikTok) smoothly across WAN uplinks.</p>
+                    </div>
+                </div>
+
+                <!-- Save DPI Policy Action -->
+                <div class="flex justify-end pt-2">
+                    <button @click="saveDpiPolicy()" class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold px-6 py-2.5 rounded-xl shadow-lg shadow-purple-500/25 flex items-center space-x-2 rtl:space-x-reverse transition">
+                        <span>💾</span>
+                        <span x-text="t('dpi_save_btn')">Save & Apply DPI Policies</span>
+                    </button>
+                </div>
+            </div>
+        </section>
+
         <!-- ================= TAB 6: SMART SERVICES & ALERTS ================= -->
         <section x-show="currentTab === 'services'" class="space-y-8">
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1993,34 +2475,199 @@
             </div>
         </section>
 
-    </main>
-
-    <!-- System Footer & Copyright Attribution -->
-    <footer class="mt-auto border-t border-slate-800/80 bg-slate-950/40 py-6 text-center text-xs text-slate-500">
-        <div class="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4">
-            <div class="flex items-center gap-2">
-                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span class="text-slate-300 font-medium tracking-wide">FluxWAN Carrier OS</span>
-                <span class="text-slate-600">•</span>
-                <span class="text-cyan-400 font-mono text-3xs bg-cyan-950/60 px-2 py-0.5 rounded border border-cyan-800/50" x-text="'v' + systemVersion + ' LTS'">v__FLUXWAN_VERSION__ LTS</span>
-            </div>
-            <div class="flex items-center gap-2 text-slate-400 text-xs">
-                <span>Designed & Engineered by</span>
-                <span class="text-white font-bold tracking-wide flex items-center gap-1.5">
-                    <span class="text-sky-400 font-black">⚡</span> <span x-text="systemAuthor">__FLUXWAN_AUTHOR__</span>
-                </span>
-            </div>
-            <div class="flex items-center gap-2 text-3xs text-slate-400 font-mono">
-                <span class="px-2 py-0.5 rounded bg-slate-900 border border-slate-700/60 text-emerald-400 font-semibold" x-text="systemLicense + ' License'">__FLUXWAN_LICENSE__ License</span>
-                <span x-text="'© ' + new Date().getFullYear() + ' All Rights Reserved'">&copy; 2026 All Rights Reserved</span>
-            </div>
-        </div>
-    </footer>
+        </main><!-- #main-content -->
+    </div><!-- #app-shell -->
 
     <script>
+        const I18N = {
+            en: {
+                app_title: "FluxWAN",
+                app_subtitle: "High-Performance Multi-WAN Router & Port Manager",
+                tab_interfaces: "Interfaces",
+                tab_wan: "WAN Uplinks",
+                tab_groups: "WAN Groups & PBR",
+                tab_lan: "LAN & DHCP",
+                tab_qos: "QoS & Limits",
+                tab_dpi: "L7 DPI & Apps",
+                tab_services: "Services & Alerts",
+                tab_backup: "Backup & System",
+                btn_debug: "Debug",
+                btn_terminal: "Terminal",
+                btn_logs: "Logs",
+                btn_logout: "Logout",
+                btn_save_apply: "Save & Apply",
+                lang_name: "العربية",
+                dpi_title: "L7 Deep Packet Inspection & App Classifier",
+                dpi_subtitle: "Real-time application recognition via TLS SNI & protocol signatures. Intelligent QoS and P2P suppression.",
+                dpi_master_enable: "Enable DPI Engine",
+                dpi_total_detected: "Identified Traffic",
+                dpi_total_packets: "Total Packets",
+                dpi_total_rate: "Active DPI Bandwidth",
+                dpi_live_breakdown: "Live Application Bandwidth Breakdown",
+                dpi_app: "Application",
+                dpi_category: "Category",
+                dpi_volume: "Data Volume",
+                dpi_packets_col: "Packets",
+                dpi_current_speed: "Current Rate",
+                dpi_share: "Share",
+                dpi_policy_status: "QoS Policy Tag",
+                dpi_policies_title: "Smart Traffic Prioritization & Throttling Policies",
+                dpi_voip_title: "VoIP & Video Conferencing Boost (Zoom, Teams, Skype)",
+                dpi_voip_desc: "Mark with DSCP EF (Expedited Forwarding) and steer to the lowest jitter uplink.",
+                dpi_gaming_title: "Competitive Gaming Priority (Steam & Online Games)",
+                dpi_gaming_desc: "Mark with DSCP CS5 (Low-Latency) and steer to the lowest ping uplink.",
+                dpi_p2p_title: "BitTorrent & P2P Auto-Throttling",
+                dpi_p2p_desc: "Automatically cap heavy torrent swarms to prevent link exhaustion and bufferbloat.",
+                dpi_p2p_ceiling: "Max P2P Bandwidth Ceiling (Kbps):",
+                dpi_stream_title: "Smart Streaming Distribution (YouTube, TikTok, Netflix)",
+                dpi_stream_desc: "Distribute heavy video chunks evenly across available healthy uplinks.",
+                dpi_save_btn: "Save & Apply DPI Policies",
+                dpi_saved: "DPI Traffic Policies applied successfully!",
+                stat_healthy: "HEALTHY",
+                stat_degraded: "DEGRADED",
+                stat_down: "DOWN",
+                stat_draining: "DRAINING",
+                rx_speed: "Download (Rx)",
+                tx_speed: "Upload (Tx)",
+                total_data: "Total Data",
+                total_download: "Total Download (Rx)",
+                total_upload: "Total Upload (Tx)",
+                active_conns: "Active Connections",
+                refresh: "Refresh",
+                enabled: "Enabled",
+                disabled: "Disabled"
+            },
+            ar: {
+                app_title: "فلوكس وان (FluxWAN)",
+                app_subtitle: "راوتر موازنة وتوزيع الأحمال متعدد الخطوط عالي الأداء وإدارة المنافذ",
+                tab_interfaces: "المنافذ والبطاقات",
+                tab_wan: "خطوط الإنترنت (WAN)",
+                tab_groups: "مجموعات التوجيه PBR",
+                tab_lan: "الشبكة المحلية و DHCP",
+                tab_qos: "جودة الخدمة وتحديد السرعة",
+                tab_dpi: "فحص الحزم L7 والتطبيقات",
+                tab_services: "الخدمات والتنبيهات",
+                tab_backup: "النسخ الاحتياطي والنظام",
+                btn_debug: "فحص وتشخيص",
+                btn_terminal: "سطر الأوامر",
+                btn_logs: "سجلات النظام",
+                btn_logout: "تسجيل الخروج",
+                btn_save_apply: "حفظ وتطبيق",
+                lang_name: "English",
+                dpi_title: "فحص الحزم العميق وتصنيف التطبيقات (L7 DPI)",
+                dpi_subtitle: "محرك التعرف اللحظي على تطبيقات الإنترنت عبر بصمات TLS SNI وتطبيق الأولويات الذكية وخنق التورنت.",
+                dpi_master_enable: "تشغيل محرك فحص التطبيقات L7",
+                dpi_total_detected: "حجم الترافيك المصنف",
+                dpi_total_packets: "إجمالي الحزم المعالجة",
+                dpi_total_rate: "السرعة اللحظية للتطبيقات",
+                dpi_live_breakdown: "التوزيع اللحظي لاستهلاك التطبيقات",
+                dpi_app: "التطبيق",
+                dpi_category: "التصنيف",
+                dpi_volume: "إجمالي البيانات",
+                dpi_packets_col: "عدد الحزم",
+                dpi_current_speed: "السرعة الحالية",
+                dpi_share: "النسبة من الإجمالي",
+                dpi_policy_status: "وسم جودة الخدمة QoS",
+                dpi_policies_title: "سياسات الأولويات الذكية وخنق السعة",
+                dpi_voip_title: "أولوية المكالمات والاجتماعات (Zoom / Teams / Skype)",
+                dpi_voip_desc: "تطبيق أولوية عليا مطلقة (DSCP EF 46) والتوجيه التلقائي للخط الأقل ارتعاشاً (Jitter).",
+                dpi_gaming_title: "أولوية الألعاب الإلكترونية التنافسية (Steam / Multiplayer)",
+                dpi_gaming_desc: "تطبيق وسم الاستجابة السريعة (DSCP CS5 40) والتوجيه التلقائي للخط الأقل زمناً (Ping).",
+                dpi_p2p_title: "خنق التورنت ومشاركة الملفات (BitTorrent Throttle)",
+                dpi_p2p_desc: "تقييد سرعة التورنت تلقائياً لمنع خنق الشبكة وارتفاع البينج أثناء الاستخدام المشترك.",
+                dpi_p2p_ceiling: "الحد الأقصى لسرعة التورنت المسموحة (Kbps):",
+                dpi_stream_title: "توزيع بث الفيديو الذكي (YouTube / TikTok / Netflix)",
+                dpi_stream_desc: "موازنة تدفق الفيديو بسلاسة عبر الخطوط المتاحة دون تقطيع.",
+                dpi_save_btn: "حفظ وتطبيق سياسات التطبيقات",
+                dpi_saved: "تم حفظ وتفعيل سياسات DPI بنجاح على النواة!",
+                stat_healthy: "متصل ومستقر",
+                stat_degraded: "غير مستقر",
+                stat_down: "منقطع",
+                stat_draining: "قيد التفريغ",
+                rx_speed: "سرعة التحميل (Rx)",
+                tx_speed: "سرعة الرفع (Tx)",
+                total_data: "إجمالي البيانات",
+                total_download: "إجمالي التحميل (Rx)",
+                total_upload: "إجمالي الرفع (Tx)",
+                active_conns: "الاتصالات النشطة",
+                refresh: "تحديث",
+                enabled: "مفعل",
+                disabled: "معطل"
+            }
+        };
+
         function fluxRouterApp() {
             return {
                 currentTab: 'interfaces',
+                currentLang: localStorage.getItem('fluxwan_lang') || 'ar',
+                toggleLanguage() {
+                    this.currentLang = (this.currentLang === 'ar') ? 'en' : 'ar';
+                    localStorage.setItem('fluxwan_lang', this.currentLang);
+                    document.documentElement.dir = (this.currentLang === 'ar') ? 'rtl' : 'ltr';
+                    document.documentElement.lang = this.currentLang;
+                    this.updateClock();
+                },
+                t(key) {
+                    if (!I18N[this.currentLang] || !I18N[this.currentLang][key]) {
+                        return (I18N['en'] && I18N['en'][key]) ? I18N['en'][key] : key;
+                    }
+                    return I18N[this.currentLang][key];
+                },
+                showToast(msg) {
+                    this.toastMessage = msg;
+                    setTimeout(() => { this.toastMessage = ''; }, 4000);
+                },
+                dpiStats: {
+                    enabled: true,
+                    p2p_throttle_enabled: false,
+                    p2p_throttle_rate_kbps: 512,
+                    voip_priority_enabled: true,
+                    gaming_priority_enabled: true,
+                    streaming_balance_enabled: true,
+                    total_bytes: 0,
+                    total_packets: 0,
+                    total_rate_kbps: 0,
+                    apps: []
+                },
+                fetchDpiStats() {
+                    if (!this.authToken) return;
+                    fetch('/api/v1/dpi/stats', {
+                        headers: { 'X-Auth-Token': this.authToken }
+                    })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data && data.status === 'ok') {
+                            this.dpiStats = data;
+                        }
+                    })
+                    .catch(e => console.error('Error loading DPI stats:', e));
+                },
+                saveDpiPolicy() {
+                    if (!this.authToken) return;
+                    fetch('/api/v1/dpi/policy', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Auth-Token': this.authToken
+                        },
+                        body: JSON.stringify({
+                            enabled: !!this.dpiStats.enabled,
+                            p2p_throttle_enabled: !!this.dpiStats.p2p_throttle_enabled,
+                            p2p_throttle_rate_kbps: parseInt(this.dpiStats.p2p_throttle_rate_kbps) || 512,
+                            voip_priority_enabled: !!this.dpiStats.voip_priority_enabled,
+                            gaming_priority_enabled: !!this.dpiStats.gaming_priority_enabled,
+                            streaming_balance_enabled: !!this.dpiStats.streaming_balance_enabled
+                        })
+                    })
+                    .then(r => r.json())
+                    .then(res => {
+                        this.showToast(this.t('dpi_saved'));
+                        this.fetchDpiStats();
+                    })
+                    .catch(err => {
+                        this.showToast('Failed to save DPI policy', 'error');
+                    });
+                },
                 isEditing: false,
                 hasLoadedInitialConfig: false,
                 systemVersion: '__FLUXWAN_VERSION__',
@@ -2105,8 +2752,43 @@
                 gamingRunning: false,
                 gamingData: null,
                 lanClients: [],
+                sysinfo: {
+                    uptime_sec: 0,
+                    cpu_pct: 0,
+                    mem_total_kb: 0,
+                    mem_used_kb: 0,
+                    mem_pct: 0,
+                    load1: 0,
+                    load5: 0,
+                    load15: 0,
+                    epoch: 0
+                },
+                liveClock: '--:--:--',
+                liveDate: '---',
+
+                updateClock() {
+                    const now = new Date();
+                    const pad = n => String(n).padStart(2, '0');
+                    this.liveClock = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+                    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                    const monthsAr = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+                    if (this.currentLang === 'ar') {
+                        this.liveDate = `${now.getDate()} ${monthsAr[now.getMonth()]} ${now.getFullYear()}`;
+                    } else {
+                        this.liveDate = `${now.getDate()} ${months[now.getMonth()]} ${now.getFullYear()}`;
+                    }
+                },
 
                 initApp() {
+                    const savedLang = localStorage.getItem('fluxwan_lang') || 'ar';
+                    this.currentLang = savedLang;
+                    document.documentElement.dir = (savedLang === 'ar') ? 'rtl' : 'ltr';
+                    document.documentElement.lang = savedLang;
+
+                    /* Live clock tick every second */
+                    this.updateClock();
+                    setInterval(() => this.updateClock(), 1000);
+
                     /* Always verify session with server before loading anything */
                     this.verifySession();
 
@@ -2117,9 +2799,10 @@
                         if (this.currentTab === 'lan') {
                             this.fetchLanClients();
                         }
-                        if (!this.isEditing) {
-                            this.fetchStatus();
+                        if (this.currentTab === 'dpi') {
+                            this.fetchDpiStats();
                         }
+                        this.fetchStatus();
                     }, 3000);
                 },
 
@@ -2610,6 +3293,9 @@
                             if (d.system.version) this.systemVersion = d.system.version;
                             if (d.system.author) this.systemAuthor = d.system.author;
                             if (d.system.license) this.systemLicense = d.system.license;
+                        }
+                        if (d.sysinfo) {
+                            this.sysinfo = d.sysinfo;
                         }
                         const isFirst = !this.hasLoadedInitialConfig;
                         if (d.lan && (isFirst || !this.isEditing)) {

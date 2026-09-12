@@ -194,7 +194,7 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
 #if defined(__linux__)
     /* 4. Configure Linux Kernel Mangle Rules with Conntrack Sticky Marks */
     safe_system("iptables -t mangle -F PREROUTING 2>/dev/null || true");
-    safe_system("iptables -t mangle -A PREROUTING -j CONNMARK --restore-mark 2>/dev/null || true");
+    safe_system("iptables -t mangle -A PREROUTING -j CONNMARK --restore-mark --mask 0x0000ffff 2>/dev/null || true");
 
     /* Bypass Multi-WAN load balancing for local, broadcast and directly-connected subnets */
     safe_system("iptables -t mangle -A PREROUTING -m addrtype --dst-type LOCAL -j RETURN 2>/dev/null || true");
@@ -233,13 +233,14 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
             safe_system(cmd);
         }
     }
-    safe_system("iptables -t mangle -A PREROUTING -j CONNMARK --save-mark 2>/dev/null || true");
+    safe_system("iptables -t mangle -A PREROUTING -j CONNMARK --save-mark --mask 0x0000ffff 2>/dev/null || true");
 #endif
 
-    /* 5. Apply QoS, Rate Limits, Application Steering, and DNS Redirection */
+    /* 5. Apply QoS, Rate Limits, Application Steering, DPI, and DNS Redirection */
     net_apply_qos(config);
     net_apply_rate_limits(config);
     net_apply_app_steering(config);
+    net_apply_dpi(config);
     net_apply_dns_features(config);
 
     LOG_INFO("Network configuration successfully applied to Kernel!");
@@ -487,6 +488,107 @@ int net_apply_dns_features(const fluxwan_config_t *config) {
         LOG_INFO("[DNS Engine] Intercepting port 53 -> %s (%s)",
                  target_dns, dns->adblock_enabled ? "Ad-Blocking Active" : "Fast DNS Active");
     }
+#endif
+    return 0;
+}
+
+int net_apply_dpi(const fluxwan_config_t *config) {
+    if (!config) return -1;
+#if defined(__linux__)
+    safe_system("iptables -t mangle -F FLUXWAN_DPI 2>/dev/null || true");
+    safe_system("iptables -t mangle -F FLUXWAN_DPI_QOS 2>/dev/null || true");
+    safe_system("iptables -t mangle -F FLUXWAN_DPI_ACCT 2>/dev/null || true");
+    safe_system("iptables -t mangle -D PREROUTING -j FLUXWAN_DPI 2>/dev/null || true");
+    safe_system("iptables -t mangle -D PREROUTING -j FLUXWAN_DPI_QOS 2>/dev/null || true");
+    safe_system("iptables -t mangle -D PREROUTING -j FLUXWAN_DPI_ACCT 2>/dev/null || true");
+
+    if (!config->dpi.enabled) {
+        LOG_INFO("[DPI Engine] L7 Deep Packet Inspection is DISABLED");
+        return 0;
+    }
+
+    safe_system("iptables -t mangle -N FLUXWAN_DPI 2>/dev/null || true");
+    safe_system("iptables -t mangle -N FLUXWAN_DPI_QOS 2>/dev/null || true");
+    safe_system("iptables -t mangle -N FLUXWAN_DPI_ACCT 2>/dev/null || true");
+
+    /* Insert chains into PREROUTING:
+     * 1. FLUXWAN_DPI: Classifies connections via SNI & Signatures, writes mark 0x00XX0000 into connmark
+     * 2. FLUXWAN_DPI_QOS: Applies DSCP priorities (VoIP EF, Gaming CS5, Torrent CS1) and throttling
+     * 3. FLUXWAN_DPI_ACCT: Tracks byte and packet metrics per application category
+     */
+    safe_system("iptables -t mangle -I PREROUTING 1 -j FLUXWAN_DPI 2>/dev/null || true");
+    safe_system("iptables -t mangle -I PREROUTING 2 -j FLUXWAN_DPI_QOS 2>/dev/null || true");
+    safe_system("iptables -t mangle -A PREROUTING -j FLUXWAN_DPI_ACCT 2>/dev/null || true");
+
+    /* FLUXWAN_DPI Chain: If flow already classified (mark != 0 in mask 0x00ff0000), return early */
+    safe_system("iptables -t mangle -A FLUXWAN_DPI -m connmark ! --mark 0/0x00ff0000 -j RETURN 2>/dev/null || true");
+
+    /* YouTube / Google Video (0x00100000) */
+    safe_system("iptables -t mangle -A FLUXWAN_DPI -m string --string \"googlevideo.com\" --algo bm -j CONNMARK --set-xmark 0x00100000/0x00ff0000 2>/dev/null || true");
+    safe_system("iptables -t mangle -A FLUXWAN_DPI -m string --string \"youtube.com\" --algo bm -j CONNMARK --set-xmark 0x00100000/0x00ff0000 2>/dev/null || true");
+    safe_system("iptables -t mangle -A FLUXWAN_DPI -m string --string \"ytimg.com\" --algo bm -j CONNMARK --set-xmark 0x00100000/0x00ff0000 2>/dev/null || true");
+
+    /* TikTok / ByteDance (0x00200000) */
+    safe_system("iptables -t mangle -A FLUXWAN_DPI -m string --string \"byteoversea.com\" --algo bm -j CONNMARK --set-xmark 0x00200000/0x00ff0000 2>/dev/null || true");
+    safe_system("iptables -t mangle -A FLUXWAN_DPI -m string --string \"tiktokv.com\" --algo bm -j CONNMARK --set-xmark 0x00200000/0x00ff0000 2>/dev/null || true");
+    safe_system("iptables -t mangle -A FLUXWAN_DPI -m string --string \"musical.ly\" --algo bm -j CONNMARK --set-xmark 0x00200000/0x00ff0000 2>/dev/null || true");
+    safe_system("iptables -t mangle -A FLUXWAN_DPI -m string --string \"ibytedtos.com\" --algo bm -j CONNMARK --set-xmark 0x00200000/0x00ff0000 2>/dev/null || true");
+
+    /* Netflix Video (0x00300000) */
+    safe_system("iptables -t mangle -A FLUXWAN_DPI -m string --string \"netflix.com\" --algo bm -j CONNMARK --set-xmark 0x00300000/0x00ff0000 2>/dev/null || true");
+    safe_system("iptables -t mangle -A FLUXWAN_DPI -m string --string \"nflxvideo.net\" --algo bm -j CONNMARK --set-xmark 0x00300000/0x00ff0000 2>/dev/null || true");
+    safe_system("iptables -t mangle -A FLUXWAN_DPI -m string --string \"nflxext.com\" --algo bm -j CONNMARK --set-xmark 0x00300000/0x00ff0000 2>/dev/null || true");
+
+    /* Zoom Conferencing (0x00400000) */
+    safe_system("iptables -t mangle -A FLUXWAN_DPI -m string --string \"zoom.us\" --algo bm -j CONNMARK --set-xmark 0x00400000/0x00ff0000 2>/dev/null || true");
+    safe_system("iptables -t mangle -A FLUXWAN_DPI -p udp -m multiport --dports 8801,8802 -j CONNMARK --set-xmark 0x00400000/0x00ff0000 2>/dev/null || true");
+
+    /* Microsoft Teams & Skype (0x00500000) */
+    safe_system("iptables -t mangle -A FLUXWAN_DPI -m string --string \"teams.microsoft.com\" --algo bm -j CONNMARK --set-xmark 0x00500000/0x00ff0000 2>/dev/null || true");
+    safe_system("iptables -t mangle -A FLUXWAN_DPI -m string --string \"skype.com\" --algo bm -j CONNMARK --set-xmark 0x00500000/0x00ff0000 2>/dev/null || true");
+
+    /* Steam & Online Gaming (0x00600000) */
+    safe_system("iptables -t mangle -A FLUXWAN_DPI -m string --string \"steampowered.com\" --algo bm -j CONNMARK --set-xmark 0x00600000/0x00ff0000 2>/dev/null || true");
+    safe_system("iptables -t mangle -A FLUXWAN_DPI -m string --string \"steamcontent.com\" --algo bm -j CONNMARK --set-xmark 0x00600000/0x00ff0000 2>/dev/null || true");
+
+    /* BitTorrent P2P Handshake & Ports (0x00700000) */
+    safe_system("iptables -t mangle -A FLUXWAN_DPI -m string --hex-string \"|13426974546f7272656e742070726f746f636f6c|\" --algo bm -j CONNMARK --set-xmark 0x00700000/0x00ff0000 2>/dev/null || true");
+    safe_system("iptables -t mangle -A FLUXWAN_DPI -p tcp -m multiport --dports 6881:6889,51413 -j CONNMARK --set-xmark 0x00700000/0x00ff0000 2>/dev/null || true");
+    safe_system("iptables -t mangle -A FLUXWAN_DPI -p udp -m multiport --dports 6881:6889,51413 -j CONNMARK --set-xmark 0x00700000/0x00ff0000 2>/dev/null || true");
+
+    /* FLUXWAN_DPI_QOS Chain: Set DSCP class & apply P2P throttle */
+    if (config->dpi.voip_priority_enabled) {
+        safe_system("iptables -t mangle -A FLUXWAN_DPI_QOS -m connmark --mark 0x00400000/0x00ff0000 -j DSCP --set-dscp-class EF 2>/dev/null || true");
+        safe_system("iptables -t mangle -A FLUXWAN_DPI_QOS -m connmark --mark 0x00500000/0x00ff0000 -j DSCP --set-dscp-class EF 2>/dev/null || true");
+    }
+    if (config->dpi.gaming_priority_enabled) {
+        safe_system("iptables -t mangle -A FLUXWAN_DPI_QOS -m connmark --mark 0x00600000/0x00ff0000 -j DSCP --set-dscp-class CS5 2>/dev/null || true");
+    }
+
+    /* BitTorrent Scavenger DSCP CS1 & Dynamic Throttling */
+    safe_system("iptables -t mangle -A FLUXWAN_DPI_QOS -m connmark --mark 0x00700000/0x00ff0000 -j DSCP --set-dscp-class CS1 2>/dev/null || true");
+    if (config->dpi.p2p_throttle_enabled) {
+        uint32_t kbps = config->dpi.p2p_throttle_rate_kbps > 0 ? config->dpi.p2p_throttle_rate_kbps : 512;
+        char th_cmd[512];
+        snprintf(th_cmd, sizeof(th_cmd),
+                 "iptables -t mangle -A FLUXWAN_DPI_QOS -m connmark --mark 0x00700000/0x00ff0000 -m hashlimit --hashlimit-above %ukb/s --hashlimit-mode dstip --hashlimit-name p2p_throttle -j DROP 2>/dev/null || true",
+                 kbps);
+        safe_system(th_cmd);
+        LOG_INFO("[DPI Engine] P2P BitTorrent throttling ACTIVE at %u Kbps", kbps);
+    }
+
+    /* FLUXWAN_DPI_ACCT Chain: Accounting counters */
+    safe_system("iptables -t mangle -A FLUXWAN_DPI_ACCT -m connmark --mark 0x00100000/0x00ff0000 -m comment --comment 'YouTube' 2>/dev/null || true");
+    safe_system("iptables -t mangle -A FLUXWAN_DPI_ACCT -m connmark --mark 0x00200000/0x00ff0000 -m comment --comment 'TikTok' 2>/dev/null || true");
+    safe_system("iptables -t mangle -A FLUXWAN_DPI_ACCT -m connmark --mark 0x00300000/0x00ff0000 -m comment --comment 'Netflix' 2>/dev/null || true");
+    safe_system("iptables -t mangle -A FLUXWAN_DPI_ACCT -m connmark --mark 0x00400000/0x00ff0000 -m comment --comment 'Zoom' 2>/dev/null || true");
+    safe_system("iptables -t mangle -A FLUXWAN_DPI_ACCT -m connmark --mark 0x00500000/0x00ff0000 -m comment --comment 'Teams' 2>/dev/null || true");
+    safe_system("iptables -t mangle -A FLUXWAN_DPI_ACCT -m connmark --mark 0x00600000/0x00ff0000 -m comment --comment 'Steam' 2>/dev/null || true");
+    safe_system("iptables -t mangle -A FLUXWAN_DPI_ACCT -m connmark --mark 0x00700000/0x00ff0000 -m comment --comment 'BitTorrent' 2>/dev/null || true");
+    safe_system("iptables -t mangle -A FLUXWAN_DPI_ACCT -m comment --comment 'Other' 2>/dev/null || true");
+
+    LOG_INFO("[DPI Engine] L7 Deep Packet Inspection & App Classification rules ACTIVE (VoIP:%d, Gaming:%d, P2P_Throttle:%d)",
+             config->dpi.voip_priority_enabled, config->dpi.gaming_priority_enabled, config->dpi.p2p_throttle_enabled);
 #endif
     return 0;
 }

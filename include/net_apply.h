@@ -49,4 +49,9 @@ int net_apply_app_steering(const fluxwan_config_t *config);
  */
 int net_apply_dns_features(const fluxwan_config_t *config);
 
+/**
+ * Apply L7 Deep Packet Inspection (DPI) & QoS Traffic Policy
+ */
+int net_apply_dpi(const fluxwan_config_t *config);
+
 #endif /* NET_APPLY_H */
