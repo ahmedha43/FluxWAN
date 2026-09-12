@@ -135,6 +135,22 @@ static int fetch_version_manifest(char *out_json, size_t max_len) {
 #endif
 }
 
+static void get_active_system_version(char *out, size_t max_len) {
+    if (!out || max_len == 0) return;
+    out[0] = '\0';
+#if defined(__linux__)
+    FILE *vf = fopen("/opt/fluxwan/version", "r");
+    if (vf) {
+        if (fscanf(vf, "%31s", out) == 1 && out[0] != '\0') {
+            fclose(vf);
+            return;
+        }
+        fclose(vf);
+    }
+#endif
+    safe_str_copy(out, FLUXWAN_VERSION, max_len);
+}
+
 static void get_real_ipv6_str(const char *ifname, char *out_v6, size_t max_len) {
     out_v6[0] = '\0';
 #if defined(__linux__)
@@ -2158,6 +2174,9 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
         char *resp_body = calloc(1, 32768);
         int fetch_res = manifest_buf ? fetch_version_manifest(manifest_buf, 16384) : -1;
 
+        char curr_ver[32] = FLUXWAN_VERSION;
+        get_active_system_version(curr_ver, sizeof(curr_ver));
+
         char latest_ver[32] = "1.2.3";
         char rel_date[32] = "2026-09-12";
         char channel[32] = "stable";
@@ -2167,7 +2186,7 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
             extract_json_string(manifest_buf, "latest_version", latest_ver, sizeof(latest_ver));
             extract_json_string(manifest_buf, "release_date", rel_date, sizeof(rel_date));
             extract_json_string(manifest_buf, "channel", channel, sizeof(channel));
-            if (compare_semver(latest_ver, FLUXWAN_VERSION) > 0) {
+            if (compare_semver(latest_ver, curr_ver) > 0) {
                 update_available = true;
             }
         }
@@ -2190,7 +2209,7 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
                     "  \"rollback_available\": %s,\n"
                     "  \"manifest\": %s\n"
                     "}",
-                    FLUXWAN_VERSION, latest_ver,
+                    curr_ver, latest_ver,
                     update_available ? "true" : "false",
                     rel_date, channel,
                     rollback_avail ? "true" : "false",
@@ -2205,7 +2224,7 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
                     "  \"update_available\": false,\n"
                     "  \"rollback_available\": %s\n"
                     "}",
-                    FLUXWAN_VERSION, FLUXWAN_VERSION,
+                    curr_ver, curr_ver,
                     rollback_avail ? "true" : "false");
             }
 
@@ -2248,15 +2267,20 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
         const char *body = strstr(req, "\r\n\r\n");
         char pkg_url[512] = {0};
         char expected_sha[128] = {0};
+        char target_ver[32] = {0};
         if (body) {
             body += 4;
             extract_json_string(body, "url", pkg_url, sizeof(pkg_url));
             extract_json_string(body, "sha256", expected_sha, sizeof(expected_sha));
+            extract_json_string(body, "version", target_ver, sizeof(target_ver));
         }
 
         if (!pkg_url[0]) {
             char *manifest_buf = calloc(1, 16384);
             if (manifest_buf && fetch_version_manifest(manifest_buf, 16384) == 0) {
+                if (!target_ver[0] || strcmp(target_ver, "latest") == 0) {
+                    extract_json_string(manifest_buf, "latest_version", target_ver, sizeof(target_ver));
+                }
                 const char *core_pos = strstr(manifest_buf, "\"core\"");
                 if (core_pos) {
                     extract_json_string(core_pos, "url", pkg_url, sizeof(pkg_url));
@@ -2333,6 +2357,11 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
         safe_system("chmod +x /tmp/fluxwan_update.tmp");
         safe_system("cp -a /opt/fluxwan/fluxwan /opt/fluxwan/fluxwan.old 2>/dev/null || true");
         safe_system("mv /tmp/fluxwan_update.tmp /opt/fluxwan/fluxwan && chmod +x /opt/fluxwan/fluxwan");
+        if (target_ver[0] && strcmp(target_ver, "latest") != 0) {
+            char ver_cmd[128];
+            snprintf(ver_cmd, sizeof(ver_cmd), "echo \"%s\" > /opt/fluxwan/version", target_ver);
+            safe_system(ver_cmd);
+        }
 #endif
 
         LOG_INFO("[Update] FluxWAN core binary successfully updated! Scheduling reactor hot-restart...");
@@ -2373,6 +2402,7 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
 
 #if defined(__linux__)
         safe_system("mv /opt/fluxwan/fluxwan.old /opt/fluxwan/fluxwan && chmod +x /opt/fluxwan/fluxwan");
+        safe_system("rm -f /opt/fluxwan/version");
         LOG_WARN("[Update] System rolled back to previous fluxwan.old binary! Scheduling restart...");
         wan_manager_add_log("WARN", "System rolled back to previous version. Restarting in 1s...");
 #endif

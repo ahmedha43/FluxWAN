@@ -61,7 +61,7 @@ typedef int socket_t;
 #define INVALID_SOCKET (-1)
 #endif
 
-#define FLUXWAN_VERSION "1.2.3"
+#define FLUXWAN_VERSION "1.2.4"
 #define FLUXWAN_AUTHOR "Ahmed Al-Dulaimi (أحمد الدليمي)"
 #define FLUXWAN_LICENSE "GNU GPLv3"
 #define FLUXWAN_COPYRIGHT "Copyright (C) 2026 Ahmed Al-Dulaimi. All rights reserved."
