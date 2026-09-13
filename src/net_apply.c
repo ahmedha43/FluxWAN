@@ -121,6 +121,25 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
             snprintf(tbl_f, sizeof(tbl_f), "/run/fluxwan_table_%s", w->name);
             FILE *tf = fopen(tbl_f, "w");
             if (tf) { fprintf(tf, "%u\n", w->table_id); fclose(tf); }
+
+            /* Configure Static IP Address & Subnet on Linux interface */
+            if (w->type == WAN_TYPE_STATIC && w->ip_addr != 0) {
+                int prefix_len = 24;
+                uint32_t m = ntohl(w->netmask);
+                if (m != 0) {
+                    int p = 0;
+                    while ((m & 0x80000000) && p < 32) { p++; m <<= 1; }
+                    if (p > 0 && p <= 32) prefix_len = p;
+                }
+                char static_ip_cmd[512];
+                snprintf(static_ip_cmd, sizeof(static_ip_cmd),
+                         "ip -4 addr flush dev %s 2>/dev/null || true; "
+                         "ip addr add %s/%d dev %s brd + 2>/dev/null || true; "
+                         "ip link set %s up 2>/dev/null || true",
+                         w->name, wan_ip, prefix_len, w->name, w->name);
+                safe_system(static_ip_cmd);
+                LOG_INFO("[Static IP] Configured %s/%d on WAN interface %s", wan_ip, prefix_len, w->name);
+            }
 #endif
 
             if (nl) {

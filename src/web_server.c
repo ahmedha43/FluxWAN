@@ -307,6 +307,8 @@ static void set_nonblocking(socket_t fd) {
 #endif
 }
 
+static web_server_ctx_t *s_active_web_ctx = NULL;
+
 static void close_client_socket(socket_t fd) {
     if (!IS_VALID_SOCK(fd)) return;
 #if defined(_WIN32) || defined(_WIN64)
@@ -315,12 +317,22 @@ static void close_client_socket(socket_t fd) {
     shutdown(fd, SHUT_RDWR);
 #endif
     CLOSE_SOCK(fd);
+
+    if (s_active_web_ctx) {
+        for (int i = 0; i < MAX_CLIENTS; i++) {
+            if (s_active_web_ctx->clients[i].fd == fd && !s_active_web_ctx->clients[i].is_sse) {
+                s_active_web_ctx->clients[i].fd = INVALID_SOCKET;
+            }
+        }
+    }
 }
 
 web_server_ctx_t *web_server_init(fluxwan_config_t *config, netlink_ctx_t *nl, dhcp_server_ctx_t *dhcp) {
     if (!config) return NULL;
     web_server_ctx_t *ctx = calloc(1, sizeof(web_server_ctx_t));
     if (!ctx) return NULL;
+
+    s_active_web_ctx = ctx;
 
     for (int i = 0; i < MAX_CLIENTS; i++) {
         ctx->clients[i].fd = INVALID_SOCKET;
@@ -401,12 +413,31 @@ socket_t web_server_accept_client(web_server_ctx_t *ctx) {
 
     set_socket_timeout(client_fd, 3000);
 
+    int free_slot = -1;
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (!IS_VALID_SOCK(ctx->clients[i].fd)) {
-            ctx->clients[i].fd = client_fd;
-            ctx->clients[i].is_sse = false;
-            return client_fd;
+            free_slot = i;
+            break;
         }
+    }
+
+    if (free_slot == -1) {
+        /* Sweep and reclaim any completed non-SSE slots */
+        for (int i = 0; i < MAX_CLIENTS; i++) {
+            if (!ctx->clients[i].is_sse) {
+                if (IS_VALID_SOCK(ctx->clients[i].fd)) {
+                    close_client_socket(ctx->clients[i].fd);
+                }
+                ctx->clients[i].fd = INVALID_SOCKET;
+                if (free_slot == -1) free_slot = i;
+            }
+        }
+    }
+
+    if (free_slot >= 0) {
+        ctx->clients[free_slot].fd = client_fd;
+        ctx->clients[free_slot].is_sse = false;
+        return client_fd;
     }
 
     CLOSE_SOCK(client_fd);
