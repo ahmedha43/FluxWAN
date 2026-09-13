@@ -9,6 +9,7 @@ add_definitions(-D_GNU_SOURCE -D_DEFAULT_SOURCE)
 
 set(CORE_LIB_SOURCES
     src/config.c
+    src/dyn_buf.c
     src/netlink_manager.c
     src/bpf_loader.c
     src/prober.c
@@ -20,6 +21,7 @@ set(CORE_LIB_SOURCES
     src/net_apply.c
     src/dhcp_server.c
     src/dns64_daemon.c
+    src/diagnostics.c
 )
 
 add_executable(fluxwan src/main.c ${CORE_LIB_SOURCES})
@@ -40,7 +42,7 @@ else()
     foreach(target fluxwan fluxwan_lab test_wan_validator test_pppoe_manager test_live_nat46_translation test_xdp_packet test_wan_groups test_policy_routing test_katran_nextgen)
         target_compile_options(${target} PRIVATE -O2 -Wall -Wextra -pthread)
     endforeach()
-    target_link_libraries(fluxwan PRIVATE pthread)
+    target_link_libraries(fluxwan PRIVATE pthread m)
     target_link_libraries(fluxwan_lab PRIVATE pthread m)
     target_link_libraries(test_wan_validator PRIVATE pthread)
     target_link_libraries(test_pppoe_manager PRIVATE pthread)

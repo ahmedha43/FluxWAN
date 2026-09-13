@@ -635,7 +635,7 @@ int net_apply_address_lists(const fluxwan_config_t *config) {
         const address_list_t *al = &config->address_lists[a];
         if (!al->enabled || al->entry_count == 0) continue;
 
-        char set_name[64], tmp_set[64];
+        char set_name[64], tmp_set[80];
         sanitize_set_name(al->name, set_name, sizeof(set_name));
         snprintf(tmp_set, sizeof(tmp_set), "t_%s", set_name);
         if (strlen(tmp_set) > 31) tmp_set[31] = '\0';
@@ -755,7 +755,7 @@ int net_apply_address_lists(const fluxwan_config_t *config) {
                              al->name, added_count, grp->name, config->wans[w_idx].label, fwmark);
                 } else if (active_member_count > 1 && total_group_weight > 0) {
                     /* Multiple WANs active in group: subchain with weighted distribution */
-                    char subchain[64];
+                    char subchain[80];
                     snprintf(subchain, sizeof(subchain), "FW_L_%s", set_name);
                     if (strlen(subchain) > 28) subchain[28] = '\0';
 

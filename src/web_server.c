@@ -707,7 +707,10 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
     double uptime_secs = 0.0;
     {
         FILE *f = fopen("/proc/uptime", "r");
-        if (f) { fscanf(f, "%lf", &uptime_secs); fclose(f); }
+        if (f) {
+            if (fscanf(f, "%lf", &uptime_secs) != 1) uptime_secs = 0.0;
+            fclose(f);
+        }
     }
 
     /* --- CPU usage from /proc/stat (delta between reads) --- */
@@ -758,7 +761,12 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
     float load1=0.0f, load5=0.0f, load15=0.0f;
     {
         FILE *f = fopen("/proc/loadavg", "r");
-        if (f) { fscanf(f, "%f %f %f", &load1, &load5, &load15); fclose(f); }
+        if (f) {
+            if (fscanf(f, "%f %f %f", &load1, &load5, &load15) != 3) {
+                load1 = load5 = load15 = 0.0f;
+            }
+            fclose(f);
+        }
     }
 
     /* --- Current epoch time --- */
@@ -1052,7 +1060,10 @@ static void build_prometheus_metrics(web_server_ctx_t *ctx, dyn_buf_t *buf) {
     double uptime_secs = 0.0;
     {
         FILE *f = fopen("/proc/uptime", "r");
-        if (f) { fscanf(f, "%lf", &uptime_secs); fclose(f); }
+        if (f) {
+            if (fscanf(f, "%lf", &uptime_secs) != 1) uptime_secs = 0.0;
+            fclose(f);
+        }
     }
     dyn_buf_printf(buf, "# HELP fluxwan_uptime_seconds Router uptime in seconds\n");
     dyn_buf_printf(buf, "# TYPE fluxwan_uptime_seconds counter\n");
@@ -1113,7 +1124,12 @@ static void build_prometheus_metrics(web_server_ctx_t *ctx, dyn_buf_t *buf) {
     float load1=0.0f, load5=0.0f, load15=0.0f;
     {
         FILE *f = fopen("/proc/loadavg", "r");
-        if (f) { fscanf(f, "%f %f %f", &load1, &load5, &load15); fclose(f); }
+        if (f) {
+            if (fscanf(f, "%f %f %f", &load1, &load5, &load15) != 3) {
+                load1 = load5 = load15 = 0.0f;
+            }
+            fclose(f);
+        }
     }
     dyn_buf_printf(buf, "# HELP fluxwan_load1 1-minute system load average\n");
     dyn_buf_printf(buf, "# TYPE fluxwan_load1 gauge\n");
@@ -2047,7 +2063,9 @@ static void handle_terminal_exec(web_server_ctx_t *ctx, socket_t client_fd, cons
         _getcwd(g_terminal_cwd, sizeof(g_terminal_cwd));
 #else
         if (chdir("/root") != 0) {
-            chdir("/");
+            if (chdir("/") != 0) {
+                /* fallback ignored */
+            }
         }
         if (getcwd(g_terminal_cwd, sizeof(g_terminal_cwd)) == NULL) {
             safe_str_copy(g_terminal_cwd, "/root", sizeof(g_terminal_cwd));
