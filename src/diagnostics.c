@@ -69,7 +69,14 @@ int diagnostics_run_speedtest(const char *ifname, speedtest_result_t *out) {
     strncpy(out->interface, ifname, sizeof(out->interface) - 1);
 
 #if defined(__linux__)
-    LOG_INFO("[Speedtest] Starting REAL throughput test on WAN interface: %s", ifname);
+    /* 0. Strict Interface Verification */
+    if (if_nametoindex(ifname) == 0) {
+        snprintf(out->error_msg, sizeof(out->error_msg), "Interface '%s' does not exist in the system", ifname);
+        out->success = false;
+        return -1;
+    }
+
+    LOG_INFO("[Speedtest] Starting REAL throughput test strictly isolated on WAN interface: %s", ifname);
 
     /* 1. Real Latency check via interface ping */
     double ping_res = measure_ping_socket(ifname, "1.1.1.1");
@@ -105,7 +112,10 @@ int diagnostics_run_speedtest(const char *ifname, speedtest_result_t *out) {
     int dl_sock = socket(AF_INET, SOCK_STREAM, 0);
     if (dl_sock >= 0) {
         if (setsockopt(dl_sock, SOL_SOCKET, SO_BINDTODEVICE, (void *)&ifr, sizeof(ifr)) < 0) {
-            LOG_WARN("[Speedtest] SO_BINDTODEVICE failed on %s: %s", ifname, strerror(errno));
+            close(dl_sock);
+            snprintf(out->error_msg, sizeof(out->error_msg), "Failed to bind download socket strictly to %s: %s", ifname, strerror(errno));
+            out->success = false;
+            return -1;
         }
 
         struct timeval tv = { .tv_sec = 4, .tv_usec = 0 };
@@ -152,7 +162,10 @@ int diagnostics_run_speedtest(const char *ifname, speedtest_result_t *out) {
     int ul_sock = socket(AF_INET, SOCK_STREAM, 0);
     if (ul_sock >= 0) {
         if (setsockopt(ul_sock, SOL_SOCKET, SO_BINDTODEVICE, (void *)&ifr, sizeof(ifr)) < 0) {
-            LOG_WARN("[Speedtest] SO_BINDTODEVICE failed on %s: %s", ifname, strerror(errno));
+            close(ul_sock);
+            snprintf(out->error_msg, sizeof(out->error_msg), "Failed to bind upload socket strictly to %s: %s", ifname, strerror(errno));
+            out->success = false;
+            return -1;
         }
 
         struct timeval tv = { .tv_sec = 4, .tv_usec = 0 };
