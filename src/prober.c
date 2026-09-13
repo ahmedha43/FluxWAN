@@ -148,18 +148,29 @@ int prober_send_probes(prober_ctx_t *ctx) {
         ps->pending_probes[slot].received = false;
 
         /* Ensure dedicated socket bound to this interface exists */
-        if (ctx->wan_send_fds[i] < 0 && w->name[0]) {
-            ctx->wan_send_fds[i] = (int)socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
-            if (ctx->wan_send_fds[i] >= 0) {
+        char target_dev[MAX_IFNAME_LEN] = {0};
+        if (w->type == WAN_TYPE_PPPOE) {
+            snprintf(target_dev, sizeof(target_dev), "ppp%u", i);
+        } else {
+            snprintf(target_dev, sizeof(target_dev), "%s", w->name);
+        }
+
+        if (ctx->wan_send_fds[i] < 0 && target_dev[0]) {
+            int s = (int)socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+            if (s >= 0) {
 #if !defined(_WIN32) && !defined(_WIN64)
-                fcntl(ctx->wan_send_fds[i], F_SETFD, FD_CLOEXEC);
-                int flags = fcntl(ctx->wan_send_fds[i], F_GETFL, 0);
-                if (flags >= 0) fcntl(ctx->wan_send_fds[i], F_SETFL, flags | O_NONBLOCK);
+                fcntl(s, F_SETFD, FD_CLOEXEC);
+                int flags = fcntl(s, F_GETFL, 0);
+                if (flags >= 0) fcntl(s, F_SETFL, flags | O_NONBLOCK);
 #if defined(SO_BINDTODEVICE)
-                setsockopt(ctx->wan_send_fds[i], SOL_SOCKET, SO_BINDTODEVICE,
-                           w->name, (socklen_t)strlen(w->name));
+                if (setsockopt(s, SOL_SOCKET, SO_BINDTODEVICE,
+                               target_dev, (socklen_t)strlen(target_dev)) < 0) {
+                    close(s);
+                    s = -1;
+                }
 #endif
 #endif
+                ctx->wan_send_fds[i] = s;
             }
         }
 

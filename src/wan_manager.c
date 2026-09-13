@@ -271,6 +271,12 @@ static void on_pppoe_connected_cb(int wan_idx, const char *ppp_ifname, uint32_t 
 
     wan_config_t *w = &ctx->config->wans[wan_idx];
     w->state = WAN_STATE_HEALTHY;
+    w->ip_addr = htonl(ip);
+    w->gateway = htonl(gw);
+    w->netmask = inet_addr("255.255.255.255");
+    if (w->probe_target_ip == 0) {
+        w->probe_target_ip = htonl(gw);
+    }
 
     char ip_str[32] = {0}, gw_str[32] = {0};
     ip_to_str(htonl(ip), ip_str, sizeof(ip_str));
@@ -282,8 +288,14 @@ static void on_pppoe_connected_cb(int wan_idx, const char *ppp_ifname, uint32_t 
                         w->id, w->label, ppp_ifname, ip_str);
 
     /* Update policy route default route for this table */
+    char r_cmd[256];
+    snprintf(r_cmd, sizeof(r_cmd), "ip route replace default dev %s table %u 2>/dev/null || true",
+             ppp_ifname, w->table_id);
+    safe_system(r_cmd);
+
+    int ifidx = if_nametoindex(ppp_ifname);
     if (ctx->nl) {
-        netlink_add_default_route(ctx->nl, w->table_id, htonl(gw), 0);
+        netlink_add_default_route(ctx->nl, w->table_id, htonl(gw), ifidx > 0 ? ifidx : 0);
     }
     net_apply_wan_nat(ppp_ifname, true);
 
