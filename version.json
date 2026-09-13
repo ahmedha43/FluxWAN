@@ -14,7 +14,7 @@
   "packages": {
     "core": {
       "url": "https://raw.githubusercontent.com/ahmedha43/FluxWAN/main/dist/fluxwan",
-      "sha256": "a3fe885fd0b1c26da32abff187dd4051378234b0977ac293d08f2f7f8df9f515",
+      "sha256": "6a92f0719c32a9ef4cea14cbb3d205f3f85c1714ebdc67ffb1cd7012229f2000",
       "size_bytes": 266352
     },
     "full_iso": {
