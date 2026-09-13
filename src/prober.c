@@ -2,6 +2,8 @@
 #include <math.h>
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <fcntl.h>
+#include <net/if.h>
+#include <errno.h>
 #endif
 
 #ifndef MSG_DONTWAIT
@@ -140,6 +142,7 @@ int prober_send_probes(prober_ctx_t *ctx) {
             if (elapsed_ms >= (uint64_t)ctx->config->prober.timeout_ms) {
                 ps->loss_history[ps->history_idx % PROBE_WINDOW_SIZE] = true;
                 ps->history_idx++;
+                ps->pending_probes[slot].send_time_us = 0;
             }
         }
 
@@ -155,23 +158,35 @@ int prober_send_probes(prober_ctx_t *ctx) {
             snprintf(target_dev, sizeof(target_dev), "%s", w->name);
         }
 
-        if (ctx->wan_send_fds[i] < 0 && target_dev[0]) {
-            int s = (int)socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
-            if (s >= 0) {
 #if !defined(_WIN32) && !defined(_WIN64)
-                fcntl(s, F_SETFD, FD_CLOEXEC);
-                int flags = fcntl(s, F_GETFL, 0);
-                if (flags >= 0) fcntl(s, F_SETFL, flags | O_NONBLOCK);
-#if defined(SO_BINDTODEVICE)
-                if (setsockopt(s, SOL_SOCKET, SO_BINDTODEVICE,
-                               target_dev, (socklen_t)strlen(target_dev)) < 0) {
-                    close(s);
-                    s = -1;
-                }
-#endif
-#endif
-                ctx->wan_send_fds[i] = s;
+        /* If interface was recreated or deleted, close stale socket */
+        if (ctx->wan_send_fds[i] >= 0 && target_dev[0]) {
+            if (if_nametoindex(target_dev) == 0) {
+                close(ctx->wan_send_fds[i]);
+                ctx->wan_send_fds[i] = -1;
             }
+        }
+#endif
+
+        if (ctx->wan_send_fds[i] < 0 && target_dev[0]) {
+#if !defined(_WIN32) && !defined(_WIN64)
+            if (if_nametoindex(target_dev) > 0) {
+                int s = (int)socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+                if (s >= 0) {
+                    fcntl(s, F_SETFD, FD_CLOEXEC);
+                    int flags = fcntl(s, F_GETFL, 0);
+                    if (flags >= 0) fcntl(s, F_SETFL, flags | O_NONBLOCK);
+#if defined(SO_BINDTODEVICE)
+                    if (setsockopt(s, SOL_SOCKET, SO_BINDTODEVICE,
+                                   target_dev, (socklen_t)strlen(target_dev)) < 0) {
+                        close(s);
+                        s = -1;
+                    }
+#endif
+                    ctx->wan_send_fds[i] = s;
+                }
+            }
+#endif
         }
 
         int send_fd = (ctx->wan_send_fds[i] >= 0) ? ctx->wan_send_fds[i] : ctx->raw_fd;
@@ -197,7 +212,11 @@ int prober_send_probes(prober_ctx_t *ctx) {
             dest.sin_family = AF_INET;
             dest.sin_addr.s_addr = w->probe_target_ip;
 
-            sendto(send_fd, packet, sizeof(packet), 0, (struct sockaddr *)&dest, sizeof(dest));
+            ssize_t sent = sendto(send_fd, packet, sizeof(packet), 0, (struct sockaddr *)&dest, sizeof(dest));
+            if (sent < 0 && ctx->wan_send_fds[i] >= 0) {
+                close(ctx->wan_send_fds[i]);
+                ctx->wan_send_fds[i] = -1;
+            }
         }
 
         /* Calculate moving average RTT, Jitter, and Loss from real packet history */
@@ -304,6 +323,12 @@ int prober_process_responses(prober_ctx_t *ctx) {
             while ((len = recvfrom(ctx->wan_send_fds[i], buf, sizeof(buf), MSG_DONTWAIT, (struct sockaddr *)&from, &fromlen)) > 0) {
                 prober_handle_packet(ctx, buf, len);
             }
+#if !defined(_WIN32) && !defined(_WIN64)
+            if (len < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+                close(ctx->wan_send_fds[i]);
+                ctx->wan_send_fds[i] = -1;
+            }
+#endif
         }
     }
     return 0;
