@@ -970,8 +970,9 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
     fprintf(f, "    }\n");
     fprintf(f, "  },\n");
 
+    fprintf(f, "  \"groups\": [");
     if (config->group_count > 0) {
-        fprintf(f, "  \"groups\": [\n");
+        fprintf(f, "\n");
         for (uint32_t g = 0; g < config->group_count; g++) {
             const wan_group_t *grp = &config->groups[g];
             fprintf(f, "    {\n");
@@ -987,41 +988,48 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
             fprintf(f, "    }%s\n", (g == config->group_count - 1) ? "" : ",");
         }
         fprintf(f, "  ],\n");
+    } else {
+        fprintf(f, "],\n");
     }
 
-    fprintf(f, "  \"wans\": [\n");
-    for (uint32_t i = 0; i < config->wan_count; i++) {
-        const wan_config_t *w = &config->wans[i];
-        char ip[32], mask[32], gw[32];
-        ip_to_str(w->ip_addr, ip, sizeof(ip));
-        ip_to_str(w->netmask, mask, sizeof(mask));
-        ip_to_str(w->gateway, gw, sizeof(gw));
+    fprintf(f, "  \"wans\": [");
+    if (config->wan_count > 0) {
+        fprintf(f, "\n");
+        for (uint32_t i = 0; i < config->wan_count; i++) {
+            const wan_config_t *w = &config->wans[i];
+            char ip[32], mask[32], gw[32];
+            ip_to_str(w->ip_addr, ip, sizeof(ip));
+            ip_to_str(w->netmask, mask, sizeof(mask));
+            ip_to_str(w->gateway, gw, sizeof(gw));
 
-        const char *type_str = "static";
-        if (w->type == WAN_TYPE_DHCP) type_str = "dhcp";
-        else if (w->type == WAN_TYPE_PPPOE) type_str = "pppoe";
+            const char *type_str = "static";
+            if (w->type == WAN_TYPE_DHCP) type_str = "dhcp";
+            else if (w->type == WAN_TYPE_PPPOE) type_str = "pppoe";
 
-        fprintf(f, "    {\n");
-        fprintf(f, "      \"id\": %u,\n", w->id);
-        fprintf(f, "      \"name\": \"%s\",\n", w->name);
-        fprintf(f, "      \"label\": \"%s\",\n", w->label);
-        fprintf(f, "      \"type\": \"%s\",\n", type_str);
-        if (w->type == WAN_TYPE_PPPOE || w->ppp_username[0] || w->ppp_password[0]) {
-            fprintf(f, "      \"username\": \"%s\",\n", w->ppp_username);
-            fprintf(f, "      \"password\": \"%s\",\n", w->ppp_password);
+            fprintf(f, "    {\n");
+            fprintf(f, "      \"id\": %u,\n", w->id);
+            fprintf(f, "      \"name\": \"%s\",\n", w->name);
+            fprintf(f, "      \"label\": \"%s\",\n", w->label);
+            fprintf(f, "      \"type\": \"%s\",\n", type_str);
+            if (w->type == WAN_TYPE_PPPOE || w->ppp_username[0] || w->ppp_password[0]) {
+                fprintf(f, "      \"username\": \"%s\",\n", w->ppp_username);
+                fprintf(f, "      \"password\": \"%s\",\n", w->ppp_password);
+            }
+            fprintf(f, "      \"ip\": \"%s\",\n", ip);
+            fprintf(f, "      \"netmask\": \"%s\",\n", mask);
+            fprintf(f, "      \"gateway\": \"%s\",\n", gw);
+            fprintf(f, "      \"weight\": %u,\n", w->config_weight);
+            fprintf(f, "      \"bandwidth_down_mbps\": %u,\n", w->bandwidth_down_mbps);
+            fprintf(f, "      \"bandwidth_up_mbps\": %u,\n", w->bandwidth_up_mbps);
+            fprintf(f, "      \"enabled\": %s,\n", w->enabled ? "true" : "false");
+            fprintf(f, "      \"probe_target\": \"%s\",\n", w->probe_target);
+            fprintf(f, "      \"table_id\": %u\n", w->table_id);
+            fprintf(f, "    }%s\n", (i == config->wan_count - 1) ? "" : ",");
         }
-        fprintf(f, "      \"ip\": \"%s\",\n", ip);
-        fprintf(f, "      \"netmask\": \"%s\",\n", mask);
-        fprintf(f, "      \"gateway\": \"%s\",\n", gw);
-        fprintf(f, "      \"weight\": %u,\n", w->config_weight);
-        fprintf(f, "      \"bandwidth_down_mbps\": %u,\n", w->bandwidth_down_mbps);
-        fprintf(f, "      \"bandwidth_up_mbps\": %u,\n", w->bandwidth_up_mbps);
-        fprintf(f, "      \"enabled\": %s,\n", w->enabled ? "true" : "false");
-        fprintf(f, "      \"probe_target\": \"%s\",\n", w->probe_target);
-        fprintf(f, "      \"table_id\": %u\n", w->table_id);
-        fprintf(f, "    }%s\n", (i == config->wan_count - 1) ? "" : ",");
+        fprintf(f, "  ],\n");
+    } else {
+        fprintf(f, "],\n");
     }
-    fprintf(f, "  ],\n");
 
     fprintf(f, "  \"prober\": {\n");
     fprintf(f, "    \"interval_ms\": %u,\n", config->prober.interval_ms);
@@ -1409,48 +1417,11 @@ int config_reset_to_defaults(fluxwan_config_t *out_config) {
     safe_str_copy(out_config->lan.dns.primary_dns, "1.1.1.1", sizeof(out_config->lan.dns.primary_dns));
     safe_str_copy(out_config->lan.dns.secondary_dns, "8.8.8.8", sizeof(out_config->lan.dns.secondary_dns));
 
-    /* 2. WAN Defaults: Two DHCP WANs (eth1, eth2) */
-    out_config->wan_count = 2;
-    out_config->wans[0].id = 1;
-    safe_str_copy(out_config->wans[0].name, "eth1", sizeof(out_config->wans[0].name));
-    safe_str_copy(out_config->wans[0].label, "WAN1_Primary", sizeof(out_config->wans[0].label));
-    out_config->wans[0].type = WAN_TYPE_DHCP;
-    out_config->wans[0].config_weight = 100;
-    out_config->wans[0].dynamic_weight = 100;
-    out_config->wans[0].bandwidth_down_mbps = 100;
-    out_config->wans[0].bandwidth_up_mbps = 20;
-    out_config->wans[0].table_id = 101;
-    out_config->wans[0].mtu = 1500;
-    out_config->wans[0].mss_clamping = 1452;
-    out_config->wans[0].enabled = true;
-    safe_str_copy(out_config->wans[0].probe_target, "8.8.8.8", sizeof(out_config->wans[0].probe_target));
+    /* 2. WAN Defaults: None (Clean install - admin adds physical WANs) */
+    out_config->wan_count = 0;
 
-    out_config->wans[1].id = 2;
-    safe_str_copy(out_config->wans[1].name, "eth2", sizeof(out_config->wans[1].name));
-    safe_str_copy(out_config->wans[1].label, "WAN2_Secondary", sizeof(out_config->wans[1].label));
-    out_config->wans[1].type = WAN_TYPE_DHCP;
-    out_config->wans[1].config_weight = 100;
-    out_config->wans[1].dynamic_weight = 100;
-    out_config->wans[1].bandwidth_down_mbps = 100;
-    out_config->wans[1].bandwidth_up_mbps = 20;
-    out_config->wans[1].table_id = 102;
-    out_config->wans[1].mtu = 1500;
-    out_config->wans[1].mss_clamping = 1452;
-    out_config->wans[1].enabled = true;
-    safe_str_copy(out_config->wans[1].probe_target, "1.1.1.1", sizeof(out_config->wans[1].probe_target));
-
-    /* Groups Default */
-    out_config->group_count = 1;
-    out_config->groups[0].id = 1;
-    safe_str_copy(out_config->groups[0].name, "Default_Balance", sizeof(out_config->groups[0].name));
-    safe_str_copy(out_config->groups[0].description, "Default Multi-WAN Load Balancing Pool", sizeof(out_config->groups[0].description));
-    out_config->groups[0].enabled = true;
-    out_config->groups[0].wan_count = 2;
-    safe_str_copy(out_config->groups[0].wan_names[0], "WAN1_Primary", sizeof(out_config->groups[0].wan_names[0]));
-    safe_str_copy(out_config->groups[0].wan_names[1], "WAN2_Secondary", sizeof(out_config->groups[0].wan_names[1]));
-    out_config->groups[0].wan_member_indices[0] = 0;
-    out_config->groups[0].wan_member_indices[1] = 1;
-    out_config->groups[0].active_wan_count = 2;
+    /* Groups Default: None (Clean install) */
+    out_config->group_count = 0;
 
     /* Prober Defaults */
     out_config->prober.interval_ms = 500;

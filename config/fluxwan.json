@@ -7,65 +7,10 @@
     "dhcp_start": "192.168.90.100",
     "dhcp_end": "192.168.90.200",
     "dhcp_lease_time": 43200,
-    "policy_routes": [
-      {
-        "subnet": "10.10.20.0/24",
-        "gateway_ip": "10.10.20.1",
-        "target_group": "Starlink_Fleet",
-        "description": "Starlink Dedicated VIP Subscribers",
-        "enabled": true
-      },
-      {
-        "subnet": "10.10.30.0/24",
-        "gateway_ip": "10.10.30.1",
-        "target_group": "Default_Balance",
-        "description": "General Multi-WAN Subscribers",
-        "enabled": true
-      }
-    ]
+    "policy_routes": []
   },
-  "groups": [
-    {
-      "id": 1,
-      "name": "Default_Balance",
-      "description": "Multi-WAN Load Balancing Pool",
-      "wans": ["WAN1_Primary", "WAN2_Secondary"],
-      "enabled": true
-    },
-    {
-      "id": 2,
-      "name": "Starlink_Fleet",
-      "description": "High-Speed Priority WAN",
-      "wans": ["WAN2_Secondary"],
-      "enabled": true
-    }
-  ],
-  "wans": [
-    {
-      "id": 1,
-      "name": "eth1",
-      "label": "WAN1_Primary",
-      "type": "dhcp",
-      "ip": "0.0.0.0",
-      "netmask": "255.255.255.0",
-      "gateway": "0.0.0.0",
-      "weight": 100,
-      "probe_target": "8.8.8.8",
-      "table_id": 101
-    },
-    {
-      "id": 2,
-      "name": "eth2",
-      "label": "WAN2_Secondary",
-      "type": "dhcp",
-      "ip": "0.0.0.0",
-      "netmask": "255.255.255.0",
-      "gateway": "0.0.0.0",
-      "weight": 100,
-      "probe_target": "1.1.1.1",
-      "table_id": 102
-    }
-  ],
+  "groups": [],
+  "wans": [],
   "prober": {
     "interval_ms": 500,
     "timeout_ms": 1000,

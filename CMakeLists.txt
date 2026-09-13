@@ -7,6 +7,17 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 include_directories(include .)
 add_definitions(-D_GNU_SOURCE -D_DEFAULT_SOURCE)
 
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_FOUND)
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/include/ui_assets.h
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/embed_ui.py
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/web/index.html ${CMAKE_CURRENT_SOURCE_DIR}/scripts/embed_ui.py
+        COMMENT "Embedding web/index.html into include/ui_assets.h"
+    )
+    set_source_files_properties(src/web_server.c PROPERTIES OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/include/ui_assets.h)
+endif()
+
 set(CORE_LIB_SOURCES
     src/config.c
     src/dyn_buf.c

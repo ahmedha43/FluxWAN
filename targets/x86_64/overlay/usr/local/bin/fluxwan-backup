@@ -126,47 +126,8 @@ EOF
     "dhcp_lease_time": 43200,
     "policy_routes": []
   },
-  "groups": [
-    {
-      "id": 1,
-      "name": "Default_Balance",
-      "description": "Default Multi-WAN Load Balancing Pool",
-      "wans": ["WAN1_Primary", "WAN2_Secondary"],
-      "enabled": true
-    }
-  ],
-  "wans": [
-    {
-      "id": 1,
-      "name": "eth1",
-      "label": "WAN1_Primary",
-      "type": "dhcp",
-      "ip": "0.0.0.0",
-      "netmask": "255.255.255.0",
-      "gateway": "0.0.0.0",
-      "weight": 100,
-      "bandwidth_down_mbps": 100,
-      "bandwidth_up_mbps": 20,
-      "probe_target": "8.8.8.8",
-      "table_id": 101,
-      "enabled": true
-    },
-    {
-      "id": 2,
-      "name": "eth2",
-      "label": "WAN2_Secondary",
-      "type": "dhcp",
-      "ip": "0.0.0.0",
-      "netmask": "255.255.255.0",
-      "gateway": "0.0.0.0",
-      "weight": 100,
-      "bandwidth_down_mbps": 100,
-      "bandwidth_up_mbps": 20,
-      "probe_target": "1.1.1.1",
-      "table_id": 102,
-      "enabled": true
-    }
-  ],
+  "groups": [],
+  "wans": [],
   "prober": {
     "interval_ms": 500,
     "timeout_ms": 1000,

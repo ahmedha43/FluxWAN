@@ -3759,9 +3759,9 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
                         fclose(f_tmp);
                     }
                     if (config_load("/tmp/fluxwan_test_cfg.json", test_cfg) == 0) {
-                        /* Protect existing WANs if client payload sent empty WAN list */
-                        if (test_cfg->wan_count == 0 && ctx->config->wan_count > 0) {
-                            LOG_WARN("[Web] Incoming apply payload had 0 WANs. Preserving existing %u WAN uplinks.", ctx->config->wan_count);
+                        /* Only preserve existing WANs if "wans" key was completely omitted from client payload */
+                        if (test_cfg->wan_count == 0 && ctx->config->wan_count > 0 && strstr(body, "\"wans\"") == NULL) {
+                            LOG_WARN("[Web] Incoming apply payload omitted 'wans'. Preserving existing %u WAN uplinks.", ctx->config->wan_count);
                             test_cfg->wan_count = ctx->config->wan_count;
                             memcpy(test_cfg->wans, ctx->config->wans, sizeof(wan_config_t) * ctx->config->wan_count);
                         }
