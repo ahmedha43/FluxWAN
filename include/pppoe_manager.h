@@ -58,6 +58,10 @@ typedef struct {
     /* Backoff: 15 → 30 → 60 → 120 (seconds) */
     uint32_t     backoff_s;
     int          reconnect_attempts;
+
+    /* Dynamic credentials hot-reloading */
+    char         last_username[64];
+    char         last_password[64];
 } pppoe_session_t;
 
 /* ── Manager context ──────────────────────────────────────────────── */

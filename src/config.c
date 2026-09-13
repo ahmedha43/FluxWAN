@@ -434,12 +434,12 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
                         w->gateway = str_to_ip(val);
                     }
 
-                    if (extract_json_string(obj_str, "username", val, sizeof(val)) ||
-                        extract_json_string(obj_str, "ppp_username", val, sizeof(val))) {
+                    if (extract_json_string(obj_str, "ppp_username", val, sizeof(val)) ||
+                        extract_json_string(obj_str, "username", val, sizeof(val))) {
                         safe_str_copy(w->ppp_username, val, sizeof(w->ppp_username));
                     }
-                    if (extract_json_string(obj_str, "password", val, sizeof(val)) ||
-                        extract_json_string(obj_str, "ppp_password", val, sizeof(val))) {
+                    if (extract_json_string(obj_str, "ppp_password", val, sizeof(val)) ||
+                        extract_json_string(obj_str, "password", val, sizeof(val))) {
                         safe_str_copy(w->ppp_password, val, sizeof(w->ppp_password));
                     }
 

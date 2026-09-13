@@ -5,6 +5,7 @@
  */
 
 #include "pppoe_manager.h"
+#include "wan_manager.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -172,6 +173,9 @@ int pppoe_session_start(pppoe_manager_ctx_t *pctx, int wan_index, const wan_conf
 
     /* Stop previous instance if any */
     pppoe_session_stop(pctx, wan_index);
+
+    safe_str_copy(sess->last_username, wan->ppp_username, sizeof(sess->last_username));
+    safe_str_copy(sess->last_password, wan->ppp_password, sizeof(sess->last_password));
 
     /* Generate unique PPP interface unit name: ppp<wan_index> */
     snprintf(sess->ppp_ifname, sizeof(sess->ppp_ifname), "ppp%d", wan_index);
@@ -348,6 +352,19 @@ void pppoe_manager_tick(pppoe_manager_ctx_t *pctx,
                 pppoe_session_stop(pctx, (int)i);
             }
             continue;
+        }
+
+        /* Check if credentials changed dynamically via Web UI */
+        if (sess->state == PPPOE_STATE_CONNECTED || sess->state == PPPOE_STATE_DIALING || sess->state == PPPOE_STATE_AUTH) {
+            if (strcmp(sess->last_username, w->ppp_username) != 0 ||
+                strcmp(sess->last_password, w->ppp_password) != 0) {
+                LOG_INFO("[PPPoE WAN%d] Credentials modified (User: '%s' -> '%s'). Re-authenticating session...",
+                         i + 1, sess->last_username, w->ppp_username);
+                wan_manager_add_log("INFO", "PPPoE WAN%d credentials updated (%s). Re-authenticating session...",
+                                    i + 1, w->ppp_username);
+                pppoe_session_stop(pctx, (int)i);
+                sess->state = PPPOE_STATE_IDLE;
+            }
         }
 
         /* Check if process is still running */
