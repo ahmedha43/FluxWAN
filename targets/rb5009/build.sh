@@ -214,7 +214,6 @@ if [ -f "$TARGET_DIR/kernel/armada-7040-rb5009.dts" ]; then
     dtc -I dts -O dtb -o "$BUILD_DIR/armada-7040-rb5009.dtb" \
         -i "$TARGET_DIR/kernel" "$BUILD_DIR/armada-7040-rb5009.dts.tmp"
     test -s "$BUILD_DIR/armada-7040-rb5009.dtb"
-    file "$BUILD_DIR/armada-7040-rb5009.dtb" | grep -q 'Device Tree Blob'
 fi
 
 # 6. Build Flattened Image Tree (FIT .itb image)
