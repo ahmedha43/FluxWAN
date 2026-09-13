@@ -50,6 +50,10 @@ static void apply_mss_clamping(const wan_config_t *wan) {
     char cmd[512];
     snprintf(cmd, sizeof(cmd), "iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -o %s -j TCPMSS --set-mss %u 2>/dev/null || iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -o %s -j TCPMSS --set-mss %u 2>/dev/null", wan->name, mss, wan->name, mss);
     safe_system(cmd);
+    if (wan->type == WAN_TYPE_PPPOE) {
+        snprintf(cmd, sizeof(cmd), "iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -o ppp+ -j TCPMSS --set-mss %u 2>/dev/null || iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -o ppp+ -j TCPMSS --set-mss %u 2>/dev/null", mss, mss);
+        safe_system(cmd);
+    }
 #endif
     LOG_INFO("[QoS / MTU] Configuring TCP MSS Clamping to %u bytes on %s", mss, wan->name);
 }
