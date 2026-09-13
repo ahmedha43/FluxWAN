@@ -15,6 +15,7 @@
 #include <netinet/ip_icmp.h>
 #include <arpa/inet.h>
 #include <net/if.h>
+#include <netdb.h>
 #endif
 
 typedef struct {
@@ -68,143 +69,147 @@ int diagnostics_run_speedtest(const char *ifname, speedtest_result_t *out) {
     strncpy(out->interface, ifname, sizeof(out->interface) - 1);
 
 #if defined(__linux__)
-    LOG_INFO("[Speedtest] Starting independent throughput test on WAN interface: %s", ifname);
+    LOG_INFO("[Speedtest] Starting REAL throughput test on WAN interface: %s", ifname);
 
-    /* 1. Ping / Latency check via interface */
+    /* 1. Real Latency check via interface ping */
     double ping_res = measure_ping_socket(ifname, "1.1.1.1");
     if (ping_res >= 990.0) {
         ping_res = measure_ping_socket(ifname, "8.8.8.8");
     }
-    out->ping_ms = (ping_res < 990.0) ? ping_res : 45.0;
+    out->ping_ms = (ping_res < 990.0) ? ping_res : 0.0;
 
-    /* 2. Download Throughput Test via dedicated socket bound to ifname */
-    /* Target test server: Fast HTTP CDN chunk test (10MB / 25MB test files) */
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) {
-        snprintf(out->error_msg, sizeof(out->error_msg), "Failed to open socket: %s", strerror(errno));
-        return -1;
+    /* Target speed server: speed.cloudflare.com */
+    struct sockaddr_in serv_addr;
+    memset(&serv_addr, 0, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(80);
+
+    /* Resolve speed.cloudflare.com */
+    bool resolved = false;
+    struct hostent *he = gethostbyname("speed.cloudflare.com");
+    if (he && he->h_addr_list && he->h_addr_list[0]) {
+        memcpy(&serv_addr.sin_addr, he->h_addr_list[0], sizeof(struct in_addr));
+        resolved = true;
+    }
+    if (!resolved) {
+        serv_addr.sin_addr.s_addr = inet_addr("162.159.140.220");
     }
 
     struct ifreq ifr;
     memset(&ifr, 0, sizeof(ifr));
     strncpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name) - 1);
-    if (setsockopt(sock, SOL_SOCKET, SO_BINDTODEVICE, (void *)&ifr, sizeof(ifr)) < 0) {
-        LOG_WARN("[Speedtest] SO_BINDTODEVICE failed for %s: %s", ifname, strerror(errno));
-    }
 
-    struct timeval tv;
-    tv.tv_sec = 4;
-    tv.tv_usec = 0;
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(tv));
-    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (const char *)&tv, sizeof(tv));
-
-    struct sockaddr_in serv;
-    memset(&serv, 0, sizeof(serv));
-    serv.sin_family = AF_INET;
-    serv.sin_port = htons(80);
-    serv.sin_addr.s_addr = inet_addr("1.1.1.1");
-
-    double dl_mbps = 0.0;
-    double ul_mbps = 0.0;
-
-    if (connect(sock, (struct sockaddr *)&serv, sizeof(serv)) == 0) {
-        const char *http_req = "GET /cdn-cgi/trace HTTP/1.1\r\nHost: 1.1.1.1\r\nUser-Agent: FluxWAN-Speedtest/1.2.4\r\nConnection: close\r\n\r\n";
-        send(sock, http_req, strlen(http_req), 0);
-
-        char rx_buf[16384];
-        uint64_t total_rx = 0;
-        uint64_t dl_start = get_time_ns();
-        while (1) {
-            ssize_t n = recv(sock, rx_buf, sizeof(rx_buf), 0);
-            if (n <= 0) break;
-            total_rx += (uint64_t)n;
-            uint64_t cur = get_time_ns();
-            if ((cur - dl_start) >= 2000000000ULL) break; /* 2 second sample window */
+    /* =========================================================================
+     * 2. REAL DOWNLOAD THROUGHPUT TEST (Direct Socket Bound to WAN Interface)
+     * ========================================================================= */
+    int dl_sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (dl_sock >= 0) {
+        if (setsockopt(dl_sock, SOL_SOCKET, SO_BINDTODEVICE, (void *)&ifr, sizeof(ifr)) < 0) {
+            LOG_WARN("[Speedtest] SO_BINDTODEVICE failed on %s: %s", ifname, strerror(errno));
         }
-        close(sock);
 
-        /* Also run multi-chunk download test via wget bound to interface address */
-        char wan_ip[64] = {0};
-        char ip_cmd[256];
-        snprintf(ip_cmd, sizeof(ip_cmd), "ip -4 addr show dev %s | grep inet | awk '{print $2}' | cut -d/ -f1 | head -n1", ifname);
-        FILE *fp = popen(ip_cmd, "r");
-        if (fp) {
-            if (fgets(wan_ip, sizeof(wan_ip), fp)) {
-                size_t l = strlen(wan_ip);
-                if (l > 0 && wan_ip[l-1] == '\n') wan_ip[l-1] = '\0';
+        struct timeval tv = { .tv_sec = 4, .tv_usec = 0 };
+        setsockopt(dl_sock, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(tv));
+        setsockopt(dl_sock, SOL_SOCKET, SO_SNDTIMEO, (const char *)&tv, sizeof(tv));
+
+        if (connect(dl_sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == 0) {
+            /* Request 25MB stream from Cloudflare speed endpoint */
+            const char *http_req = 
+                "GET /__down?bytes=25000000 HTTP/1.1\r\n"
+                "Host: speed.cloudflare.com\r\n"
+                "User-Agent: FluxWAN-Speedtest/1.2.5\r\n"
+                "Connection: close\r\n\r\n";
+            send(dl_sock, http_req, strlen(http_req), 0);
+
+            char rx_buf[32768];
+            uint64_t total_rx = 0;
+            uint64_t dl_start = get_time_ns();
+            uint64_t max_dur_ns = 3500000000ULL; /* 3.5 seconds sampling window */
+
+            while (1) {
+                ssize_t n = recv(dl_sock, rx_buf, sizeof(rx_buf), 0);
+                if (n <= 0) break;
+                total_rx += (uint64_t)n;
+                uint64_t cur = get_time_ns();
+                if ((cur - dl_start) >= max_dur_ns) break;
             }
-            pclose(fp);
-        }
+            uint64_t dl_end = get_time_ns();
+            close(dl_sock);
 
-        char dl_cmd[512];
-        if (wan_ip[0]) {
-            snprintf(dl_cmd, sizeof(dl_cmd),
-                     "wget --bind-address=%s -q -O /dev/null -T 5 'http://speed.hetzner.de/100MB.bin' 2>&1",
-                     wan_ip);
+            double dur_sec = (double)(dl_end - dl_start) / 1000000000.0;
+            if (dur_sec > 0.2 && total_rx > 500) {
+                out->download_mbps = (double)(total_rx * 8) / (dur_sec * 1000000.0);
+            }
         } else {
-            snprintf(dl_cmd, sizeof(dl_cmd),
-                     "wget -q -O /dev/null -T 5 'http://speed.hetzner.de/100MB.bin' 2>&1");
+            close(dl_sock);
+            LOG_WARN("[Speedtest] Connect failed on %s to speed server: %s", ifname, strerror(errno));
         }
-
-        /* Read interface counters before and after 2.5s sample to get precise hardware throughput */
-        char rx_stat_path[128];
-        snprintf(rx_stat_path, sizeof(rx_stat_path), "/sys/class/net/%s/statistics/rx_bytes", ifname);
-        char tx_stat_path[128];
-        snprintf(tx_stat_path, sizeof(tx_stat_path), "/sys/class/net/%s/statistics/tx_bytes", ifname);
-
-        FILE *f_rx = fopen(rx_stat_path, "r");
-        uint64_t rx_before = 0, tx_before = 0;
-        if (f_rx) { fscanf(f_rx, "%llu", (unsigned long long *)&rx_before); fclose(f_rx); }
-        FILE *f_tx = fopen(tx_stat_path, "r");
-        if (f_tx) { fscanf(f_tx, "%llu", (unsigned long long *)&tx_before); fclose(f_tx); }
-
-        /* Trigger background download stream */
-        char bg_cmd[512];
-        if (wan_ip[0]) {
-            snprintf(bg_cmd, sizeof(bg_cmd),
-                     "wget --bind-address=%s -q -O /dev/null -T 4 'http://speed.hetzner.de/100MB.bin' >/dev/null 2>&1 &",
-                     wan_ip);
-        } else {
-            snprintf(bg_cmd, sizeof(bg_cmd),
-                     "wget -q -O /dev/null -T 4 'http://speed.hetzner.de/100MB.bin' >/dev/null 2>&1 &");
-        }
-        safe_system(bg_cmd);
-
-        usleep(2500000); /* 2.5 seconds measurement */
-
-        uint64_t rx_after = 0, tx_after = 0;
-        f_rx = fopen(rx_stat_path, "r");
-        if (f_rx) { fscanf(f_rx, "%llu", (unsigned long long *)&rx_after); fclose(f_rx); }
-        f_tx = fopen(tx_stat_path, "r");
-        if (f_tx) { fscanf(f_tx, "%llu", (unsigned long long *)&tx_after); fclose(f_tx); }
-
-        safe_system("killall wget 2>/dev/null || true");
-
-        uint64_t rx_delta = (rx_after >= rx_before) ? (rx_after - rx_before) : 0;
-        uint64_t tx_delta = (tx_after >= tx_before) ? (tx_after - tx_before) : 0;
-
-        dl_mbps = (double)(rx_delta * 8) / (2.5 * 1000000.0);
-        ul_mbps = (double)(tx_delta * 8) / (2.5 * 1000000.0);
-
-        if (dl_mbps < 1.0) dl_mbps = 24.5 + (double)(rand() % 40) / 10.0;
-        if (ul_mbps < 0.5) ul_mbps = 8.2 + (double)(rand() % 25) / 10.0;
-    } else {
-        close(sock);
-        dl_mbps = 18.5;
-        ul_mbps = 5.4;
     }
 
-    out->download_mbps = dl_mbps;
-    out->upload_mbps = ul_mbps;
-    out->success = true;
-    LOG_INFO("[Speedtest] Finished for %s: Ping=%.1f ms, Down=%.2f Mbps, Up=%.2f Mbps",
+    /* =========================================================================
+     * 3. REAL UPLOAD THROUGHPUT TEST (Direct Socket Bound to WAN Interface)
+     * ========================================================================= */
+    int ul_sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (ul_sock >= 0) {
+        if (setsockopt(ul_sock, SOL_SOCKET, SO_BINDTODEVICE, (void *)&ifr, sizeof(ifr)) < 0) {
+            LOG_WARN("[Speedtest] SO_BINDTODEVICE failed on %s: %s", ifname, strerror(errno));
+        }
+
+        struct timeval tv = { .tv_sec = 4, .tv_usec = 0 };
+        setsockopt(ul_sock, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(tv));
+        setsockopt(ul_sock, SOL_SOCKET, SO_SNDTIMEO, (const char *)&tv, sizeof(tv));
+
+        if (connect(ul_sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == 0) {
+            char up_hdr[256];
+            int hlen = snprintf(up_hdr, sizeof(up_hdr),
+                "POST /__up HTTP/1.1\r\n"
+                "Host: speed.cloudflare.com\r\n"
+                "User-Agent: FluxWAN-Speedtest/1.2.5\r\n"
+                "Content-Type: application/octet-stream\r\n"
+                "Content-Length: 10485760\r\n"
+                "Connection: close\r\n\r\n");
+            send(ul_sock, up_hdr, hlen, 0);
+
+            static char tx_chunk[32768];
+            uint64_t total_tx = 0;
+            uint64_t ul_start = get_time_ns();
+            uint64_t max_dur_ns = 3000000000ULL; /* 3.0 seconds sampling window */
+
+            while (total_tx < 10485760) {
+                ssize_t sent = send(ul_sock, tx_chunk, sizeof(tx_chunk), 0);
+                if (sent <= 0) break;
+                total_tx += (uint64_t)sent;
+                uint64_t cur = get_time_ns();
+                if ((cur - ul_start) >= max_dur_ns) break;
+            }
+            uint64_t ul_end = get_time_ns();
+            close(ul_sock);
+
+            double dur_sec = (double)(ul_end - ul_start) / 1000000000.0;
+            if (dur_sec > 0.2 && total_tx > 500) {
+                out->upload_mbps = (double)(total_tx * 8) / (dur_sec * 1000000.0);
+            }
+        } else {
+            close(ul_sock);
+        }
+    }
+
+    if (out->download_mbps > 0.0 || out->upload_mbps > 0.0) {
+        out->success = true;
+    } else {
+        out->success = false;
+        snprintf(out->error_msg, sizeof(out->error_msg),
+                 "No traffic could be routed through %s (Check line cable and gateway)", ifname);
+    }
+
+    LOG_INFO("[Speedtest] Real Result for %s: Ping=%.1f ms, Down=%.2f Mbps, Up=%.2f Mbps (Real Socket Measurement)",
              ifname, out->ping_ms, out->download_mbps, out->upload_mbps);
-    return 0;
+    return out->success ? 0 : -1;
 #else
-    out->ping_ms = 25.0;
-    out->download_mbps = 95.5;
-    out->upload_mbps = 19.8;
-    out->success = true;
+    out->ping_ms = 0.0;
+    out->download_mbps = 0.0;
+    out->upload_mbps = 0.0;
+    out->success = false;
     return 0;
 #endif
 }
