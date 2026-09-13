@@ -452,6 +452,10 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
             "      \"name\": \"%s\",\n"
             "      \"label\": \"%s\",\n"
             "      \"type\": \"%s\",\n"
+            "      \"username\": \"%s\",\n"
+            "      \"ppp_username\": \"%s\",\n"
+            "      \"password\": \"%s\",\n"
+            "      \"ppp_password\": \"%s\",\n"
             "      \"ip\": \"%s\",\n"
             "      \"ip6\": \"%s\",\n"
             "      \"netmask\": \"%s\",\n"
@@ -474,7 +478,10 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
             "      \"enabled\": %s,\n"
             "      \"state\": \"%s\"\n"
             "    }%s\n",
-            w->id, w->name, w->label, type_str, ip,
+            w->id, w->name, w->label, type_str,
+            w->ppp_username, w->ppp_username,
+            w->ppp_password, w->ppp_password,
+            ip,
             real_v6,
             mask, gw,
             w->dns_servers[0] ? w->dns_servers : (w->gateway ? gw : "N/A"),
@@ -1340,16 +1347,22 @@ static void build_json_debug_report(web_server_ctx_t *ctx, char *buf, size_t max
         float share_pct = (total_weight > 0 && w->enabled && w->state != WAN_STATE_DOWN) ?
                           ((float)w->dynamic_weight / total_weight) * 100.0f : 0.0f;
 
+        char ppp_acc[80] = {0};
+        if (w->type == WAN_TYPE_PPPOE && w->ppp_username[0]) {
+            snprintf(ppp_acc, sizeof(ppp_acc), " | Account: %s", w->ppp_username);
+        }
+
         r_off += snprintf(raw_report + r_off, sizeof(raw_report) - r_off,
             "%-2u  %-7s %-16s %-6s %-15s %-5u %-3ums %-4.1f%% %-10s %-3u (%.1f%%)\n"
-            "            Gateway: %s%s%s\n",
+            "            Gateway: %s%s%s%s\n",
             w->id, w->name, w->label, type_str, ip[0] ? ip : "0.0.0.0",
             w->link_mtu ? w->link_mtu : 1500,
             w->metrics.rtt_ms, w->metrics.packet_loss_pct,
             state_str, w->dynamic_weight, share_pct,
             gw[0] ? gw : "N/A",
             w->ac_name[0] ? " | AC: " : "",
-            w->ac_name[0] ? w->ac_name : "");
+            w->ac_name[0] ? w->ac_name : "",
+            ppp_acc);
     }
 
     r_off += snprintf(raw_report + r_off, sizeof(raw_report) - r_off,

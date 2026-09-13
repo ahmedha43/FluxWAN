@@ -434,10 +434,12 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
                         w->gateway = str_to_ip(val);
                     }
 
-                    if (extract_json_string(obj_str, "username", val, sizeof(val))) {
+                    if (extract_json_string(obj_str, "username", val, sizeof(val)) ||
+                        extract_json_string(obj_str, "ppp_username", val, sizeof(val))) {
                         safe_str_copy(w->ppp_username, val, sizeof(w->ppp_username));
                     }
-                    if (extract_json_string(obj_str, "password", val, sizeof(val))) {
+                    if (extract_json_string(obj_str, "password", val, sizeof(val)) ||
+                        extract_json_string(obj_str, "ppp_password", val, sizeof(val))) {
                         safe_str_copy(w->ppp_password, val, sizeof(w->ppp_password));
                     }
 
@@ -864,6 +866,10 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
         fprintf(f, "      \"name\": \"%s\",\n", w->name);
         fprintf(f, "      \"label\": \"%s\",\n", w->label);
         fprintf(f, "      \"type\": \"%s\",\n", type_str);
+        if (w->type == WAN_TYPE_PPPOE || w->ppp_username[0] || w->ppp_password[0]) {
+            fprintf(f, "      \"username\": \"%s\",\n", w->ppp_username);
+            fprintf(f, "      \"password\": \"%s\",\n", w->ppp_password);
+        }
         fprintf(f, "      \"ip\": \"%s\",\n", ip);
         fprintf(f, "      \"netmask\": \"%s\",\n", mask);
         fprintf(f, "      \"gateway\": \"%s\",\n", gw);
