@@ -21,6 +21,7 @@
 #include "dyn_buf.h"
 #include <pthread.h>
 #include <fcntl.h>
+#include <ctype.h>
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <poll.h>
 #include <sys/time.h>
@@ -70,6 +71,67 @@ static inline void safe_str_copy(char *dst, const char *src, size_t max_len) {
     if (slen >= max_len) slen = max_len - 1;
     memcpy(dst, src, slen);
     dst[slen] = '\0';
+}
+
+static const char *find_matching_bracket(const char *start) {
+    if (!start || *start != '[') return NULL;
+    int depth = 0;
+    for (const char *p = start; *p; p++) {
+        if (*p == '[') depth++;
+        else if (*p == ']') {
+            depth--;
+            if (depth == 0) return p;
+        }
+    }
+    return NULL;
+}
+
+static void unescape_json_inplace(char *str) {
+    if (!str) return;
+    char *src = str;
+    char *dst = str;
+    while (*src) {
+        if (*src == '\\') {
+            src++;
+            if (*src == 'n') { *dst++ = '\n'; src++; }
+            else if (*src == 'r') { *dst++ = '\r'; src++; }
+            else if (*src == 't') { *dst++ = '\t'; src++; }
+            else if (*src == '"') { *dst++ = '"'; src++; }
+            else if (*src == '\\') { *dst++ = '\\'; src++; }
+            else if (*src) { *dst++ = *src++; }
+        } else {
+            *dst++ = *src++;
+        }
+    }
+    *dst = '\0';
+}
+
+static const char *extract_json_string(const char *json, const char *key, char *out_val, size_t max_len) {
+    char pattern[128];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char *p = strstr(json, pattern);
+    if (!p) return NULL;
+    p += strlen(pattern);
+    while (*p && (*p == ' ' || *p == ':' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
+    if (*p == '"') {
+        p++;
+        const char *end = NULL;
+        bool esc = false;
+        for (const char *s = p; *s; s++) {
+            if (esc) { esc = false; continue; }
+            if (*s == '\\') { esc = true; continue; }
+            if (*s == '"') { end = s; break; }
+        }
+        if (end) {
+            size_t len = end - p;
+            if (len >= max_len) len = max_len - 1;
+            strncpy(out_val, p, len);
+            out_val[len] = '\0';
+            unescape_json_inplace(out_val);
+            return p;
+        }
+    }
+    return NULL;
 }
 
 static bool parse_mac_str(const char *str, uint8_t *mac) {
@@ -537,6 +599,40 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
             pr->target_group_id, pr->description,
             pr->enabled ? "true" : "false",
             (p == config->lan.policy_route_count - 1) ? "" : ",");
+    }
+
+    /* Address Lists */
+    offset += snprintf(buf + offset, max_len - offset, "  ],\n  \"address_lists\": [\n");
+    for (uint32_t a = 0; a < config->address_list_count; a++) {
+        const address_list_t *al = &config->address_lists[a];
+        offset += snprintf(buf + offset, max_len - offset,
+            "    {\n"
+            "      \"id\": %u,\n"
+            "      \"name\": \"%s\",\n"
+            "      \"description\": \"%s\",\n"
+            "      \"target_type\": \"%s\",\n"
+            "      \"target_id\": %u,\n"
+            "      \"target_name\": \"%s\",\n"
+            "      \"enabled\": %s,\n"
+            "      \"entry_count\": %u,\n"
+            "      \"entries\": [",
+            a + 1, al->name, al->description, al->target_type, al->target_id, al->target_name,
+            al->enabled ? "true" : "false", al->entry_count);
+        for (uint32_t e = 0; e < al->entry_count; e++) {
+            char ip_str[32] = {0};
+            if (al->entries[e].resolved_ip != 0) {
+                ip_to_str(al->entries[e].resolved_ip, ip_str, sizeof(ip_str));
+            }
+            offset += snprintf(buf + offset, max_len - offset,
+                "{\"value\":\"%s\",\"type\":\"%s\",\"resolved_ip\":\"%s\"}%s",
+                al->entries[e].value,
+                al->entries[e].type == ADDR_ENTRY_DOMAIN ? "domain" : "ip",
+                ip_str,
+                (e == al->entry_count - 1) ? "" : ",");
+        }
+        offset += snprintf(buf + offset, max_len - offset,
+            "]\n    }%s\n",
+            (a == config->address_list_count - 1) ? "" : ",");
     }
 
     /* Static Leases */
@@ -1278,6 +1374,211 @@ static void build_json_policy_routes(const fluxwan_config_t *config, char *buf, 
     snprintf(buf + offset, max_len - offset, "  ]\n}\n");
 }
 
+static inline int safe_strcasecmp(const char *s1, const char *s2) {
+    if (!s1 || !s2) return (s1 == s2) ? 0 : (s1 ? 1 : -1);
+#if defined(_WIN32) || defined(_WIN64)
+    return _stricmp(s1, s2);
+#else
+    return strcasecmp(s1, s2);
+#endif
+}
+
+static void parse_address_entries_from_text(const char *text, address_list_t *al) {
+    if (!text || !al) return;
+    const char *p = text;
+    while (*p && al->entry_count < MAX_ENTRIES_PER_LIST) {
+        while (*p && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n' ||
+                     (*p == '\\' && (*(p+1) == 'n' || *(p+1) == 'r')))) {
+            if (*p == '\\') p += 2;
+            else p++;
+        }
+        if (!*p) break;
+
+        const char *eol = p;
+        while (*eol && *eol != '\r' && *eol != '\n' &&
+               !(*eol == '\\' && (*(eol+1) == 'n' || *(eol+1) == 'r'))) {
+            eol++;
+        }
+
+        size_t line_len = (size_t)(eol - p);
+        if (line_len > 0) {
+            char line[512];
+            if (line_len >= sizeof(line)) line_len = sizeof(line) - 1;
+            strncpy(line, p, line_len);
+            line[line_len] = '\0';
+
+            const char *addr_match = strstr(line, "address=");
+            const char *list_match = strstr(line, "list=");
+
+            /* Auto-detect list name from script if not set */
+            if (list_match && al->name[0] == '\0') {
+                const char *lp = list_match + 5;
+                if (*lp == '"') lp++;
+                size_t lidx = 0;
+                while (lp[lidx] && lp[lidx] != ' ' && lp[lidx] != '"' && lp[lidx] != '\t' &&
+                       lp[lidx] != '\r' && lp[lidx] != '\n' && lidx < sizeof(al->name) - 1) {
+                    al->name[lidx] = lp[lidx];
+                    lidx++;
+                }
+                al->name[lidx] = '\0';
+            }
+
+            char entry_val[MAX_ENTRY_STR_LEN] = {0};
+            if (addr_match) {
+                const char *ap = addr_match + 8;
+                if (*ap == '"') ap++;
+                size_t aidx = 0;
+                while (ap[aidx] && ap[aidx] != ' ' && ap[aidx] != '"' && ap[aidx] != '\t' &&
+                       ap[aidx] != '\r' && ap[aidx] != '\n' && aidx < sizeof(entry_val) - 1) {
+                    entry_val[aidx] = ap[aidx];
+                    aidx++;
+                }
+                entry_val[aidx] = '\0';
+            } else if (line[0] != '/' && line[0] != '#' && strncmp(line, "add", 3) != 0) {
+                /* Plain domain or IP line */
+                size_t aidx = 0;
+                while (line[aidx] && line[aidx] != ' ' && line[aidx] != '\t' && line[aidx] != ',' &&
+                       line[aidx] != '\r' && line[aidx] != '\n' && aidx < sizeof(entry_val) - 1) {
+                    entry_val[aidx] = line[aidx];
+                    aidx++;
+                }
+                entry_val[aidx] = '\0';
+            }
+
+            if (entry_val[0]) {
+                bool exists = false;
+                for (uint32_t i = 0; i < al->entry_count; i++) {
+                    if (safe_strcasecmp(al->entries[i].value, entry_val) == 0) {
+                        exists = true;
+                        break;
+                    }
+                }
+                if (!exists && al->entry_count < MAX_ENTRIES_PER_LIST) {
+                    address_list_entry_t *entry = &al->entries[al->entry_count];
+                    safe_str_copy(entry->value, entry_val, sizeof(entry->value));
+                    bool is_domain = false;
+                    for (size_t c = 0; entry->value[c]; c++) {
+                        if (isalpha((unsigned char)entry->value[c])) {
+                            is_domain = true;
+                            break;
+                        }
+                    }
+                    entry->type = is_domain ? ADDR_ENTRY_DOMAIN : ADDR_ENTRY_IP;
+                    entry->resolved_ip = 0;
+                    al->entry_count++;
+                }
+            }
+        }
+        p = eol;
+        if (*p == '\\' && (*(p+1) == 'n' || *(p+1) == 'r')) {
+            p += 2;
+        }
+    }
+}
+
+static void parse_address_entries_from_json(const char *arr_start, address_list_t *al) {
+    if (!arr_start || !al) return;
+    const char *arr_end = find_matching_bracket(arr_start);
+    if (!arr_end) return;
+
+    al->entry_count = 0;
+    const char *p = arr_start + 1;
+
+    while (p < arr_end && al->entry_count < MAX_ENTRIES_PER_LIST) {
+        while (p < arr_end && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n' || *p == ',')) p++;
+        if (p >= arr_end) break;
+
+        char entry_val[MAX_ENTRY_STR_LEN] = {0};
+
+        if (*p == '{') {
+            const char *obj_end = strchr(p, '}');
+            if (!obj_end || obj_end > arr_end) break;
+            size_t olen = obj_end - p + 1;
+            char obj_str[512];
+            if (olen >= sizeof(obj_str)) olen = sizeof(obj_str) - 1;
+            strncpy(obj_str, p, olen);
+            obj_str[olen] = '\0';
+
+            extract_json_string(obj_str, "value", entry_val, sizeof(entry_val));
+            p = obj_end + 1;
+        } else if (*p == '"') {
+            const char *q2 = strchr(p + 1, '"');
+            if (!q2 || q2 > arr_end) break;
+            size_t vlen = q2 - (p + 1);
+            if (vlen >= sizeof(entry_val)) vlen = sizeof(entry_val) - 1;
+            strncpy(entry_val, p + 1, vlen);
+            entry_val[vlen] = '\0';
+            unescape_json_inplace(entry_val);
+            p = q2 + 1;
+        } else {
+            p++;
+            continue;
+        }
+
+        if (entry_val[0]) {
+            bool exists = false;
+            for (uint32_t i = 0; i < al->entry_count; i++) {
+                if (safe_strcasecmp(al->entries[i].value, entry_val) == 0) {
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists && al->entry_count < MAX_ENTRIES_PER_LIST) {
+                address_list_entry_t *entry = &al->entries[al->entry_count];
+                safe_str_copy(entry->value, entry_val, sizeof(entry->value));
+                bool is_domain = false;
+                for (size_t c = 0; entry->value[c]; c++) {
+                    if (isalpha((unsigned char)entry->value[c])) {
+                        is_domain = true;
+                        break;
+                    }
+                }
+                entry->type = is_domain ? ADDR_ENTRY_DOMAIN : ADDR_ENTRY_IP;
+                entry->resolved_ip = 0;
+                al->entry_count++;
+            }
+        }
+    }
+}
+
+static void build_json_address_lists(const fluxwan_config_t *config, char *buf, size_t max_len) {
+    if (!config || !buf || max_len == 0) return;
+    int offset = snprintf(buf, max_len, "{\n  \"count\": %u,\n  \"address_lists\": [\n", config->address_list_count);
+    for (uint32_t a = 0; a < config->address_list_count; a++) {
+        const address_list_t *al = &config->address_lists[a];
+        offset += snprintf(buf + offset, max_len - offset,
+            "    {\n"
+            "      \"id\": %u,\n"
+            "      \"name\": \"%s\",\n"
+            "      \"description\": \"%s\",\n"
+            "      \"target_type\": \"%s\",\n"
+            "      \"target_id\": %u,\n"
+            "      \"target_name\": \"%s\",\n"
+            "      \"enabled\": %s,\n"
+            "      \"entry_count\": %u,\n"
+            "      \"entries\": [",
+            a + 1, al->name, al->description, al->target_type, al->target_id, al->target_name,
+            al->enabled ? "true" : "false", al->entry_count);
+
+        for (uint32_t e = 0; e < al->entry_count; e++) {
+            char ip_str[32] = {0};
+            if (al->entries[e].resolved_ip != 0) {
+                ip_to_str(al->entries[e].resolved_ip, ip_str, sizeof(ip_str));
+            }
+            offset += snprintf(buf + offset, max_len - offset,
+                "{\"value\":\"%s\",\"type\":\"%s\",\"resolved_ip\":\"%s\"}%s",
+                al->entries[e].value,
+                al->entries[e].type == ADDR_ENTRY_DOMAIN ? "domain" : "ip",
+                ip_str,
+                (e == al->entry_count - 1) ? "" : ",");
+        }
+        offset += snprintf(buf + offset, max_len - offset,
+            "]\n    }%s\n",
+            (a == config->address_list_count - 1) ? "" : ",");
+    }
+    snprintf(buf + offset, max_len - offset, "  ]\n}\n");
+}
+
 static void build_json_debug_report(web_server_ctx_t *ctx, char *buf, size_t max_len) {
     if (!ctx || !ctx->config) return;
     fluxwan_config_t *config = ctx->config;
@@ -1455,27 +1756,6 @@ static bool is_request_authorized(const fluxwan_config_t *config, const char *re
     if (strstr(req, bearer_header) != NULL) return true;
 
     return false;
-}
-
-static const char *extract_json_string(const char *json, const char *key, char *out_val, size_t max_len) {
-    char pattern[128];
-    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
-    const char *p = strstr(json, pattern);
-    if (!p) return NULL;
-    p += strlen(pattern);
-    while (*p && (*p == ' ' || *p == ':' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
-    if (*p == '"') {
-        p++;
-        const char *end = strchr(p, '"');
-        if (end) {
-            size_t len = end - p;
-            if (len >= max_len) len = max_len - 1;
-            strncpy(out_val, p, len);
-            out_val[len] = '\0';
-            return p;
-        }
-    }
-    return NULL;
 }
 
 static int extract_json_int(const char *json, const char *key, int default_val) {
@@ -2358,6 +2638,195 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
             }
         }
         const char *rb = "{\"status\":\"ok\",\"message\":\"Policy route saved\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd);
+    } else if (strstr(req, "GET /api/v1/address_lists") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        char *json_buf = malloc(65536);
+        if (!json_buf) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Memory allocation failed\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        build_json_address_lists(ctx->config, json_buf, 65536);
+        size_t blen = strlen(json_buf);
+        char *resp = malloc(blen + 1024);
+        if (resp) {
+            int len = snprintf(resp, blen + 1024,
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: application/json\r\n"
+                "Access-Control-Allow-Origin: *\r\n"
+                "Content-Length: %zu\r\n"
+                "Connection: close\r\n\r\n%s",
+                blen, json_buf);
+            send(client_fd, resp, (int)len, 0);
+            free(resp);
+        }
+        free(json_buf);
+        close_client_socket(client_fd);
+    } else if (strstr(req, "POST /api/v1/address_lists/delete") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        if (body) {
+            body += 4;
+            char name[64] = {0};
+            extract_json_string(body, "name", name, sizeof(name));
+            int found_idx = -1;
+            for (uint32_t i = 0; i < ctx->config->address_list_count; i++) {
+                if (name[0] && strcmp(ctx->config->address_lists[i].name, name) == 0) {
+                    found_idx = (int)i;
+                    break;
+                }
+            }
+            if (found_idx >= 0) {
+#if defined(__linux__)
+                char sname[64];
+                snprintf(sname, sizeof(sname), "fw_");
+                size_t p = 3;
+                for (size_t k = 0; ctx->config->address_lists[found_idx].name[k] && p < 28; k++) {
+                    char c = ctx->config->address_lists[found_idx].name[k];
+                    sname[p++] = (isalnum((unsigned char)c) || c == '_' || c == '-') ? (char)tolower((unsigned char)c) : '_';
+                }
+                sname[p] = '\0';
+                char dcmd[256];
+                snprintf(dcmd, sizeof(dcmd), "ipset destroy %s 2>/dev/null || true", sname);
+                safe_system(dcmd);
+#endif
+                for (uint32_t i = found_idx; i + 1 < ctx->config->address_list_count; i++) {
+                    ctx->config->address_lists[i] = ctx->config->address_lists[i + 1];
+                }
+                ctx->config->address_list_count--;
+                config_save(get_config_target_path(ctx), ctx->config);
+                config_load(get_config_target_path(ctx), ctx->config);
+                net_apply_address_lists(ctx->config);
+            }
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"Address list deleted\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd);
+    } else if (strstr(req, "POST /api/v1/address_lists") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        if (body) {
+            body += 4;
+            char name[64] = {0}, desc[128] = {0}, ttype[16] = {0}, tname[64] = {0};
+            extract_json_string(body, "name", name, sizeof(name));
+            extract_json_string(body, "description", desc, sizeof(desc));
+            extract_json_string(body, "target_type", ttype, sizeof(ttype));
+            extract_json_string(body, "target_name", tname, sizeof(tname));
+            uint32_t tid = (uint32_t)extract_json_int(body, "target_id", 0);
+            bool aenabled = extract_json_bool(body, "enabled", true);
+
+            address_list_t temp_al;
+            memset(&temp_al, 0, sizeof(temp_al));
+            safe_str_copy(temp_al.name, name, sizeof(temp_al.name));
+
+            char *script_buf = malloc(65536);
+            if (script_buf) {
+                if (extract_json_string(body, "script", script_buf, 65536) ||
+                    extract_json_string(body, "raw_text", script_buf, 65536)) {
+                    parse_address_entries_from_text(script_buf, &temp_al);
+                }
+                free(script_buf);
+            }
+
+            if (temp_al.name[0] == '\0' && name[0] != '\0') {
+                safe_str_copy(temp_al.name, name, sizeof(temp_al.name));
+            }
+            if (temp_al.name[0] == '\0') {
+                safe_str_copy(temp_al.name, "Custom_List", sizeof(temp_al.name));
+            }
+
+            int found_idx = -1;
+            for (uint32_t i = 0; i < ctx->config->address_list_count; i++) {
+                if (strcmp(ctx->config->address_lists[i].name, temp_al.name) == 0) {
+                    found_idx = (int)i;
+                    break;
+                }
+            }
+            if (found_idx < 0 && ctx->config->address_list_count < MAX_ADDRESS_LISTS) {
+                found_idx = (int)ctx->config->address_list_count;
+                ctx->config->address_list_count++;
+            }
+
+            if (found_idx >= 0) {
+                address_list_t *al = &ctx->config->address_lists[found_idx];
+                safe_str_copy(al->name, temp_al.name, sizeof(al->name));
+                safe_str_copy(al->description, desc[0] ? desc : "Custom Address List", sizeof(al->description));
+                safe_str_copy(al->target_type, ttype[0] ? ttype : "group", sizeof(al->target_type));
+                safe_str_copy(al->target_name, tname, sizeof(al->target_name));
+                al->target_id = tid;
+                al->enabled = aenabled;
+
+                if (temp_al.entry_count > 0) {
+                    al->entry_count = 0;
+                    for (uint32_t e = 0; e < temp_al.entry_count; e++) {
+                        al->entries[e] = temp_al.entries[e];
+                        al->entry_count++;
+                    }
+                } else {
+                    const char *ent_pos = strstr(body, "\"entries\"");
+                    if (ent_pos) {
+                        const char *e_start = strchr(ent_pos, '[');
+                        if (e_start) {
+                            parse_address_entries_from_json(e_start, al);
+                        }
+                    }
+                }
+
+                /* Resolve Target (WAN or Group) */
+                if (strcmp(al->target_type, "wan") == 0) {
+                    for (uint32_t w = 0; w < ctx->config->wan_count; w++) {
+                        if (al->target_id == ctx->config->wans[w].id ||
+                            (al->target_name[0] && (strcmp(al->target_name, ctx->config->wans[w].label) == 0 ||
+                                                    strcmp(al->target_name, ctx->config->wans[w].name) == 0))) {
+                            al->target_id = ctx->config->wans[w].id;
+                            safe_str_copy(al->target_name, ctx->config->wans[w].label, sizeof(al->target_name));
+                            break;
+                        }
+                    }
+                } else {
+                    /* Group */
+                    for (uint32_t g = 0; g < ctx->config->group_count; g++) {
+                        if (al->target_id == ctx->config->groups[g].id ||
+                            (al->target_name[0] && strcmp(al->target_name, ctx->config->groups[g].name) == 0)) {
+                            al->target_id = ctx->config->groups[g].id;
+                            safe_str_copy(al->target_name, ctx->config->groups[g].name, sizeof(al->target_name));
+                            break;
+                        }
+                    }
+                }
+
+                config_save(get_config_target_path(ctx), ctx->config);
+                config_load(get_config_target_path(ctx), ctx->config);
+                net_apply_address_lists(ctx->config);
+            }
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"Address list saved and applied to Kernel\"}";
         char resp[256]; int len = snprintf(resp, sizeof(resp),
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
             strlen(rb), rb);

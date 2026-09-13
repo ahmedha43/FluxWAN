@@ -862,6 +862,83 @@
                 </div>
             </div>
         </div>
+
+        <!-- ================= ADDRESS LIST MIKROTIK IMPORT MODAL ================= -->
+        <div x-show="showAddressListImportModal" x-transition class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+            <div class="glass-card max-w-2xl w-full p-6 rounded-2xl border border-indigo-500/40 space-y-5 shadow-2xl bg-gradient-to-b from-slate-900 via-slate-900 to-indigo-950/40 flex flex-col max-h-[90vh]">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <div class="flex items-center space-x-2.5">
+                        <span class="text-xl">📋</span>
+                        <div>
+                            <h3 class="text-base font-bold text-white">Import MikroTik Address-List / Raw Domains</h3>
+                            <p class="text-3xs text-slate-400">Paste commands from MikroTik (/ip firewall address-list) or raw domain/IP list</p>
+                        </div>
+                    </div>
+                    <button @click="showAddressListImportModal = false" class="text-slate-400 hover:text-white text-sm px-2 py-1">✕</button>
+                </div>
+
+                <div class="space-y-4 overflow-y-auto flex-1 pr-1">
+                    <!-- Script Textarea -->
+                    <div>
+                        <div class="flex items-center justify-between mb-1">
+                            <label class="text-2xs font-bold text-slate-300">Paste MikroTik Script or Domain/IP Lines:</label>
+                            <span class="text-3xs font-mono text-cyan-400 font-bold" x-text="importParsedCount + ' Valid Entries Detected'"></span>
+                        </div>
+                        <textarea x-model="importScriptText" @input="parseImportScript()"
+                                  rows="7"
+                                  placeholder="/ip firewall address-list&#10;add address=cdn.shabakaty.cc list=CINEMANA&#10;add address=se.shabakaty.cc list=CINEMANA&#10;...or paste plain domains/IPs"
+                                  class="w-full bg-slate-950/90 border border-slate-800 rounded-xl p-3 font-mono text-2xs text-cyan-300 focus:border-indigo-500 focus:outline-none placeholder-slate-600"></textarea>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <!-- List Name -->
+                        <div>
+                            <label class="text-3xs text-slate-400 block mb-1 font-semibold">Address List Name</label>
+                            <input type="text" x-model="importListName"
+                                   placeholder="e.g. CINEMANA"
+                                   class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono font-bold text-white focus:border-indigo-500">
+                        </div>
+
+                        <!-- Target Destination -->
+                        <div>
+                            <label class="text-3xs text-slate-400 block mb-1 font-semibold">Route Target Destination</label>
+                            <select x-model="importListTargetChoice" class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs font-bold text-indigo-300 focus:border-indigo-500">
+                                <optgroup label="WAN Groups (Multi-WAN Pools)">
+                                    <template x-for="g in (config.groups || [])" :key="'grp_' + g.id">
+                                        <option :value="'group:' + g.id + ':' + g.name" x-text="'Group: ' + g.name + ' (' + (g.wan_count || (g.wans ? g.wans.length : 0)) + ' lines)'"></option>
+                                    </template>
+                                </optgroup>
+                                <optgroup label="Single WAN Links">
+                                    <template x-for="w in (config.wans || [])" :key="'wan_' + w.id">
+                                        <option :value="'wan:' + w.id + ':' + (w.label || w.name)" x-text="'WAN ' + w.id + ': ' + (w.label || w.name)"></option>
+                                    </template>
+                                </optgroup>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Description -->
+                    <div>
+                        <label class="text-3xs text-slate-400 block mb-1 font-semibold">Description / Notes</label>
+                        <input type="text" x-model="importListDescription"
+                               placeholder="e.g. Earthlink Cinemana CDN & Streaming Services"
+                               class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-300">
+                    </div>
+                </div>
+
+                <div class="flex items-center justify-end space-x-3 pt-3 border-t border-slate-800">
+                    <button type="button" @click="showAddressListImportModal = false" class="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white border border-slate-700 bg-slate-800 transition">
+                        Cancel
+                    </button>
+                    <button type="button" @click="submitAddressListImport()"
+                            :disabled="!importListName.trim() || importParsedCount === 0"
+                            :class="(!importListName.trim() || importParsedCount === 0) ? 'opacity-40 cursor-not-allowed bg-slate-800 text-slate-500' : 'bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white shadow-lg shadow-indigo-600/30'"
+                            class="px-5 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2">
+                        <span>🚀 Import &amp; Apply Now</span>
+                    </button>
+                </div>
+            </div>
+        </div>
         
         <!-- Toast Notification -->
         <div x-show="toastMessage" x-transition class="fixed bottom-6 right-6 z-50 bg-emerald-600 text-white px-5 py-3 rounded-xl shadow-2xl flex items-center space-x-2 font-semibold text-sm">
@@ -1509,6 +1586,121 @@
                     <p class="text-slate-400 text-2xs leading-relaxed">
                         In your MikroTik Distribution Router, simply assign IP Pools for each service package (e.g. <code class="bg-slate-950 px-1 py-0.5 rounded text-blue-400">10.10.20.0/24</code> for Starlink users, <code class="bg-slate-950 px-1 py-0.5 rounded text-emerald-400">10.10.30.0/24</code> for Local PPPoE users). Point their Default Gateway to FluxWAN LAN. No complex mangle or routing marks needed on MikroTik!
                     </p>
+                </div>
+            </div>
+
+            <!-- ================= ADDRESS LISTS & DOMAIN / IP STEERING ================= -->
+            <div class="glass-card p-6 rounded-2xl border border-slate-700 space-y-6">
+                <div class="flex flex-col md:flex-row items-start md:items-center justify-between border-b border-slate-800 pb-4 gap-4">
+                    <div>
+                        <div class="flex items-center space-x-2">
+                            <span class="text-xl">📋</span>
+                            <h3 class="text-base font-bold text-white">Address Lists &amp; Domain / IP Steering</h3>
+                        </div>
+                        <p class="text-2xs text-slate-400 mt-0.5 max-w-2xl">
+                            Steer specific websites, CDNs (e.g. Cinemana, Shabakaty, Netflix), or IP subnets to a designated WAN uplink or WAN Group using high-performance Linux Kernel ipset hash tables.
+                        </p>
+                    </div>
+                    <div class="flex items-center space-x-2.5 shrink-0">
+                        <button @click="openAddressListImportModal()" class="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold px-3.5 py-1.5 rounded-xl shadow-lg shadow-indigo-600/20 transition flex items-center space-x-1.5">
+                            <span>📥</span>
+                            <span>Import MikroTik Script</span>
+                        </button>
+                        <button @click="addAddressList()" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-3.5 py-1.5 rounded-xl shadow-lg shadow-blue-500/20 transition flex items-center space-x-1.5">
+                            <span>➕</span>
+                            <span>Add List</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Address Lists Grid / Cards -->
+                <div class="space-y-4">
+                    <template x-for="(list, lIdx) in (config.address_lists || [])" :key="list.name || lIdx">
+                        <div class="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 space-y-4 transition hover:border-slate-700">
+                            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+                                <div class="flex items-center space-x-2.5">
+                                    <span class="px-2.5 py-1 rounded-lg bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 font-mono font-bold text-xs" x-text="list.name"></span>
+                                    <span class="text-3xs font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700" x-text="((list.entries ? list.entries.length : (list.entry_count || 0)) + ' entries')"></span>
+                                </div>
+                                
+                                <div class="flex items-center space-x-3 w-full sm:w-auto justify-between sm:justify-end flex-wrap gap-2">
+                                    <!-- Target Selection -->
+                                    <div class="flex items-center space-x-2">
+                                        <span class="text-3xs text-slate-400 uppercase font-semibold">Target:</span>
+                                        <select :value="(list.target_type || 'group') + ':' + (list.target_id || 0) + ':' + (list.target_name || '')"
+                                                @change="onListTargetChange(list, $event.target.value)"
+                                                class="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-2xs font-bold text-indigo-300">
+                                            <optgroup label="WAN Groups (Multi-WAN Pools)">
+                                                <template x-for="g in (config.groups || [])" :key="'g_' + g.id">
+                                                    <option :value="'group:' + g.id + ':' + g.name" x-text="'Group: ' + g.name" :selected="list.target_type === 'group' && (list.target_name === g.name || list.target_id === g.id)"></option>
+                                                </template>
+                                            </optgroup>
+                                            <optgroup label="Single WAN Links">
+                                                <template x-for="w in (config.wans || [])" :key="'w_' + w.id">
+                                                    <option :value="'wan:' + w.id + ':' + (w.label || w.name)" x-text="'WAN ' + w.id + ' (' + (w.label || w.name) + ')'" :selected="list.target_type === 'wan' && (list.target_name === (w.label || w.name) || list.target_id === w.id)"></option>
+                                                </template>
+                                            </optgroup>
+                                        </select>
+                                    </div>
+
+                                    <!-- Enabled Checkbox -->
+                                    <label class="flex items-center space-x-1.5 cursor-pointer bg-slate-950/60 px-2 py-1 rounded-lg border border-slate-800">
+                                        <input type="checkbox" x-model="list.enabled" @change="saveAddressList(list)" class="w-3.5 h-3.5 accent-emerald-500">
+                                        <span class="text-3xs font-semibold" :class="list.enabled ? 'text-emerald-400' : 'text-slate-500'" x-text="list.enabled ? 'Active' : 'Disabled'"></span>
+                                    </label>
+
+                                    <!-- Delete List Button -->
+                                    <button @click="removeAddressList(lIdx)" class="text-slate-500 hover:text-rose-400 text-xs p-1" title="Delete Address List">🗑️</button>
+                                </div>
+                            </div>
+
+                            <!-- List Description -->
+                            <div class="flex items-center space-x-2 text-2xs">
+                                <span class="text-slate-400 shrink-0">Description:</span>
+                                <input type="text" x-model="list.description" @blur="saveAddressList(list)" class="w-full bg-slate-950/60 border border-slate-800 rounded px-2 py-1 text-2xs text-slate-300 placeholder-slate-600" placeholder="e.g. Earthlink Cinemana Video CDN">
+                            </div>
+
+                            <!-- Entries Chips -->
+                            <div class="space-y-2">
+                                <div class="flex items-center justify-between text-3xs text-slate-400">
+                                    <span>Configured Domains / Subnets (Kernel IPSet: <code class="text-cyan-400" x-text="'fw_' + (list.name||'').toLowerCase().replace(/[^a-z0-9_-]/g, '_').slice(0,25)"></code>)</span>
+                                    <span class="text-slate-500">Click ✕ to remove entry</span>
+                                </div>
+
+                                <div class="flex flex-wrap gap-1.5 p-2.5 bg-slate-950/80 rounded-xl border border-slate-800/80 max-h-48 overflow-y-auto">
+                                    <template x-for="(entry, eIdx) in (list.entries || [])" :key="eIdx">
+                                        <span class="inline-flex items-center space-x-1.5 px-2 py-1 rounded-lg bg-slate-900 border border-slate-700/80 font-mono text-2xs text-slate-300 shadow-sm">
+                                            <span :class="(entry.type === 'domain' || (typeof entry === 'string' && /[a-z]/i.test(entry))) ? 'text-cyan-300' : 'text-emerald-300'" x-text="typeof entry === 'string' ? entry : entry.value"></span>
+                                            <span x-show="entry.resolved_ip" class="text-3xs text-slate-500" x-text="'(' + entry.resolved_ip + ')'"></span>
+                                            <button @click="removeEntryFromList(lIdx, eIdx)" class="text-slate-500 hover:text-rose-400 text-3xs font-bold leading-none pl-0.5">✕</button>
+                                        </span>
+                                    </template>
+
+                                    <div x-show="!list.entries || list.entries.length === 0" class="text-3xs text-slate-500 italic p-1">
+                                        No domains or IPs in this list yet. Add entries below or import a MikroTik script.
+                                    </div>
+                                </div>
+
+                                <!-- Add Entry Inline Form -->
+                                <div class="flex items-center space-x-2 pt-1">
+                                    <input type="text"
+                                           :id="'new_entry_input_' + lIdx"
+                                           placeholder="Add domain or CIDR (e.g. cdn.shabakaty.cc or 10.0.0.0/8)..."
+                                           @keydown.enter.prevent="addEntryToList(lIdx)"
+                                           class="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-2xs font-mono text-slate-200 focus:border-indigo-500 focus:outline-none placeholder-slate-600">
+                                    <button @click="addEntryToList(lIdx)" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-2xs font-semibold px-3 py-1 rounded-lg border border-slate-700 transition">
+                                        ➕ Add
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+
+                    <div x-show="!config.address_lists || config.address_lists.length === 0" class="text-center py-8 bg-slate-900/30 rounded-2xl border border-dashed border-slate-800 space-y-2">
+                        <span class="text-2xl block">🌐</span>
+                        <p class="text-xs text-slate-400">No Address Lists or domain routing policies configured yet.</p>
+                        <p class="text-3xs text-slate-500">Click <span class="text-indigo-400 font-bold">Import MikroTik Script</span> to paste your address list rules or click <span class="text-blue-400 font-bold">Add List</span>.</p>
+                    </div>
                 </div>
             </div>
         </section>
@@ -2723,10 +2915,17 @@
                         dns: { fast_dns_enabled: true, adblock_enabled: false, primary_dns: '1.1.1.1', secondary_dns: '8.8.8.8' }
                     },
                     groups: [],
+                    address_lists: [],
                     wans: [],
                     app_steering: { gaming_steering_enabled: true, voip_steering_enabled: true, bulk_balancing_enabled: true, primary_gaming_wan_id: 1, primary_voip_wan_id: 1 },
                     telegram: { enabled: false, bot_token: '', chat_id: '', notify_on_failover: true, notify_on_recovery: true }
                 },
+                showAddressListImportModal: false,
+                importScriptText: '',
+                importListName: '',
+                importListTargetChoice: '',
+                importListDescription: '',
+                importParsedCount: 0,
                 leases: [],
                 systemLogs: [],
                 prevStats: {},
@@ -3096,6 +3295,191 @@
                     }
                 },
 
+                /* Address Lists & Steering Methods */
+                openAddressListImportModal() {
+                    this.importScriptText = '';
+                    this.importListName = '';
+                    this.importListDescription = '';
+                    this.importParsedCount = 0;
+                    if (this.config.groups && this.config.groups.length > 0) {
+                        this.importListTargetChoice = 'group:' + this.config.groups[0].id + ':' + this.config.groups[0].name;
+                    } else if (this.config.wans && this.config.wans.length > 0) {
+                        this.importListTargetChoice = 'wan:' + this.config.wans[0].id + ':' + (this.config.wans[0].label || this.config.wans[0].name);
+                    } else {
+                        this.importListTargetChoice = 'group:1:Default';
+                    }
+                    this.showAddressListImportModal = true;
+                },
+
+                parseImportScript() {
+                    if (!this.importScriptText) {
+                        this.importParsedCount = 0;
+                        return;
+                    }
+                    const lines = this.importScriptText.split(/[\r\n]+/);
+                    let count = 0;
+                    let detectedList = '';
+                    lines.forEach(line => {
+                        const trimmed = line.trim();
+                        if (!trimmed || trimmed.startsWith('/') || trimmed.startsWith('#')) return;
+                        const addrMatch = trimmed.match(/address=([^\s"]+)/) || trimmed.match(/address="([^"]+)"/);
+                        const listMatch = trimmed.match(/list=([^\s"]+)/) || trimmed.match(/list="([^"]+)"/);
+                        if (listMatch && !detectedList) {
+                            detectedList = listMatch[1];
+                        }
+                        if (addrMatch) {
+                            count++;
+                        } else if (!trimmed.startsWith('add') && !trimmed.startsWith('/')) {
+                            const parts = trimmed.split(/[\s,]+/);
+                            if (parts[0] && parts[0].length > 1) count++;
+                        }
+                    });
+                    this.importParsedCount = count;
+                    if (detectedList && !this.importListName) {
+                        this.importListName = detectedList;
+                    }
+                },
+
+                submitAddressListImport() {
+                    if (!this.importListName.trim() || this.importParsedCount === 0) return;
+                    let targetType = 'group';
+                    let targetId = 1;
+                    let targetName = '';
+                    if (this.importListTargetChoice) {
+                        const parts = this.importListTargetChoice.split(':');
+                        targetType = parts[0] || 'group';
+                        targetId = parseInt(parts[1]) || 1;
+                        targetName = parts[2] || '';
+                    }
+
+                    fetch('/api/v1/address_lists', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Auth-Token': this.authToken
+                        },
+                        body: JSON.stringify({
+                            name: this.importListName.trim(),
+                            description: this.importListDescription.trim() || ('Imported ' + this.importListName),
+                            target_type: targetType,
+                            target_id: targetId,
+                            target_name: targetName,
+                            enabled: true,
+                            script: this.importScriptText
+                        })
+                    })
+                    .then(r => r.json())
+                    .then(res => {
+                        this.showAddressListImportModal = false;
+                        this.toastMessage = 'Address list "' + this.importListName + '" imported & applied to Linux Kernel!';
+                        setTimeout(() => this.toastMessage = '', 4000);
+                        this.fetchStatus();
+                    })
+                    .catch(err => {
+                        this.toastMessage = 'Import error: ' + err.message;
+                        setTimeout(() => this.toastMessage = '', 4000);
+                    });
+                },
+
+                addAddressList() {
+                    this.isEditing = true;
+                    if (!this.config.address_lists) this.config.address_lists = [];
+                    const nextNum = this.config.address_lists.length + 1;
+                    let defaultTargetName = this.config.groups && this.config.groups.length > 0 ? this.config.groups[0].name : '';
+                    let defaultTargetId = this.config.groups && this.config.groups.length > 0 ? this.config.groups[0].id : 1;
+                    const newList = {
+                        name: 'LIST_' + nextNum,
+                        description: 'Custom Address List ' + nextNum,
+                        target_type: 'group',
+                        target_id: defaultTargetId,
+                        target_name: defaultTargetName,
+                        enabled: true,
+                        entries: []
+                    };
+                    this.config.address_lists.push(newList);
+                    this.saveAddressList(newList);
+                },
+
+                removeAddressList(idx) {
+                    if (!this.config.address_lists || !this.config.address_lists[idx]) return;
+                    const list = this.config.address_lists[idx];
+                    if (!confirm('Are you sure you want to delete Address List "' + list.name + '"?')) return;
+                    fetch('/api/v1/address_lists/delete', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Auth-Token': this.authToken
+                        },
+                        body: JSON.stringify({ name: list.name })
+                    })
+                    .then(() => {
+                        this.config.address_lists.splice(idx, 1);
+                        this.toastMessage = 'Address list "' + list.name + '" deleted.';
+                        setTimeout(() => this.toastMessage = '', 3000);
+                        this.fetchStatus();
+                    })
+                    .catch(err => {
+                        this.config.address_lists.splice(idx, 1);
+                        this.fetchStatus();
+                    });
+                },
+
+                onListTargetChange(list, choiceVal) {
+                    if (!list || !choiceVal) return;
+                    const parts = choiceVal.split(':');
+                    list.target_type = parts[0] || 'group';
+                    list.target_id = parseInt(parts[1]) || 0;
+                    list.target_name = parts[2] || '';
+                    this.saveAddressList(list);
+                },
+
+                addEntryToList(listIdx) {
+                    if (!this.config.address_lists || !this.config.address_lists[listIdx]) return;
+                    const list = this.config.address_lists[listIdx];
+                    const inputEl = document.getElementById('new_entry_input_' + listIdx);
+                    if (!inputEl) return;
+                    const val = inputEl.value.trim();
+                    if (!val) return;
+                    if (!list.entries) list.entries = [];
+                    const exists = list.entries.some(e => (typeof e === 'string' ? e : e.value).toLowerCase() === val.toLowerCase());
+                    if (!exists) {
+                        const isDomain = /[a-zA-Z]/.test(val);
+                        list.entries.push({ value: val, type: isDomain ? 'domain' : 'ip' });
+                        inputEl.value = '';
+                        this.saveAddressList(list);
+                    }
+                },
+
+                removeEntryFromList(listIdx, entryIdx) {
+                    if (!this.config.address_lists || !this.config.address_lists[listIdx]) return;
+                    const list = this.config.address_lists[listIdx];
+                    if (list.entries && list.entries[entryIdx]) {
+                        list.entries.splice(entryIdx, 1);
+                        this.saveAddressList(list);
+                    }
+                },
+
+                saveAddressList(list) {
+                    if (!list || !list.name) return;
+                    fetch('/api/v1/address_lists', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Auth-Token': this.authToken
+                        },
+                        body: JSON.stringify(list)
+                    })
+                    .then(r => r.json())
+                    .then(() => {
+                        this.toastMessage = 'Address list "' + list.name + '" updated & kernel ipset reloaded.';
+                        setTimeout(() => this.toastMessage = '', 3000);
+                        this.fetchStatus();
+                    })
+                    .catch(err => {
+                        console.error('Failed to save list:', err);
+                    });
+                },
+
                 getWanByPortName(portName) {
                     return this.config.wans.find(w => w.name === portName);
                 },
@@ -3354,6 +3738,9 @@
                         if (d.policy_routes && (isFirst || !this.isEditing)) {
                             if (!this.config.lan) this.config.lan = {};
                             this.config.lan.policy_routes = d.policy_routes;
+                        }
+                        if (d.address_lists && (isFirst || !this.isEditing)) {
+                            this.config.address_lists = d.address_lists;
                         }
                         if (d.wans && (isFirst || (!this.isEditing && d.wans.length > 0) || this.config.wans.length === 0)) {
                             this.config.wans = d.wans.map((w, idx) => ({

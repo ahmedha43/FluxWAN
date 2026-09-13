@@ -237,6 +237,32 @@ typedef struct {
     bool enabled;
 } wan_group_t;
 
+#define MAX_ADDRESS_LISTS 16
+#define MAX_ENTRIES_PER_LIST 256
+#define MAX_ENTRY_STR_LEN 128
+
+typedef enum {
+    ADDR_ENTRY_IP = 0,
+    ADDR_ENTRY_DOMAIN = 1
+} addr_entry_type_t;
+
+typedef struct {
+    char value[MAX_ENTRY_STR_LEN];
+    addr_entry_type_t type;
+    uint32_t resolved_ip;
+} address_list_entry_t;
+
+typedef struct {
+    char name[64];
+    char description[128];
+    char target_type[16];   /* "wan" or "group" */
+    uint32_t target_id;     /* WAN ID or Group ID */
+    char target_name[64];   /* Name of WAN or Group */
+    bool enabled;
+    uint32_t entry_count;
+    address_list_entry_t entries[MAX_ENTRIES_PER_LIST];
+} address_list_t;
+
 #define MAX_STATIC_LEASES 64
 #define MAX_RATE_LIMITS 32
 
@@ -379,6 +405,8 @@ typedef struct {
     uint32_t wan_count;
     wan_group_t groups[MAX_WAN_GROUPS];
     uint32_t group_count;
+    address_list_t address_lists[MAX_ADDRESS_LISTS];
+    uint32_t address_list_count;
     prober_config_t prober;
     sticky_config_t sticky;
     app_steering_t app_steering;

@@ -12,6 +12,11 @@
 #include <string.h>
 #include <assert.h>
 
+void wan_manager_add_log(const char *level, const char *fmt, ...) {
+    (void)level;
+    (void)fmt;
+}
+
 static int g_connected_count = 0;
 static int g_disconnected_count = 0;
 

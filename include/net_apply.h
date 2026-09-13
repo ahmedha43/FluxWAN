@@ -54,4 +54,9 @@ int net_apply_dns_features(const fluxwan_config_t *config);
  */
 int net_apply_dpi(const fluxwan_config_t *config);
 
+/**
+ * Apply Custom Address Lists & Domain/IP Steering Rules via IPSet and Mangle
+ */
+int net_apply_address_lists(const fluxwan_config_t *config);
+
 #endif /* NET_APPLY_H */

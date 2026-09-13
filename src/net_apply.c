@@ -1,6 +1,10 @@
 #include "net_apply.h"
 #include <fcntl.h>
 #include <net/if.h>
+#include <ctype.h>
+#if !defined(_WIN32) && !defined(_WIN64)
+#include <netdb.h>
+#endif
 
 
 int net_apply_set_ip_forward(bool enable) {
@@ -202,6 +206,11 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
     safe_system("iptables -t mangle -A PREROUTING -d 192.168.0.0/16 -j RETURN 2>/dev/null || true");
     safe_system("iptables -t mangle -A PREROUTING -d 172.16.0.0/12 -j RETURN 2>/dev/null || true");
 
+    /* Address Lists Steering (evaluated before default load balancing) */
+    safe_system("iptables -t mangle -N FLUXWAN_ADDRLIST 2>/dev/null || true");
+    safe_system("iptables -t mangle -A PREROUTING -j FLUXWAN_ADDRLIST 2>/dev/null || true");
+    safe_system("iptables -t mangle -A OUTPUT -j FLUXWAN_ADDRLIST 2>/dev/null || true");
+
     /* Calculate total active dynamic weight (strictly exclude disabled WANs) */
     uint32_t total_active_weight = 0;
     for (uint32_t i = 0; i < config->wan_count; i++) {
@@ -239,6 +248,7 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
     /* 5. Apply QoS, Rate Limits, Application Steering, DPI, and DNS Redirection */
     net_apply_qos(config);
     net_apply_rate_limits(config);
+    net_apply_address_lists(config);
     net_apply_app_steering(config);
     net_apply_dpi(config);
     net_apply_dns_features(config);
@@ -589,6 +599,209 @@ int net_apply_dpi(const fluxwan_config_t *config) {
 
     LOG_INFO("[DPI Engine] L7 Deep Packet Inspection & App Classification rules ACTIVE (VoIP:%d, Gaming:%d, P2P_Throttle:%d)",
              config->dpi.voip_priority_enabled, config->dpi.gaming_priority_enabled, config->dpi.p2p_throttle_enabled);
+#endif
+    return 0;
+}
+
+static void sanitize_set_name(const char *in_name, char *out_name, size_t out_len) {
+    if (!out_name || out_len < 4) return;
+    snprintf(out_name, out_len, "fw_");
+    size_t p = 3;
+    for (size_t i = 0; in_name && in_name[i] && p < out_len - 1 && p < 28; i++) {
+        char c = in_name[i];
+        if (isalnum((unsigned char)c) || c == '_' || c == '-') {
+            out_name[p++] = (char)tolower((unsigned char)c);
+        } else {
+            out_name[p++] = '_';
+        }
+    }
+    out_name[p] = '\0';
+}
+
+int net_apply_address_lists(const fluxwan_config_t *config) {
+    if (!config) return -1;
+#if defined(__linux__)
+
+    /* Initialize FLUXWAN_ADDRLIST chain in mangle table */
+    safe_system("iptables -t mangle -N FLUXWAN_ADDRLIST 2>/dev/null || true");
+    safe_system("iptables -t mangle -F FLUXWAN_ADDRLIST 2>/dev/null || true");
+    safe_system("iptables -t mangle -C PREROUTING -j FLUXWAN_ADDRLIST 2>/dev/null || iptables -t mangle -I PREROUTING 6 -j FLUXWAN_ADDRLIST 2>/dev/null || true");
+    safe_system("iptables -t mangle -C OUTPUT -j FLUXWAN_ADDRLIST 2>/dev/null || iptables -t mangle -A OUTPUT -j FLUXWAN_ADDRLIST 2>/dev/null || true");
+
+    /* Skip re-marking if packet already has a restored conntrack routing mark */
+    safe_system("iptables -t mangle -A FLUXWAN_ADDRLIST -m mark ! --mark 0 -j RETURN 2>/dev/null || true");
+
+    for (uint32_t a = 0; a < config->address_list_count; a++) {
+        const address_list_t *al = &config->address_lists[a];
+        if (!al->enabled || al->entry_count == 0) continue;
+
+        char set_name[64], tmp_set[64];
+        sanitize_set_name(al->name, set_name, sizeof(set_name));
+        snprintf(tmp_set, sizeof(tmp_set), "t_%s", set_name);
+        if (strlen(tmp_set) > 31) tmp_set[31] = '\0';
+
+        /* 1. Create temporary ipset */
+        char cmd[512];
+        snprintf(cmd, sizeof(cmd), "ipset create %s hash:net maxelem 65536 -exist 2>/dev/null || true", set_name);
+        safe_system(cmd);
+        snprintf(cmd, sizeof(cmd), "ipset create %s hash:net maxelem 65536 -exist 2>/dev/null || true", tmp_set);
+        safe_system(cmd);
+        snprintf(cmd, sizeof(cmd), "ipset flush %s 2>/dev/null || true", tmp_set);
+        safe_system(cmd);
+
+        /* 2. Populate temporary ipset with IPs and resolved domain addresses */
+        uint32_t added_count = 0;
+        for (uint32_t e = 0; e < al->entry_count; e++) {
+            const address_list_entry_t *entry = &al->entries[e];
+            if (!entry->value[0]) continue;
+
+            if (entry->type == ADDR_ENTRY_IP) {
+                snprintf(cmd, sizeof(cmd), "ipset add %s %s -exist 2>/dev/null || true", tmp_set, entry->value);
+                safe_system(cmd);
+                added_count++;
+            } else {
+                /* Domain resolution via getaddrinfo */
+                struct addrinfo hints, *res = NULL, *p = NULL;
+                memset(&hints, 0, sizeof(hints));
+                hints.ai_family = AF_INET; /* IPv4 */
+                hints.ai_socktype = SOCK_STREAM;
+                if (getaddrinfo(entry->value, NULL, &hints, &res) == 0 && res) {
+                    for (p = res; p != NULL; p = p->ai_next) {
+                        struct sockaddr_in *ipv4 = (struct sockaddr_in *)p->ai_addr;
+                        char ip_str[INET_ADDRSTRLEN];
+                        inet_ntop(AF_INET, &(ipv4->sin_addr), ip_str, INET_ADDRSTRLEN);
+                        snprintf(cmd, sizeof(cmd), "ipset add %s %s -exist 2>/dev/null || true", tmp_set, ip_str);
+                        safe_system(cmd);
+                        added_count++;
+                    }
+                    freeaddrinfo(res);
+                }
+            }
+        }
+
+        /* 3. Atomic swap and cleanup */
+        snprintf(cmd, sizeof(cmd), "ipset swap %s %s 2>/dev/null || true", set_name, tmp_set);
+        safe_system(cmd);
+        snprintf(cmd, sizeof(cmd), "ipset destroy %s 2>/dev/null || true", tmp_set);
+        safe_system(cmd);
+
+        /* 4. Determine steering mark or group load balancing */
+        bool is_wan = (strcmp(al->target_type, "wan") == 0);
+        if (is_wan) {
+            /* Single WAN target */
+            int target_wan_idx = -1;
+            for (uint32_t w = 0; w < config->wan_count; w++) {
+                if (config->wans[w].id == al->target_id ||
+                    (al->target_name[0] && (strcmp(config->wans[w].label, al->target_name) == 0 ||
+                                            strcmp(config->wans[w].name, al->target_name) == 0))) {
+                    target_wan_idx = (int)w;
+                    break;
+                }
+            }
+            if (target_wan_idx >= 0) {
+                uint32_t fwmark = 0x100 + target_wan_idx + 1;
+                snprintf(cmd, sizeof(cmd),
+                         "iptables -t mangle -A FLUXWAN_ADDRLIST -m set --match-set %s dst -j MARK --set-mark 0x%x 2>/dev/null || true",
+                         set_name, fwmark);
+                safe_system(cmd);
+                snprintf(cmd, sizeof(cmd),
+                         "iptables -t mangle -A FLUXWAN_ADDRLIST -m set --match-set %s dst -j CONNMARK --save-mark --mask 0x0000ffff 2>/dev/null || true",
+                         set_name);
+                safe_system(cmd);
+                LOG_INFO("[Address List] List '%s' (%u entries) -> Steered to WAN %u (%s, mark 0x%x)",
+                         al->name, added_count, config->wans[target_wan_idx].id, config->wans[target_wan_idx].label, fwmark);
+            }
+        } else {
+            /* WAN Group target */
+            int target_grp_idx = -1;
+            for (uint32_t g = 0; g < config->group_count; g++) {
+                if (config->groups[g].id == al->target_id ||
+                    (al->target_name[0] && strcmp(config->groups[g].name, al->target_name) == 0)) {
+                    target_grp_idx = (int)g;
+                    break;
+                }
+            }
+
+            if (target_grp_idx >= 0) {
+                const wan_group_t *grp = &config->groups[target_grp_idx];
+                uint32_t total_group_weight = 0;
+                uint32_t active_member_indices[MAX_GROUP_MEMBERS];
+                uint32_t active_member_count = 0;
+
+                for (uint32_t m = 0; m < grp->wan_count; m++) {
+                    uint32_t w_idx = grp->wan_member_indices[m];
+                    if (w_idx < config->wan_count) {
+                        const wan_config_t *w = &config->wans[w_idx];
+                        if (w->enabled && w->state != WAN_STATE_DOWN && w->dynamic_weight > 0) {
+                            active_member_indices[active_member_count++] = w_idx;
+                            total_group_weight += w->dynamic_weight;
+                        }
+                    }
+                }
+
+                if (active_member_count == 1) {
+                    /* Only 1 WAN active in group: direct mark */
+                    uint32_t w_idx = active_member_indices[0];
+                    uint32_t fwmark = 0x100 + w_idx + 1;
+                    snprintf(cmd, sizeof(cmd),
+                             "iptables -t mangle -A FLUXWAN_ADDRLIST -m set --match-set %s dst -j MARK --set-mark 0x%x 2>/dev/null || true",
+                             set_name, fwmark);
+                    safe_system(cmd);
+                    snprintf(cmd, sizeof(cmd),
+                             "iptables -t mangle -A FLUXWAN_ADDRLIST -m set --match-set %s dst -j CONNMARK --save-mark --mask 0x0000ffff 2>/dev/null || true",
+                             set_name);
+                    safe_system(cmd);
+                    LOG_INFO("[Address List] List '%s' (%u entries) -> Steered to Group '%s' (WAN %s, mark 0x%x)",
+                             al->name, added_count, grp->name, config->wans[w_idx].label, fwmark);
+                } else if (active_member_count > 1 && total_group_weight > 0) {
+                    /* Multiple WANs active in group: subchain with weighted distribution */
+                    char subchain[64];
+                    snprintf(subchain, sizeof(subchain), "FW_L_%s", set_name);
+                    if (strlen(subchain) > 28) subchain[28] = '\0';
+
+                    snprintf(cmd, sizeof(cmd), "iptables -t mangle -F %s 2>/dev/null || true", subchain);
+                    safe_system(cmd);
+                    snprintf(cmd, sizeof(cmd), "iptables -t mangle -N %s 2>/dev/null || true", subchain);
+                    safe_system(cmd);
+
+                    snprintf(cmd, sizeof(cmd),
+                             "iptables -t mangle -A FLUXWAN_ADDRLIST -m set --match-set %s dst -j %s 2>/dev/null || true",
+                             set_name, subchain);
+                    safe_system(cmd);
+
+                    uint32_t rem_weight = total_group_weight;
+                    for (uint32_t mi = 0; mi < active_member_count; mi++) {
+                        uint32_t w_idx = active_member_indices[mi];
+                        const wan_config_t *w = &config->wans[w_idx];
+                        uint32_t fwmark = 0x100 + w_idx + 1;
+
+                        if (mi == active_member_count - 1 || rem_weight == w->dynamic_weight) {
+                            snprintf(cmd, sizeof(cmd),
+                                     "iptables -t mangle -A %s -m mark --mark 0 -j MARK --set-mark 0x%x 2>/dev/null || true",
+                                     subchain, fwmark);
+                        } else {
+                            double prob = (double)w->dynamic_weight / (double)rem_weight;
+                            snprintf(cmd, sizeof(cmd),
+                                     "iptables -t mangle -A %s -m mark --mark 0 -m statistic --mode random --probability %.4f -j MARK --set-mark 0x%x 2>/dev/null || true",
+                                     subchain, prob, fwmark);
+                            rem_weight -= w->dynamic_weight;
+                        }
+                        safe_system(cmd);
+                    }
+
+                    snprintf(cmd, sizeof(cmd),
+                             "iptables -t mangle -A %s -j CONNMARK --save-mark --mask 0x0000ffff 2>/dev/null || true",
+                             subchain);
+                    safe_system(cmd);
+
+                    LOG_INFO("[Address List] List '%s' (%u entries) -> Balanced across Group '%s' (%u active WANs)",
+                             al->name, added_count, grp->name, active_member_count);
+                }
+            }
+        }
+    }
+#else
+    LOG_INFO("[Simulation] Address Lists steering rules applied (%u lists configured)", config->address_list_count);
 #endif
     return 0;
 }

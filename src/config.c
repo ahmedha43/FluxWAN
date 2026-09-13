@@ -49,6 +49,26 @@ static inline void safe_str_copy(char *dst, const char *src, size_t max_len) {
     dst[slen] = '\0';
 }
 
+static void unescape_json_inplace(char *str) {
+    if (!str) return;
+    char *src = str;
+    char *dst = str;
+    while (*src) {
+        if (*src == '\\') {
+            src++;
+            if (*src == 'n') { *dst++ = '\n'; src++; }
+            else if (*src == 'r') { *dst++ = '\r'; src++; }
+            else if (*src == 't') { *dst++ = '\t'; src++; }
+            else if (*src == '"') { *dst++ = '"'; src++; }
+            else if (*src == '\\') { *dst++ = '\\'; src++; }
+            else if (*src) { *dst++ = *src++; }
+        } else {
+            *dst++ = *src++;
+        }
+    }
+    *dst = '\0';
+}
+
 static const char *extract_json_string(const char *json, const char *key, char *out_val, size_t max_len) {
     char pattern[128];
     snprintf(pattern, sizeof(pattern), "\"%s\"", key);
@@ -58,12 +78,19 @@ static const char *extract_json_string(const char *json, const char *key, char *
     while (*p && (*p == ' ' || *p == ':' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
     if (*p == '"') {
         p++;
-        const char *end = strchr(p, '"');
+        const char *end = NULL;
+        bool esc = false;
+        for (const char *s = p; *s; s++) {
+            if (esc) { esc = false; continue; }
+            if (*s == '\\') { esc = true; continue; }
+            if (*s == '"') { end = s; break; }
+        }
         if (end) {
             size_t len = end - p;
             if (len >= max_len) len = max_len - 1;
             strncpy(out_val, p, len);
             out_val[len] = '\0';
+            unescape_json_inplace(out_val);
             return p;
         }
     }
@@ -717,9 +744,122 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
         }
     }
 
+    /* Parse Address Lists array */
+    const char *al_pos = strstr(json, "\"address_lists\"");
+    if (al_pos) {
+        const char *array_start = strchr(al_pos, '[');
+        const char *array_end = find_matching_bracket(array_start);
+        if (array_start && array_end) {
+            const char *p = array_start;
+            uint32_t al_idx = 0;
+            while (p < array_end && al_idx < MAX_ADDRESS_LISTS) {
+                const char *obj_start = strchr(p, '{');
+                if (!obj_start || obj_start > array_end) break;
+                const char *obj_end = find_matching_brace(obj_start);
+                if (!obj_end || obj_end > array_end) break;
+
+                size_t obj_len = obj_end - obj_start + 1;
+                char *obj_str = malloc(obj_len + 1);
+                if (obj_str) {
+                    strncpy(obj_str, obj_start, obj_len);
+                    obj_str[obj_len] = '\0';
+
+                    address_list_t *al = &out_config->address_lists[al_idx];
+                    al->enabled = extract_json_bool(obj_str, "enabled", true);
+                    al->target_id = (uint32_t)extract_json_int(obj_str, "target_id", 0);
+
+                    char sval[128];
+                    if (extract_json_string(obj_str, "name", sval, sizeof(sval))) {
+                        safe_str_copy(al->name, sval, sizeof(al->name));
+                    }
+                    if (extract_json_string(obj_str, "description", sval, sizeof(sval))) {
+                        safe_str_copy(al->description, sval, sizeof(al->description));
+                    }
+                    if (extract_json_string(obj_str, "target_type", sval, sizeof(sval))) {
+                        safe_str_copy(al->target_type, sval, sizeof(al->target_type));
+                    } else {
+                        safe_str_copy(al->target_type, "group", sizeof(al->target_type));
+                    }
+                    if (extract_json_string(obj_str, "target_name", sval, sizeof(sval))) {
+                        safe_str_copy(al->target_name, sval, sizeof(al->target_name));
+                    }
+
+                    /* Parse entries array */
+                    const char *ent_pos = strstr(obj_str, "\"entries\"");
+                    if (ent_pos) {
+                        const char *e_start = strchr(ent_pos, '[');
+                        const char *e_end = find_matching_bracket(e_start);
+                        if (e_start && e_end) {
+                            const char *ep = e_start;
+                            uint32_t e_idx = 0;
+                            while (ep < e_end && e_idx < MAX_ENTRIES_PER_LIST) {
+                                const char *q1 = strchr(ep, '"');
+                                if (!q1 || q1 >= e_end) break;
+                                const char *q2 = strchr(q1 + 1, '"');
+                                if (!q2 || q2 > e_end) break;
+
+                                size_t vlen = q2 - (q1 + 1);
+                                if (vlen > 0) {
+                                    if (vlen >= MAX_ENTRY_STR_LEN) vlen = MAX_ENTRY_STR_LEN - 1;
+                                    address_list_entry_t *entry = &al->entries[e_idx];
+                                    strncpy(entry->value, q1 + 1, vlen);
+                                    entry->value[vlen] = '\0';
+
+                                    /* Determine if value is IP/CIDR or Domain */
+                                    bool is_domain = false;
+                                    for (size_t c = 0; c < vlen; c++) {
+                                        if (isalpha((unsigned char)entry->value[c])) {
+                                            is_domain = true;
+                                            break;
+                                        }
+                                    }
+                                    entry->type = is_domain ? ADDR_ENTRY_DOMAIN : ADDR_ENTRY_IP;
+                                    e_idx++;
+                                }
+                                ep = q2 + 1;
+                            }
+                            al->entry_count = e_idx;
+                        }
+                    }
+
+                    free(obj_str);
+                    al_idx++;
+                }
+                p = obj_end + 1;
+            }
+            out_config->address_list_count = al_idx;
+        }
+    }
+
+    /* Resolve Address List Targets */
+    for (uint32_t a = 0; a < out_config->address_list_count; a++) {
+        address_list_t *al = &out_config->address_lists[a];
+        if (strcmp(al->target_type, "wan") == 0) {
+            for (uint32_t w = 0; w < out_config->wan_count; w++) {
+                if (al->target_id == out_config->wans[w].id ||
+                    (al->target_name[0] && (strcmp(al->target_name, out_config->wans[w].label) == 0 ||
+                                            strcmp(al->target_name, out_config->wans[w].name) == 0))) {
+                    al->target_id = out_config->wans[w].id;
+                    safe_str_copy(al->target_name, out_config->wans[w].label, sizeof(al->target_name));
+                    break;
+                }
+            }
+        } else {
+            /* Group */
+            for (uint32_t g = 0; g < out_config->group_count; g++) {
+                if (al->target_id == out_config->groups[g].id ||
+                    (al->target_name[0] && strcmp(al->target_name, out_config->groups[g].name) == 0)) {
+                    al->target_id = out_config->groups[g].id;
+                    safe_str_copy(al->target_name, out_config->groups[g].name, sizeof(al->target_name));
+                    break;
+                }
+            }
+        }
+    }
+
     free(json);
-    LOG_INFO("Configuration loaded successfully from %s (%u WANs, %u Groups, %u Policy Routes)",
-             config_path, out_config->wan_count, out_config->group_count, out_config->lan.policy_route_count);
+    LOG_INFO("Configuration loaded successfully from %s (%u WANs, %u Groups, %u Policy Routes, %u Address Lists)",
+             config_path, out_config->wan_count, out_config->group_count, out_config->lan.policy_route_count, out_config->address_list_count);
     return 0;
 }
 
@@ -938,7 +1078,30 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
     fprintf(f, "    \"voip_priority_enabled\": %s,\n", config->dpi.voip_priority_enabled ? "true" : "false");
     fprintf(f, "    \"gaming_priority_enabled\": %s,\n", config->dpi.gaming_priority_enabled ? "true" : "false");
     fprintf(f, "    \"streaming_balance_enabled\": %s\n", config->dpi.streaming_balance_enabled ? "true" : "false");
-    fprintf(f, "  }\n");
+    fprintf(f, "  }");
+
+    if (config->address_list_count > 0) {
+        fprintf(f, ",\n  \"address_lists\": [\n");
+        for (uint32_t a = 0; a < config->address_list_count; a++) {
+            const address_list_t *al = &config->address_lists[a];
+            fprintf(f, "    {\n");
+            fprintf(f, "      \"name\": \"%s\",\n", al->name);
+            fprintf(f, "      \"description\": \"%s\",\n", al->description);
+            fprintf(f, "      \"target_type\": \"%s\",\n", al->target_type[0] ? al->target_type : "group");
+            fprintf(f, "      \"target_id\": %u,\n", al->target_id);
+            fprintf(f, "      \"target_name\": \"%s\",\n", al->target_name);
+            fprintf(f, "      \"enabled\": %s,\n", al->enabled ? "true" : "false");
+            fprintf(f, "      \"entries\": [\n");
+            for (uint32_t e = 0; e < al->entry_count; e++) {
+                fprintf(f, "        \"%s\"%s\n", al->entries[e].value, (e == al->entry_count - 1) ? "" : ",");
+            }
+            fprintf(f, "      ]\n");
+            fprintf(f, "    }%s\n", (a == config->address_list_count - 1) ? "" : ",");
+        }
+        fprintf(f, "  ]\n");
+    } else {
+        fprintf(f, "\n");
+    }
     fprintf(f, "}\n");
 
     fclose(f);
@@ -1335,6 +1498,9 @@ int config_reset_to_defaults(fluxwan_config_t *out_config) {
     out_config->dpi.voip_priority_enabled = true;
     out_config->dpi.gaming_priority_enabled = true;
     out_config->dpi.streaming_balance_enabled = true;
+
+    /* Address Lists Default */
+    out_config->address_list_count = 0;
 
     return 0;
 }
