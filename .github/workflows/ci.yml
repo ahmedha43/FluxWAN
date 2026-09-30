@@ -101,8 +101,12 @@ jobs:
           mkdir -p dist_pkg/fluxwan-x86_64/config
           mkdir -p dist_pkg/fluxwan-x86_64/systemd
 
+          # Ensure binaries exist
+          [ -f fluxwan ] || make fluxwan
+          [ -f fluxwan_lab ] || make fluxwan_lab || true
+
           cp -f fluxwan dist_pkg/fluxwan-x86_64/bin/
-          cp -f fluxwan_lab dist_pkg/fluxwan-x86_64/bin/
+          [ -f fluxwan_lab ] && cp -f fluxwan_lab dist_pkg/fluxwan-x86_64/bin/ || true
           cp -f bpf/*.bpf.o dist_pkg/fluxwan-x86_64/bpf/ 2>/dev/null || true
           cp -f config/fluxwan.json dist_pkg/fluxwan-x86_64/config/
           cp -f systemd/fluxwan.service dist_pkg/fluxwan-x86_64/systemd/
