@@ -273,11 +273,16 @@
             <button @click="logout()" class="topbar-btn" style="background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.2);color:#f87171">
                 <span>🔒</span>
             </button>
-            <button @click="saveAndApply()" style="display:flex;align-items:center;gap:6px;padding:6px 14px;background:linear-gradient(135deg,#059669,#0d9488);color:white;font-size:12px;font-weight:700;border-radius:7px;border:none;cursor:pointer;box-shadow:0 2px 12px rgba(5,150,105,0.3)">
+            <button x-show="isEditing" @click="discardChanges()" class="topbar-btn" style="background:rgba(239,68,68,0.15);border-color:rgba(239,68,68,0.4);color:#fca5a5" :title="currentLang==='ar'?'إلغاء كافة التغييرات':'Discard changes'">
+                <span>↩️</span>
+                <span class="hidden md:inline" x-text="currentLang==='ar'?'إلغاء':'Discard'"></span>
+            </button>
+            <button @click="saveAndApply()" :style="isEditing ? 'display:flex;align-items:center;gap:6px;padding:6px 14px;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:white;font-size:12px;font-weight:700;border-radius:7px;border:none;cursor:pointer;box-shadow:0 0 16px rgba(37,99,235,0.7);' : 'display:flex;align-items:center;gap:6px;padding:6px 14px;background:linear-gradient(135deg,#059669,#0d9488);color:white;font-size:12px;font-weight:700;border-radius:7px;border:none;cursor:pointer;box-shadow:0 2px 12px rgba(5,150,105,0.3)'">
+                <span x-show="isEditing" class="w-2 h-2 rounded-full bg-amber-400"></span>
                 <svg style="width:14px;height:14px;fill:none;stroke:currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
                 </svg>
-                <span x-text="t('btn_save_apply')"></span>
+                <span x-text="isEditing ? (currentLang==='ar' ? 'حفظ التعديلات ●' : 'Save Changes ●') : t('btn_save_apply')"></span>
             </button>
         </div>
     </div>
@@ -940,6 +945,17 @@
             </div>
         </div>
         
+        <!-- Floating Unsaved Changes Alert Bar -->
+        <div x-show="isEditing" x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 transform -translate-x-1/2 translate-y-4" x-transition:enter-end="opacity-100 transform -translate-x-1/2 translate-y-0" x-transition:leave="transition ease-in duration-200" x-transition:leave-start="opacity-100 transform -translate-x-1/2 translate-y-0" x-transition:leave-end="opacity-0 transform -translate-x-1/2 translate-y-4" class="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-50 bg-slate-900/95 border border-amber-500/60 text-amber-200 px-5 py-3 rounded-2xl shadow-2xl backdrop-blur-md flex items-center gap-4 text-xs font-semibold">
+            <span class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping flex-shrink-0"></span>
+            <span x-text="currentLang==='ar' ? '⚠️ لديك تعديلات غير محفوظة في الإعدادات' : '⚠️ You have unsaved configuration changes'"></span>
+            <button @click="saveAndApply()" class="bg-blue-600 hover:bg-blue-500 text-white px-3.5 py-1.5 rounded-lg font-bold shadow-md transition-all flex items-center gap-1.5 flex-shrink-0">
+                <span>💾</span>
+                <span x-text="currentLang==='ar' ? 'حفظ وتطبيق الآن' : 'Save & Apply Now'"></span>
+            </button>
+            <button @click="discardChanges()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-lg transition-all flex-shrink-0" x-text="currentLang==='ar' ? 'تراجع' : 'Discard'"></button>
+        </div>
+
         <!-- Toast Notification -->
         <div x-show="toastMessage" x-transition class="fixed bottom-6 right-6 z-50 bg-emerald-600 text-white px-5 py-3 rounded-xl shadow-2xl flex items-center space-x-2 font-semibold text-sm">
             <span>✅</span>
@@ -3065,6 +3081,21 @@
                     this.updateClock();
                     setInterval(() => this.updateClock(), 1000);
 
+                    /* Automatically track when user edits ANY input/form control across the whole UI */
+                    window.addEventListener('input', (e) => {
+                        const tag = e.target && e.target.tagName;
+                        if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') {
+                            this.isEditing = true;
+                        }
+                    }, true);
+
+                    window.addEventListener('change', (e) => {
+                        const tag = e.target && e.target.tagName;
+                        if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') {
+                            this.isEditing = true;
+                        }
+                    }, true);
+
                     /* Always verify session with server before loading anything */
                     this.verifySession();
 
@@ -3690,7 +3721,29 @@
                                     time: now
                                 };
                             });
-                            this.interfaces = d.interfaces;
+                            if (!this.interfaces || this.interfaces.length === 0) {
+                                this.interfaces = d.interfaces;
+                            } else {
+                                d.interfaces.forEach(newIface => {
+                                    const existing = this.interfaces.find(i => i.name === newIface.name);
+                                    if (existing) {
+                                        existing.carrier = newIface.carrier;
+                                        existing.speed_mbps = newIface.speed_mbps;
+                                        existing.rx_bytes = newIface.rx_bytes;
+                                        existing.tx_bytes = newIface.tx_bytes;
+                                        existing.rx_packets = newIface.rx_packets;
+                                        existing.tx_packets = newIface.tx_packets;
+                                        existing.rx_errors = newIface.rx_errors;
+                                        existing.tx_errors = newIface.tx_errors;
+                                        existing.rx_bps = newIface.rx_bps;
+                                        existing.tx_bps = newIface.tx_bps;
+                                        existing.rx_speed = newIface.rx_speed;
+                                        existing.tx_speed = newIface.tx_speed;
+                                    } else {
+                                        this.interfaces.push(newIface);
+                                    }
+                                });
+                            }
                             this.updateTrafficChart();
                         }
                     })
@@ -3740,7 +3793,7 @@
                     return `${s}s`;
                 },
 
-                fetchStatus() {
+                fetchStatus(forceReload = false) {
                     if (!this.authToken || this.showLoginModal) return;
                     fetch('/api/v1/status', {
                         headers: { 'X-Auth-Token': this.authToken }
@@ -3758,77 +3811,94 @@
                         if (d.sysinfo) {
                             this.sysinfo = d.sysinfo;
                         }
-                        const isFirst = !this.hasLoadedInitialConfig;
-                        if (d.lan && (isFirst || !this.isEditing)) {
-                            if (d.lan.interface) this.config.lan.interface = d.lan.interface;
-                            if (d.lan.ip && d.lan.ip !== '0.0.0.0') this.config.lan.ip = d.lan.ip;
-                            else if (!this.config.lan.ip || this.config.lan.ip === '0.0.0.0') this.config.lan.ip = '192.168.90.1';
-                            if (d.lan.netmask && d.lan.netmask !== '0.0.0.0') this.config.lan.netmask = d.lan.netmask;
-                            else if (!this.config.lan.netmask || this.config.lan.netmask === '0.0.0.0') this.config.lan.netmask = '255.255.255.0';
-                            if (d.lan.dhcp_enabled !== undefined) this.config.lan.dhcp_enabled = d.lan.dhcp_enabled;
+
+                        const isFirst = !this.hasLoadedInitialConfig || forceReload;
+                        if (isFirst) {
+                            /* Full initial configuration load from server */
+                            if (d.lan) {
+                                if (d.lan.interface) this.config.lan.interface = d.lan.interface;
+                                if (d.lan.ip && d.lan.ip !== '0.0.0.0') this.config.lan.ip = d.lan.ip;
+                                else if (!this.config.lan.ip || this.config.lan.ip === '0.0.0.0') this.config.lan.ip = '192.168.90.1';
+                                if (d.lan.netmask && d.lan.netmask !== '0.0.0.0') this.config.lan.netmask = d.lan.netmask;
+                                else if (!this.config.lan.netmask || this.config.lan.netmask === '0.0.0.0') this.config.lan.netmask = '255.255.255.0';
+                                if (d.lan.dhcp_enabled !== undefined) this.config.lan.dhcp_enabled = d.lan.dhcp_enabled;
+                                if (d.lan.dhcp_start) this.config.lan.dhcp_start = d.lan.dhcp_start;
+                                if (d.lan.dhcp_end) this.config.lan.dhcp_end = d.lan.dhcp_end;
+                                if (d.lan.dhcp_lease_time) this.config.lan.dhcp_lease_time = d.lan.dhcp_lease_time;
+                            }
+                            if (d.qos) this.config.lan.qos = d.qos;
+                            if (d.dns) this.config.lan.dns = d.dns;
+                            if (d.static_leases) this.config.lan.static_leases = d.static_leases;
+                            if (d.rate_limits) this.config.lan.rate_limits = d.rate_limits;
+                            if (d.app_steering) this.config.app_steering = d.app_steering;
+                            if (d.telegram) this.config.telegram = d.telegram;
+                            if (d.groups) this.config.groups = d.groups;
+                            if (d.policy_routes) {
+                                if (!this.config.lan) this.config.lan = {};
+                                this.config.lan.policy_routes = d.policy_routes;
+                            }
+                            if (d.address_lists) this.config.address_lists = d.address_lists;
+                            if (d.wans) {
+                                this.config.wans = d.wans.map((w, idx) => ({
+                                    id: w.id || (idx + 1),
+                                    name: w.name || '',
+                                    label: w.label || w.name,
+                                    type: w.type || 'dhcp',
+                                    username: w.username || w.ppp_username || '',
+                                    ppp_username: w.ppp_username || w.username || '',
+                                    password: w.password || w.ppp_password || '',
+                                    ppp_password: w.ppp_password || w.password || '',
+                                    showPassword: false,
+                                    ip: w.ip || '',
+                                    ip6: w.ip6 || '',
+                                    netmask: w.netmask || '',
+                                    gateway: w.gateway || '',
+                                    dns: w.dns || '',
+                                    session_status: w.session_status || '',
+                                    uptime_sec: w.uptime_sec !== undefined ? w.uptime_sec : 0,
+                                    ac_name: w.ac_name || '',
+                                    lease_remaining_sec: w.lease_remaining_sec !== undefined ? w.lease_remaining_sec : 0,
+                                    mtu: w.mtu || 1500,
+                                    weight: w.config_weight !== undefined ? w.config_weight : (w.weight !== undefined ? w.weight : 100),
+                                    dynamic_weight: w.dynamic_weight !== undefined ? w.dynamic_weight : 100,
+                                    bandwidth_down_mbps: w.bandwidth_down_mbps !== undefined ? w.bandwidth_down_mbps : 100,
+                                    bandwidth_up_mbps: w.bandwidth_up_mbps !== undefined ? w.bandwidth_up_mbps : 20,
+                                    enabled: w.enabled !== undefined ? w.enabled : true,
+                                    state: w.state || 'HEALTHY',
+                                    rtt_ms: w.rtt_ms !== undefined ? w.rtt_ms : 0,
+                                    jitter_ms: w.jitter_ms !== undefined ? w.jitter_ms : 0,
+                                    packet_loss: w.packet_loss !== undefined ? w.packet_loss : 0,
+                                    probe_target: w.probe_target || ''
+                                }));
+                            }
+                            this.hasLoadedInitialConfig = true;
+                            this.isEditing = false;
+                        } else {
+                            /* Periodic telemetry update: ONLY update dynamic metrics in-place!
+                               NEVER overwrite form inputs or recreate arrays! */
+                            if (d.wans && this.config.wans) {
+                                d.wans.forEach(liveWan => {
+                                    const w = this.config.wans.find(item => item.id === liveWan.id || item.name === liveWan.name);
+                                    if (w) {
+                                        w.rtt_ms = liveWan.rtt_ms !== undefined ? liveWan.rtt_ms : 0;
+                                        w.jitter_ms = liveWan.jitter_ms !== undefined ? liveWan.jitter_ms : 0;
+                                        w.packet_loss = liveWan.packet_loss !== undefined ? liveWan.packet_loss : 0;
+                                        w.state = liveWan.state || 'HEALTHY';
+                                        w.dynamic_weight = liveWan.dynamic_weight !== undefined ? liveWan.dynamic_weight : (w.weight || 100);
+                                        w.session_status = liveWan.session_status || '';
+                                        w.uptime_sec = liveWan.uptime_sec !== undefined ? liveWan.uptime_sec : 0;
+                                        w.lease_remaining_sec = liveWan.lease_remaining_sec !== undefined ? liveWan.lease_remaining_sec : 0;
+                                        w.ac_name = liveWan.ac_name || '';
+
+                                        /* Update dynamic runtime IP/Gateway only if not actively editing */
+                                        if (!this.isEditing && (w.type === 'dhcp' || w.type === 'pppoe')) {
+                                            if (liveWan.ip && liveWan.ip !== '0.0.0.0') w.ip = liveWan.ip;
+                                            if (liveWan.gateway && liveWan.gateway !== '0.0.0.0') w.gateway = liveWan.gateway;
+                                        }
+                                    }
+                                });
+                            }
                         }
-                        if (d.qos && (isFirst || !this.isEditing)) {
-                            this.config.lan.qos = d.qos;
-                        }
-                        if (d.dns && (isFirst || !this.isEditing)) {
-                            this.config.lan.dns = d.dns;
-                        }
-                        if (d.static_leases && (isFirst || !this.isEditing)) {
-                            this.config.lan.static_leases = d.static_leases;
-                        }
-                        if (d.rate_limits && (isFirst || !this.isEditing)) {
-                            this.config.lan.rate_limits = d.rate_limits;
-                        }
-                        if (d.app_steering && (isFirst || !this.isEditing)) {
-                            this.config.app_steering = d.app_steering;
-                        }
-                        if (d.telegram && (isFirst || !this.isEditing)) {
-                            this.config.telegram = d.telegram;
-                        }
-                        if (d.groups && (isFirst || !this.isEditing)) {
-                            this.config.groups = d.groups;
-                        }
-                        if (d.policy_routes && (isFirst || !this.isEditing)) {
-                            if (!this.config.lan) this.config.lan = {};
-                            this.config.lan.policy_routes = d.policy_routes;
-                        }
-                        if (d.address_lists && (isFirst || !this.isEditing)) {
-                            this.config.address_lists = d.address_lists;
-                        }
-                        if (d.wans && (isFirst || (!this.isEditing && d.wans.length > 0) || this.config.wans.length === 0)) {
-                            this.config.wans = d.wans.map((w, idx) => ({
-                                id: w.id || (idx + 1),
-                                name: w.name || '',
-                                label: w.label || w.name,
-                                type: w.type || 'dhcp',
-                                username: w.username || w.ppp_username || '',
-                                ppp_username: w.ppp_username || w.username || '',
-                                password: w.password || w.ppp_password || '',
-                                ppp_password: w.ppp_password || w.password || '',
-                                showPassword: false,
-                                ip: w.ip || '',
-                                ip6: w.ip6 || '',
-                                netmask: w.netmask || '',
-                                gateway: w.gateway || '',
-                                dns: w.dns || '',
-                                session_status: w.session_status || '',
-                                uptime_sec: w.uptime_sec !== undefined ? w.uptime_sec : 0,
-                                ac_name: w.ac_name || '',
-                                lease_remaining_sec: w.lease_remaining_sec !== undefined ? w.lease_remaining_sec : 0,
-                                mtu: w.mtu || 1500,
-                                weight: w.config_weight !== undefined ? w.config_weight : 100,
-                                dynamic_weight: w.dynamic_weight !== undefined ? w.dynamic_weight : 100,
-                                bandwidth_down_mbps: w.bandwidth_down_mbps !== undefined ? w.bandwidth_down_mbps : 100,
-                                bandwidth_up_mbps: w.bandwidth_up_mbps !== undefined ? w.bandwidth_up_mbps : 20,
-                                enabled: w.enabled !== undefined ? w.enabled : true,
-                                state: w.state || 'HEALTHY',
-                                rtt_ms: w.rtt_ms !== undefined ? w.rtt_ms : 0,
-                                jitter_ms: w.jitter_ms !== undefined ? w.jitter_ms : 0,
-                                packet_loss: w.packet_loss !== undefined ? w.packet_loss : 0,
-                                probe_target: w.probe_target || ''
-                            }));
-                        }
-                        this.hasLoadedInitialConfig = true;
                     })
                     .catch(() => {});
                 },
@@ -3844,6 +3914,17 @@
                     })
                     .then(d => { if (d.leases) this.leases = d.leases; })
                     .catch(() => {});
+                },
+
+                discardChanges() {
+                    const msg = (this.currentLang === 'ar')
+                        ? 'هل أنت متأكد من إلغاء كافة التعديلات غير المحفوظة والعودة للبيانات الأصلية؟'
+                        : 'Discard all unsaved changes and reload router configuration?';
+                    if (!confirm(msg)) return;
+                    this.isEditing = false;
+                    this.fetchStatus(true);
+                    this.toastMessage = (this.currentLang === 'ar') ? 'تم إلغاء التعديلات والعودة للوضع السابق' : 'Changes discarded';
+                    setTimeout(() => this.toastMessage = '', 3000);
                 },
 
                 saveAndApply() {
@@ -3881,14 +3962,13 @@
                         this.isEditing = false;
                         this.toastMessage = 'Configuration applied to Linux Kernel successfully!';
                         setTimeout(() => this.toastMessage = '', 4000);
-                        this.fetchStatus();
+                        this.fetchStatus(true);
                         this.fetchInterfaces();
                         this.fetchLogs();
                     })
                     .catch(err => {
-                        this.isEditing = false;
                         if (err.message !== 'Authentication required') {
-                            this.toastMessage = 'Configuration saved & applied successfully!';
+                            this.toastMessage = 'Configuration save error: ' + err.message;
                             setTimeout(() => this.toastMessage = '', 4000);
                         }
                     });
