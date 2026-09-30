@@ -9,6 +9,7 @@
 #if defined(__linux__)
 #include <unistd.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <netinet/in.h>
@@ -59,7 +60,7 @@ static double measure_ping_socket(const char *ifname, const char *target_ip) {
 }
 #endif
 
-int diagnostics_run_speedtest(const char *ifname, speedtest_result_t *out) {
+static int diagnostics_run_speedtest_internal(const char *ifname, const struct sockaddr_in *provided_addr, speedtest_result_t *out) {
     if (!out) return -1;
     memset(out, 0, sizeof(speedtest_result_t));
     if (!ifname || ifname[0] == '\0') {
@@ -76,7 +77,7 @@ int diagnostics_run_speedtest(const char *ifname, speedtest_result_t *out) {
         return -1;
     }
 
-    LOG_INFO("[Speedtest] Starting REAL throughput test strictly isolated on WAN interface: %s", ifname);
+    LOG_INFO("[Speedtest] Starting throughput test on interface: %s", ifname);
 
     /* 1. Real Latency check via interface ping */
     double ping_res = measure_ping_socket(ifname, "1.1.1.1");
@@ -87,19 +88,22 @@ int diagnostics_run_speedtest(const char *ifname, speedtest_result_t *out) {
 
     /* Target speed server: speed.cloudflare.com */
     struct sockaddr_in serv_addr;
-    memset(&serv_addr, 0, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(80);
+    if (provided_addr && provided_addr->sin_addr.s_addr != 0) {
+        serv_addr = *provided_addr;
+    } else {
+        memset(&serv_addr, 0, sizeof(serv_addr));
+        serv_addr.sin_family = AF_INET;
+        serv_addr.sin_port = htons(80);
 
-    /* Resolve speed.cloudflare.com */
-    bool resolved = false;
-    struct hostent *he = gethostbyname("speed.cloudflare.com");
-    if (he && he->h_addr_list && he->h_addr_list[0]) {
-        memcpy(&serv_addr.sin_addr, he->h_addr_list[0], sizeof(struct in_addr));
-        resolved = true;
-    }
-    if (!resolved) {
-        serv_addr.sin_addr.s_addr = inet_addr("162.159.140.220");
+        bool resolved = false;
+        struct hostent *he = gethostbyname("speed.cloudflare.com");
+        if (he && he->h_addr_list && he->h_addr_list[0]) {
+            memcpy(&serv_addr.sin_addr, he->h_addr_list[0], sizeof(struct in_addr));
+            resolved = true;
+        }
+        if (!resolved) {
+            serv_addr.sin_addr.s_addr = inet_addr("162.159.140.220");
+        }
     }
 
     struct ifreq ifr;
@@ -113,7 +117,7 @@ int diagnostics_run_speedtest(const char *ifname, speedtest_result_t *out) {
     if (dl_sock >= 0) {
         if (setsockopt(dl_sock, SOL_SOCKET, SO_BINDTODEVICE, (void *)&ifr, sizeof(ifr)) < 0) {
             close(dl_sock);
-            snprintf(out->error_msg, sizeof(out->error_msg), "Failed to bind download socket strictly to %s: %s", ifname, strerror(errno));
+            snprintf(out->error_msg, sizeof(out->error_msg), "Failed to bind download socket to %s: %s", ifname, strerror(errno));
             out->success = false;
             return -1;
         }
@@ -123,9 +127,9 @@ int diagnostics_run_speedtest(const char *ifname, speedtest_result_t *out) {
         setsockopt(dl_sock, SOL_SOCKET, SO_SNDTIMEO, (const char *)&tv, sizeof(tv));
 
         if (connect(dl_sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == 0) {
-            /* Request 25MB stream from Cloudflare speed endpoint */
+            /* Request 5MB stream from Cloudflare speed endpoint (within Cloudflare unauthenticated rate limits) */
             const char *http_req = 
-                "GET /__down?bytes=25000000 HTTP/1.1\r\n"
+                "GET /__down?bytes=5000000 HTTP/1.1\r\n"
                 "Host: speed.cloudflare.com\r\n"
                 "User-Agent: FluxWAN-Speedtest/1.2.5\r\n"
                 "Connection: close\r\n\r\n";
@@ -135,11 +139,21 @@ int diagnostics_run_speedtest(const char *ifname, speedtest_result_t *out) {
             uint64_t total_rx = 0;
             uint64_t dl_start = get_time_ns();
             uint64_t max_dur_ns = 3500000000ULL; /* 3.5 seconds sampling window */
+            bool is_200_ok = false;
+            bool first_chunk = true;
 
             while (1) {
                 ssize_t n = recv(dl_sock, rx_buf, sizeof(rx_buf), 0);
                 if (n <= 0) break;
-                total_rx += (uint64_t)n;
+                if (first_chunk) {
+                    first_chunk = false;
+                    if (n >= 12 && strncmp(rx_buf, "HTTP/1.1 200", 12) == 0) {
+                        is_200_ok = true;
+                    }
+                }
+                if (is_200_ok) {
+                    total_rx += (uint64_t)n;
+                }
                 uint64_t cur = get_time_ns();
                 if ((cur - dl_start) >= max_dur_ns) break;
             }
@@ -147,8 +161,47 @@ int diagnostics_run_speedtest(const char *ifname, speedtest_result_t *out) {
             close(dl_sock);
 
             double dur_sec = (double)(dl_end - dl_start) / 1000000000.0;
-            if (dur_sec > 0.2 && total_rx > 500) {
+            if (is_200_ok && dur_sec > 0.2 && total_rx > 1000) {
                 out->download_mbps = (double)(total_rx * 8) / (dur_sec * 1000000.0);
+            } else if (!is_200_ok) {
+                /* Fallback to CacheFly Global CDN if Cloudflare rate limits */
+                LOG_INFO("[Speedtest] Cloudflare rate-limited or non-200 on %s, falling back to CacheFly CDN...", ifname);
+                int fb_sock = socket(AF_INET, SOCK_STREAM, 0);
+                if (fb_sock >= 0) {
+                    setsockopt(fb_sock, SOL_SOCKET, SO_BINDTODEVICE, (void *)&ifr, sizeof(ifr));
+                    setsockopt(fb_sock, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(tv));
+                    setsockopt(fb_sock, SOL_SOCKET, SO_SNDTIMEO, (const char *)&tv, sizeof(tv));
+                    struct sockaddr_in cf_addr;
+                    memset(&cf_addr, 0, sizeof(cf_addr));
+                    cf_addr.sin_family = AF_INET;
+                    cf_addr.sin_port = htons(80);
+                    cf_addr.sin_addr.s_addr = inet_addr("205.234.175.175");
+                    if (connect(fb_sock, (struct sockaddr *)&cf_addr, sizeof(cf_addr)) == 0) {
+                        const char *cf_req = 
+                            "GET /10mb.test HTTP/1.1\r\n"
+                            "Host: cachefly.cachefly.net\r\n"
+                            "User-Agent: FluxWAN-Speedtest/1.2.5\r\n"
+                            "Connection: close\r\n\r\n";
+                        send(fb_sock, cf_req, strlen(cf_req), 0);
+                        total_rx = 0;
+                        dl_start = get_time_ns();
+                        while (1) {
+                            ssize_t n = recv(fb_sock, rx_buf, sizeof(rx_buf), 0);
+                            if (n <= 0) break;
+                            total_rx += (uint64_t)n;
+                            uint64_t cur = get_time_ns();
+                            if ((cur - dl_start) >= max_dur_ns) break;
+                        }
+                        dl_end = get_time_ns();
+                        close(fb_sock);
+                        dur_sec = (double)(dl_end - dl_start) / 1000000000.0;
+                        if (dur_sec > 0.2 && total_rx > 1000) {
+                            out->download_mbps = (double)(total_rx * 8) / (dur_sec * 1000000.0);
+                        }
+                    } else {
+                        close(fb_sock);
+                    }
+                }
             }
         } else {
             close(dl_sock);
@@ -163,7 +216,7 @@ int diagnostics_run_speedtest(const char *ifname, speedtest_result_t *out) {
     if (ul_sock >= 0) {
         if (setsockopt(ul_sock, SOL_SOCKET, SO_BINDTODEVICE, (void *)&ifr, sizeof(ifr)) < 0) {
             close(ul_sock);
-            snprintf(out->error_msg, sizeof(out->error_msg), "Failed to bind upload socket strictly to %s: %s", ifname, strerror(errno));
+            snprintf(out->error_msg, sizeof(out->error_msg), "Failed to bind upload socket to %s: %s", ifname, strerror(errno));
             out->success = false;
             return -1;
         }
@@ -183,7 +236,8 @@ int diagnostics_run_speedtest(const char *ifname, speedtest_result_t *out) {
                 "Connection: close\r\n\r\n");
             send(ul_sock, up_hdr, hlen, 0);
 
-            static char tx_chunk[32768];
+            char tx_chunk[32768];
+            memset(tx_chunk, 'X', sizeof(tx_chunk));
             uint64_t total_tx = 0;
             uint64_t ul_start = get_time_ns();
             uint64_t max_dur_ns = 3000000000ULL; /* 3.0 seconds sampling window */
@@ -215,7 +269,7 @@ int diagnostics_run_speedtest(const char *ifname, speedtest_result_t *out) {
                  "No traffic could be routed through %s (Check line cable and gateway)", ifname);
     }
 
-    LOG_INFO("[Speedtest] Real Result for %s: Ping=%.1f ms, Down=%.2f Mbps, Up=%.2f Mbps (Real Socket Measurement)",
+    LOG_INFO("[Speedtest] Result for %s: Ping=%.1f ms, Down=%.2f Mbps, Up=%.2f Mbps",
              ifname, out->ping_ms, out->download_mbps, out->upload_mbps);
     return out->success ? 0 : -1;
 #else
@@ -224,6 +278,153 @@ int diagnostics_run_speedtest(const char *ifname, speedtest_result_t *out) {
     out->upload_mbps = 0.0;
     out->success = false;
     return 0;
+#endif
+}
+
+int diagnostics_run_speedtest(const char *ifname, speedtest_result_t *out) {
+    return diagnostics_run_speedtest_internal(ifname, NULL, out);
+}
+
+typedef struct {
+    char ifname[MAX_IFNAME_LEN];
+    char label[MAX_LABEL_LEN];
+    struct sockaddr_in serv_addr;
+    speedtest_result_t result;
+} multiwan_speedtest_worker_t;
+
+static void *multiwan_speedtest_worker_thread(void *arg) {
+    multiwan_speedtest_worker_t *w = (multiwan_speedtest_worker_t *)arg;
+    diagnostics_run_speedtest_internal(w->ifname, &w->serv_addr, &w->result);
+    strncpy(w->result.wan_label, w->label, sizeof(w->result.wan_label) - 1);
+    return NULL;
+}
+
+int diagnostics_run_multiwan_speedtest(const fluxwan_config_t *config, multiwan_speedtest_result_t *out) {
+    if (!out) return -1;
+    memset(out, 0, sizeof(multiwan_speedtest_result_t));
+    if (!config || config->wan_count == 0) {
+        snprintf(out->error_msg, sizeof(out->error_msg), "No WAN uplinks configured");
+        return -1;
+    }
+
+#if defined(__linux__)
+    /* 1. Pre-resolve Cloudflare speed server once to avoid per-thread DNS jitter */
+    struct sockaddr_in serv_addr;
+    memset(&serv_addr, 0, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(80);
+
+    bool resolved = false;
+    struct hostent *he = gethostbyname("speed.cloudflare.com");
+    if (he && he->h_addr_list && he->h_addr_list[0]) {
+        memcpy(&serv_addr.sin_addr, he->h_addr_list[0], sizeof(struct in_addr));
+        resolved = true;
+    }
+    if (!resolved) {
+        serv_addr.sin_addr.s_addr = inet_addr("162.159.140.220");
+    }
+
+    /* 2. Collect all active WAN interfaces */
+    multiwan_speedtest_worker_t workers[MAX_WANS];
+    pthread_t threads[MAX_WANS];
+    uint32_t active_count = 0;
+
+    for (uint32_t i = 0; i < config->wan_count && active_count < MAX_WANS; i++) {
+        const wan_config_t *w = &config->wans[i];
+        if (!w->enabled) continue;
+
+        char dev[MAX_IFNAME_LEN] = {0};
+        if (w->type == WAN_TYPE_PPPOE) {
+            snprintf(dev, sizeof(dev), "ppp%u", i);
+        } else {
+            snprintf(dev, sizeof(dev), "%s", w->name);
+        }
+
+        if (if_nametoindex(dev) == 0) {
+            if (if_nametoindex(w->name) > 0) {
+                snprintf(dev, sizeof(dev), "%s", w->name);
+            } else {
+                continue;
+            }
+        }
+
+        strncpy(workers[active_count].ifname, dev, sizeof(workers[active_count].ifname) - 1);
+        strncpy(workers[active_count].label, w->label[0] ? w->label : w->name, sizeof(workers[active_count].label) - 1);
+        workers[active_count].serv_addr = serv_addr;
+        active_count++;
+    }
+
+    if (active_count == 0) {
+        snprintf(out->error_msg, sizeof(out->error_msg), "No active WAN interfaces found");
+        out->success = false;
+        return -1;
+    }
+
+    LOG_INFO("[MultiWAN Speedtest] Launching parallel throughput test across %u WAN interfaces simultaneously...", active_count);
+
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 4 * 1024 * 1024);
+
+    for (uint32_t i = 0; i < active_count; i++) {
+        threads[i] = 0;
+        if (pthread_create(&threads[i], &attr, multiwan_speedtest_worker_thread, &workers[i]) != 0) {
+            LOG_WARN("[MultiWAN Speedtest] pthread_create failed for %s, running in caller thread", workers[i].ifname);
+            multiwan_speedtest_worker_thread(&workers[i]);
+            threads[i] = 0;
+        }
+    }
+    pthread_attr_destroy(&attr);
+
+    for (uint32_t i = 0; i < active_count; i++) {
+        if (threads[i] != 0) {
+            pthread_join(threads[i], NULL);
+        }
+    }
+
+    out->wan_count = active_count;
+    out->total_download_mbps = 0.0;
+    out->total_upload_mbps = 0.0;
+    out->min_ping_ms = 9999.0;
+    double ping_sum = 0.0;
+    uint32_t ping_valid = 0;
+    bool any_success = false;
+
+    for (uint32_t i = 0; i < active_count; i++) {
+        out->wans[i] = workers[i].result;
+        if (workers[i].result.success) {
+            any_success = true;
+            out->total_download_mbps += workers[i].result.download_mbps;
+            out->total_upload_mbps += workers[i].result.upload_mbps;
+            if (workers[i].result.ping_ms > 0.0) {
+                if (workers[i].result.ping_ms < out->min_ping_ms) {
+                    out->min_ping_ms = workers[i].result.ping_ms;
+                }
+                ping_sum += workers[i].result.ping_ms;
+                ping_valid++;
+            }
+        }
+    }
+
+    if (ping_valid > 0) {
+        out->avg_ping_ms = ping_sum / (double)ping_valid;
+    } else {
+        out->min_ping_ms = 0.0;
+        out->avg_ping_ms = 0.0;
+    }
+
+    out->success = any_success;
+    if (!any_success) {
+        snprintf(out->error_msg, sizeof(out->error_msg), "All lines failed to connect or transfer data");
+    }
+
+    LOG_INFO("[MultiWAN Speedtest] Total Download: %.2f Mbps, Total Upload: %.2f Mbps, Min Ping: %.1f ms across %u lines",
+             out->total_download_mbps, out->total_upload_mbps, out->min_ping_ms, out->wan_count);
+    return out->success ? 0 : -1;
+#else
+    out->success = false;
+    snprintf(out->error_msg, sizeof(out->error_msg), "Multi-WAN speedtest is only supported on Linux");
+    return -1;
 #endif
 }
 

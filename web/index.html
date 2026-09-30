@@ -727,47 +727,95 @@
 
         <!-- ================= SPEEDTEST MODAL ================= -->
         <div x-show="showSpeedtestModal" x-transition class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-            <div class="glass-card max-w-md w-full p-6 rounded-2xl border border-cyan-500/40 space-y-5 shadow-2xl bg-gradient-to-b from-slate-900 via-slate-900 to-cyan-950/40">
+            <div class="glass-card max-w-lg w-full p-6 rounded-2xl border border-cyan-500/40 space-y-5 shadow-2xl bg-gradient-to-b from-slate-900 via-slate-900 to-cyan-950/40 max-h-[90vh] overflow-y-auto">
                 <div class="flex items-center justify-between border-b border-slate-800 pb-3">
                     <div class="flex items-center space-x-2.5">
                         <span class="text-xl">⚡</span>
                         <div>
-                            <h3 class="text-base font-bold text-white">Line Speedtest (Independent)</h3>
-                            <span class="text-3xs text-cyan-400 font-mono" x-text="'Target Interface: ' + speedtestTarget + (speedtestLabel ? ' (' + speedtestLabel + ')' : '')"></span>
+                            <h3 class="text-base font-bold text-white" x-text="speedtestTarget === 'all' ? (currentLang==='ar' ? 'فحص سرعة الدمج الشامل (Multi-WAN Speedtest)' : 'Multi-WAN Combined Speedtest') : (currentLang==='ar' ? 'فحص سرعة خط منفرد' : 'Single WAN Speedtest')"></h3>
+                            <span class="text-3xs text-cyan-400 font-mono" x-text="'Target: ' + (speedtestTarget === 'all' ? (currentLang==='ar' ? 'جميع الخطوط مدمجة بالتوازي' : 'All Lines Combined (Parallel)') : (speedtestTarget + (speedtestLabel ? ' - ' + speedtestLabel : '')))"></span>
                         </div>
                     </div>
                     <button @click="showSpeedtestModal = false" class="text-slate-400 hover:text-white text-sm px-2 py-1">✕</button>
                 </div>
 
+                <!-- Mode & Interface Selector Tabs -->
+                <div class="bg-slate-950/80 p-1.5 rounded-xl border border-slate-800 flex items-center gap-1.5 text-xs">
+                    <button type="button" @click="speedtestTarget = 'all'; speedtestLabel = (currentLang==='ar'?'جميع الخطوط مدمجة':'All Lines Combined'); speedtestResult = { ping_ms: 0, download_mbps: 0, upload_mbps: 0 }; speedtestMultiResults = []; speedtestStatusMsg = (currentLang==='ar'?'جاهز لفحص كافة الخطوط معاً بالتوازي':'Ready to test all lines concurrently')"
+                            :class="speedtestTarget === 'all' ? 'bg-cyan-600 text-white font-bold shadow' : 'text-slate-400 hover:text-slate-200'"
+                            class="flex-1 py-1.5 px-2 rounded-lg transition text-center flex items-center justify-center gap-1">
+                        <span>⚡</span>
+                        <span x-text="currentLang==='ar' ? 'كافة الخطوط مدمجة (All WANs)' : 'All WANs Combined'"></span>
+                    </button>
+                    <template x-for="w in (config.wans || []).filter(w => w.enabled !== false)" :key="w.name">
+                        <button type="button" @click="speedtestTarget = w.name; speedtestLabel = (w.label || w.name); speedtestResult = { ping_ms: 0, download_mbps: 0, upload_mbps: 0 }; speedtestMultiResults = []; speedtestStatusMsg = 'Ready to test ' + w.name"
+                                :class="speedtestTarget === w.name ? 'bg-blue-600 text-white font-bold shadow' : 'text-slate-400 hover:text-slate-200'"
+                                class="py-1.5 px-3 rounded-lg transition text-center font-mono">
+                            <span x-text="w.name"></span>
+                        </button>
+                    </template>
+                </div>
+
                 <!-- Speedometer / Status Display -->
-                <div class="py-6 flex flex-col items-center justify-center space-y-3">
+                <div class="py-4 flex flex-col items-center justify-center space-y-3">
                     <div class="relative flex items-center justify-center">
                         <!-- Outer Glow Ring -->
                         <div class="w-36 h-36 rounded-full border-4 flex items-center justify-center transition-all"
                              :class="speedtestRunning ? 'border-cyan-500/50 animate-spin border-t-cyan-400 shadow-lg shadow-cyan-500/30' : 'border-slate-700 bg-slate-900/80'">
                         </div>
                         <div class="absolute flex flex-col items-center justify-center text-center">
-                            <span class="text-3xs uppercase tracking-wider text-slate-400 font-bold" x-text="speedtestRunning ? 'Testing...' : 'Download'"></span>
+                            <span class="text-3xs uppercase tracking-wider text-slate-400 font-bold" x-text="speedtestRunning ? (currentLang==='ar'?'جاري الفحص...':'Testing...') : (speedtestTarget === 'all' ? (currentLang==='ar'?'السرعة المدمجة':'Combined') : (currentLang==='ar'?'تنزيل':'Download'))"></span>
                             <span class="text-2xl font-black font-mono text-cyan-300" x-text="speedtestRunning ? '...' : ((speedtestResult.download_mbps || 0).toFixed(1))">0.0</span>
                             <span class="text-3xs font-bold text-slate-400">Mbps</span>
                         </div>
                     </div>
-                    <p class="text-xs text-slate-400 text-center font-mono" x-text="speedtestStatusMsg">Ready to test line throughput</p>
+                    <p class="text-xs text-slate-300 text-center font-mono px-4" x-text="speedtestStatusMsg">Ready to test line throughput</p>
                 </div>
 
                 <!-- Speed Results Metric Cards -->
                 <div class="grid grid-cols-3 gap-3">
                     <div class="bg-slate-950/80 p-3 rounded-xl border border-slate-800 text-center">
-                        <span class="text-3xs text-slate-400 block mb-0.5">Latency (Ping)</span>
+                        <span class="text-3xs text-slate-400 block mb-0.5" x-text="speedtestTarget === 'all' ? (currentLang==='ar'?'أقل بنك (Min Ping)':'Min Latency') : (currentLang==='ar'?'البنك (Latency)':'Latency')">Latency</span>
                         <span class="text-sm font-bold font-mono text-amber-400" x-text="speedtestResult.ping_ms ? (speedtestResult.ping_ms.toFixed(1) + ' ms') : '--'">--</span>
                     </div>
                     <div class="bg-slate-950/80 p-3 rounded-xl border border-slate-800 text-center">
-                        <span class="text-3xs text-cyan-400/90 block mb-0.5">Download</span>
+                        <span class="text-3xs text-cyan-400/90 block mb-0.5" x-text="speedtestTarget === 'all' ? (currentLang==='ar'?'إجمالي التنزيل':'Combined Down') : (currentLang==='ar'?'التنزيل (Down)':'Download')">Download</span>
                         <span class="text-sm font-bold font-mono text-cyan-300" x-text="speedtestResult.download_mbps ? (speedtestResult.download_mbps.toFixed(1) + ' Mbps') : '--'">--</span>
                     </div>
                     <div class="bg-slate-950/80 p-3 rounded-xl border border-slate-800 text-center">
-                        <span class="text-3xs text-indigo-400/90 block mb-0.5">Upload</span>
+                        <span class="text-3xs text-indigo-400/90 block mb-0.5" x-text="speedtestTarget === 'all' ? (currentLang==='ar'?'إجمالي الرفع':'Combined Up') : (currentLang==='ar'?'الرفع (Up)':'Upload')">Upload</span>
                         <span class="text-sm font-bold font-mono text-indigo-300" x-text="speedtestResult.upload_mbps ? (speedtestResult.upload_mbps.toFixed(1) + ' Mbps') : '--'">--</span>
+                    </div>
+                </div>
+
+                <!-- Per-WAN Breakdown (Visible when multi-results exist) -->
+                <div x-show="speedtestMultiResults && speedtestMultiResults.length > 0" x-transition class="space-y-2 border-t border-slate-800 pt-3">
+                    <div class="flex items-center justify-between text-2xs font-bold text-slate-400 uppercase">
+                        <span x-text="currentLang==='ar' ? 'تفاصيل سرعة كل خط على حدة' : 'Per-WAN Performance Breakdown'"></span>
+                        <span x-text="currentLang==='ar' ? 'المساهمة في الدمج' : 'Bandwidth Share'"></span>
+                    </div>
+                    <div class="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                        <template x-for="w in speedtestMultiResults" :key="w.interface">
+                            <div class="bg-slate-950/70 p-2.5 rounded-xl border border-slate-800 flex items-center justify-between text-xs">
+                                <div class="flex items-center space-x-2">
+                                    <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" :class="w.success ? 'bg-emerald-400' : 'bg-rose-400'"></span>
+                                    <div>
+                                        <div class="font-bold text-white font-mono flex items-center gap-1.5">
+                                            <span x-text="w.interface"></span>
+                                            <span class="text-3xs text-slate-400 font-normal" x-text="'(' + (w.label || w.interface) + ')'"></span>
+                                        </div>
+                                        <div class="text-3xs text-amber-400 font-mono" x-text="'Ping: ' + (w.ping_ms || 0).toFixed(1) + ' ms'"></div>
+                                    </div>
+                                </div>
+                                <div class="flex items-center space-x-3 font-mono text-xs">
+                                    <div class="text-right">
+                                        <div class="text-cyan-300 font-bold" x-text="'↓ ' + (w.download_mbps || 0).toFixed(1) + ' Mbps'"></div>
+                                        <div class="text-3xs text-indigo-300" x-text="'↑ ' + (w.upload_mbps || 0).toFixed(1) + ' Mbps'"></div>
+                                    </div>
+                                    <span class="text-2xs font-bold px-2 py-1 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20" x-text="(w.share_pct || 0).toFixed(0) + '%'"></span>
+                                </div>
+                            </div>
+                        </template>
                     </div>
                 </div>
 
@@ -775,11 +823,11 @@
                 <div class="flex items-center space-x-3 pt-2">
                     <button type="button" @click="runSpeedtest(speedtestTarget, speedtestLabel)" :disabled="speedtestRunning"
                             :class="speedtestRunning ? 'opacity-50 cursor-not-allowed bg-slate-800 text-slate-400' : 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-lg shadow-cyan-500/25'"
-                            class="flex-1 py-2 rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5">
-                        <span x-show="!speedtestRunning">⚡ Start Speedtest</span>
-                        <span x-show="speedtestRunning">⏳ Measuring Throughput...</span>
+                            class="flex-1 py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5">
+                        <span x-show="!speedtestRunning" x-text="speedtestTarget === 'all' ? (currentLang==='ar' ? '⚡ بدء فحص سرعة كافة الخطوط معاً' : '⚡ Start Multi-WAN Speedtest') : (currentLang==='ar' ? '⚡ بدء فحص الخط' : '⚡ Start Speedtest')">⚡ Start Speedtest</span>
+                        <span x-show="speedtestRunning" x-text="currentLang==='ar' ? '⏳ جاري قياس السرعة المتزامنة...' : '⏳ Measuring Throughput...'">⏳ Measuring Throughput...</span>
                     </button>
-                    <button type="button" @click="showSpeedtestModal = false" class="px-4 py-2 rounded-xl text-xs text-slate-300 hover:text-white border border-slate-700 bg-slate-800 transition">
+                    <button type="button" @click="showSpeedtestModal = false" class="px-4 py-2.5 rounded-xl text-xs text-slate-300 hover:text-white border border-slate-700 bg-slate-800 transition" x-text="currentLang==='ar' ? 'إغلاق' : 'Close'">
                         Close
                     </button>
                 </div>
@@ -997,9 +1045,15 @@
                     <h2 class="text-xl font-bold text-white">Hardware Network Interfaces & Live Traffic Monitor</h2>
                     <p class="text-xs text-slate-400">Real-time status, cable connection, link speed, and live throughput for all physical ports.</p>
                 </div>
-                <button @click="fetchInterfaces()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-lg border border-slate-700">
-                    🔄 Refresh Ports
-                </button>
+                <div class="flex items-center gap-2">
+                    <button @click="openSpeedtestModal('all', currentLang==='ar'?'جميع الخطوط مدمجة':'All WANs Combined')" class="text-xs bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold px-3.5 py-1.5 rounded-lg border border-cyan-500/40 shadow-sm flex items-center gap-1.5 transition">
+                        <span>⚡</span>
+                        <span x-text="currentLang==='ar' ? 'فحص سرعة الخطوط المدمجة' : 'Multi-WAN Speedtest'">Multi-WAN Speedtest</span>
+                    </button>
+                    <button @click="fetchInterfaces()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-lg border border-slate-700">
+                        🔄 Refresh Ports
+                    </button>
+                </div>
             </div>
 
             <!-- Router Global Throughput & Telemetry Summary -->
@@ -1187,6 +1241,10 @@
                     <p class="text-xs text-slate-400">Select physical ports for WAN uplinks. Ports selected as WAN will not appear in the LAN tab.</p>
                 </div>
                 <div class="flex items-center space-x-2">
+                    <button @click="openSpeedtestModal('all', currentLang==='ar'?'جميع الخطوط مدمجة':'All WANs Combined')" class="bg-cyan-600/30 hover:bg-cyan-600/50 text-cyan-300 border border-cyan-500/40 text-xs font-bold px-3.5 py-2 rounded-xl flex items-center space-x-1.5 transition shadow-sm">
+                        <span>⚡</span>
+                        <span x-text="currentLang==='ar' ? 'فحص سرعة كافة الخطوط' : 'Multi-WAN Speedtest'">Multi-WAN Speedtest</span>
+                    </button>
                     <button @click="openGamingAnalyzerModal()" class="bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 text-xs font-bold px-3.5 py-2 rounded-xl flex items-center space-x-1.5 transition shadow-sm">
                         <span>🎮</span>
                         <span>Gaming Latency Analyzer</span>
@@ -3032,14 +3090,15 @@
                 renewingDhcp: false,
                 showSpeedtestModal: false,
                 speedtestRunning: false,
-                speedtestTarget: 'eth1',
-                speedtestLabel: '',
+                speedtestTarget: 'all',
+                speedtestLabel: 'جميع الخطوط مدمجة',
                 speedtestStatusMsg: 'Ready to test line throughput',
                 speedtestResult: {
                     ping_ms: 0,
                     download_mbps: 0,
                     upload_mbps: 0
                 },
+                speedtestMultiResults: [],
                 showGamingModal: false,
                 gamingRunning: false,
                 gamingData: null,
@@ -4649,19 +4708,25 @@
 
                 /* Diagnostics & Speedtest */
                 openSpeedtestModal(ifaceName, wanLabel) {
-                    this.speedtestTarget = ifaceName || 'eth1';
-                    this.speedtestLabel = wanLabel || ifaceName;
+                    this.speedtestTarget = ifaceName || 'all';
+                    this.speedtestLabel = wanLabel || (this.speedtestTarget === 'all' ? (this.currentLang === 'ar' ? 'جميع الخطوط مدمجة' : 'All Lines Combined') : this.speedtestTarget);
                     this.speedtestRunning = false;
-                    this.speedtestStatusMsg = 'Ready to test line throughput';
+                    this.speedtestStatusMsg = (this.speedtestTarget === 'all')
+                        ? (this.currentLang === 'ar' ? 'جاهز لقياس سرعة كافة خطوط WAN مدمجة بالتوازي' : 'Ready to test all WAN lines concurrently')
+                        : (this.currentLang === 'ar' ? 'جاهز لقياس سرعة الخط: ' + this.speedtestTarget : 'Ready to test ' + this.speedtestTarget);
                     this.speedtestResult = { ping_ms: 0, download_mbps: 0, upload_mbps: 0 };
+                    this.speedtestMultiResults = [];
                     this.showSpeedtestModal = true;
                 },
 
                 runSpeedtest(ifaceName, wanLabel) {
-                    const target = ifaceName || this.speedtestTarget || 'eth1';
+                    const target = ifaceName || this.speedtestTarget || 'all';
                     this.speedtestRunning = true;
-                    this.speedtestStatusMsg = 'Binding to ' + target + ' & measuring latency...';
+                    this.speedtestStatusMsg = (target === 'all')
+                        ? (this.currentLang === 'ar' ? 'جاري الاتصال بالتوازي بكافة خطوط الـ WAN وقياس زمن الاستجابة والسرعة القصوى...' : 'Connecting to all WANs concurrently & measuring latency and throughput...')
+                        : (this.currentLang === 'ar' ? 'جاري ربط الفحص بالمنفذ ' + target + ' وقياس زمن الاستجابة والسرعة...' : 'Binding to ' + target + ' & measuring throughput...');
                     this.speedtestResult = { ping_ms: 0, download_mbps: 0, upload_mbps: 0 };
+                    this.speedtestMultiResults = [];
 
                     fetch('/api/v1/diagnostics/speedtest', {
                         method: 'POST',
@@ -4679,20 +4744,32 @@
                         this.speedtestRunning = false;
                         if (d.success) {
                             this.speedtestResult = {
-                                ping_ms: Number(d.ping_ms) || 0,
-                                download_mbps: Number(d.download_mbps) || 0,
-                                upload_mbps: Number(d.upload_mbps) || 0
+                                ping_ms: Number(d.min_ping_ms !== undefined ? d.min_ping_ms : d.ping_ms) || 0,
+                                download_mbps: Number(d.total_download_mbps !== undefined ? d.total_download_mbps : d.download_mbps) || 0,
+                                upload_mbps: Number(d.total_upload_mbps !== undefined ? d.total_upload_mbps : d.upload_mbps) || 0
                             };
-                            this.speedtestStatusMsg = 'Test completed successfully via ' + target;
-                            this.toastMessage = '⚡ Speedtest on ' + (wanLabel || target) + ': ' + (d.download_mbps || 0).toFixed(1) + ' Mbps Down / ' + (d.upload_mbps || 0).toFixed(1) + ' Mbps Up';
-                            setTimeout(() => this.toastMessage = '', 4000);
+                            this.speedtestMultiResults = d.wans || [];
+
+                            if (target === 'all') {
+                                const totalDown = this.speedtestResult.download_mbps.toFixed(1);
+                                const totalUp = this.speedtestResult.upload_mbps.toFixed(1);
+                                const count = d.wan_count || (d.wans ? d.wans.length : 0);
+                                this.speedtestStatusMsg = this.currentLang === 'ar'
+                                    ? `اكتمل الفحص المدمج بنجاح: ${totalDown} ميجابت/ث تنزيل و ${totalUp} ميجابت/ث رفع عبر ${count} خطوط مدمجة`
+                                    : `Multi-WAN test completed: ${totalDown} Mbps Down / ${totalUp} Mbps Up across ${count} lines`;
+                                this.toastMessage = `⚡ ${this.currentLang === 'ar' ? 'السرعة الإجمالية المدمجة' : 'Combined Speed'}: ${totalDown} Mbps Down / ${totalUp} Mbps Up`;
+                            } else {
+                                this.speedtestStatusMsg = (this.currentLang === 'ar' ? 'اكتمل الفحص بنجاح عبر ' : 'Test completed successfully via ') + target;
+                                this.toastMessage = '⚡ Speedtest on ' + (wanLabel || target) + ': ' + (d.download_mbps || 0).toFixed(1) + ' Mbps Down / ' + (d.upload_mbps || 0).toFixed(1) + ' Mbps Up';
+                            }
+                            setTimeout(() => this.toastMessage = '', 5000);
                         } else {
-                            this.speedtestStatusMsg = 'Speedtest failed: ' + (d.error || 'Unknown error');
+                            this.speedtestStatusMsg = (this.currentLang === 'ar' ? 'فشل الفحص: ' : 'Speedtest failed: ') + (d.error || d.message || 'Unknown error');
                         }
                     })
                     .catch(err => {
                         this.speedtestRunning = false;
-                        this.speedtestStatusMsg = 'Speedtest request failed: ' + err.message;
+                        this.speedtestStatusMsg = (this.currentLang === 'ar' ? 'خطأ في طلب الفحص: ' : 'Speedtest request failed: ') + err.message;
                     });
                 },
 

@@ -3762,38 +3762,118 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
             send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
         }
         const char *body = strstr(req, "\r\n\r\n");
-        char ifname[64] = "eth1";
+        char ifname[64] = "all";
+        bool all_mode = false;
         if (body) {
             body += 4;
             extract_json_string(body, "interface", ifname, sizeof(ifname));
+            if (strcmp(ifname, "all") == 0 || strcmp(ifname, "multi") == 0 || strcmp(ifname, "combined") == 0 || ifname[0] == '\0') {
+                all_mode = true;
+            }
+        } else {
+            all_mode = true;
         }
-        speedtest_result_t res;
-        diagnostics_run_speedtest(ifname, &res);
 
-        char resp_body[512];
-        snprintf(resp_body, sizeof(resp_body),
-            "{\n"
-            "  \"status\": \"%s\",\n"
-            "  \"success\": %s,\n"
-            "  \"interface\": \"%s\",\n"
-            "  \"ping_ms\": %.1f,\n"
-            "  \"download_mbps\": %.2f,\n"
-            "  \"upload_mbps\": %.2f,\n"
-            "  \"message\": \"%s\"\n"
-            "}",
-            res.success ? "ok" : "error",
-            res.success ? "true" : "false",
-            res.interface,
-            res.ping_ms,
-            res.download_mbps,
-            res.upload_mbps,
-            res.error_msg[0] ? res.error_msg : "Speedtest completed successfully");
+        if (all_mode) {
+            multiwan_speedtest_result_t multi_res;
+            diagnostics_run_multiwan_speedtest(ctx->config, &multi_res);
 
-        char resp[1024];
-        int len = snprintf(resp, sizeof(resp),
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
-            strlen(resp_body), resp_body);
-        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+            char resp_body[4096];
+            int offset = snprintf(resp_body, sizeof(resp_body),
+                "{\n"
+                "  \"status\": \"%s\",\n"
+                "  \"success\": %s,\n"
+                "  \"mode\": \"all\",\n"
+                "  \"total_download_mbps\": %.2f,\n"
+                "  \"total_upload_mbps\": %.2f,\n"
+                "  \"download_mbps\": %.2f,\n"
+                "  \"upload_mbps\": %.2f,\n"
+                "  \"min_ping_ms\": %.1f,\n"
+                "  \"ping_ms\": %.1f,\n"
+                "  \"avg_ping_ms\": %.1f,\n"
+                "  \"wan_count\": %u,\n"
+                "  \"wans\": [\n",
+                multi_res.success ? "ok" : "error",
+                multi_res.success ? "true" : "false",
+                multi_res.total_download_mbps,
+                multi_res.total_upload_mbps,
+                multi_res.total_download_mbps,
+                multi_res.total_upload_mbps,
+                multi_res.min_ping_ms,
+                multi_res.min_ping_ms,
+                multi_res.avg_ping_ms,
+                multi_res.wan_count);
+
+            for (uint32_t i = 0; i < multi_res.wan_count; i++) {
+                speedtest_result_t *w = &multi_res.wans[i];
+                double share = (multi_res.total_download_mbps > 0.0) ?
+                               (w->download_mbps / multi_res.total_download_mbps * 100.0) : 0.0;
+                offset += snprintf(resp_body + offset, sizeof(resp_body) - offset,
+                    "    {\n"
+                    "      \"interface\": \"%s\",\n"
+                    "      \"label\": \"%s\",\n"
+                    "      \"ping_ms\": %.1f,\n"
+                    "      \"download_mbps\": %.2f,\n"
+                    "      \"upload_mbps\": %.2f,\n"
+                    "      \"share_pct\": %.1f,\n"
+                    "      \"success\": %s,\n"
+                    "      \"error\": \"%s\"\n"
+                    "    }%s\n",
+                    w->interface, w->wan_label, w->ping_ms, w->download_mbps, w->upload_mbps,
+                    share, w->success ? "true" : "false", w->error_msg,
+                    (i + 1 < multi_res.wan_count) ? "," : "");
+            }
+            snprintf(resp_body + offset, sizeof(resp_body) - offset,
+                "  ],\n"
+                "  \"message\": \"%s\"\n"
+                "}",
+                multi_res.success ? "Multi-WAN aggregated speedtest completed successfully" : multi_res.error_msg);
+
+            char resp[4608];
+            int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(resp_body), resp_body);
+            send(client_fd, resp, len, 0);
+            close_client_socket(client_fd);
+            return 0;
+        } else {
+            speedtest_result_t res;
+            diagnostics_run_speedtest(ifname, &res);
+
+            char resp_body[1024];
+            snprintf(resp_body, sizeof(resp_body),
+                "{\n"
+                "  \"status\": \"%s\",\n"
+                "  \"success\": %s,\n"
+                "  \"mode\": \"single\",\n"
+                "  \"interface\": \"%s\",\n"
+                "  \"ping_ms\": %.1f,\n"
+                "  \"download_mbps\": %.2f,\n"
+                "  \"upload_mbps\": %.2f,\n"
+                "  \"total_download_mbps\": %.2f,\n"
+                "  \"total_upload_mbps\": %.2f,\n"
+                "  \"min_ping_ms\": %.1f,\n"
+                "  \"message\": \"%s\"\n"
+                "}",
+                res.success ? "ok" : "error",
+                res.success ? "true" : "false",
+                ifname,
+                res.ping_ms,
+                res.download_mbps,
+                res.upload_mbps,
+                res.download_mbps,
+                res.upload_mbps,
+                res.ping_ms,
+                res.success ? "Speedtest completed successfully" : res.error_msg);
+
+            char resp[1536];
+            int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(resp_body), resp_body);
+            send(client_fd, resp, len, 0);
+            close_client_socket(client_fd);
+            return 0;
+        }
     } else if (strstr(req, "GET /api/v1/diagnostics/gaming_ping") != NULL) {
         if (!is_request_authorized(ctx->config, req)) {
             const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
