@@ -8,7 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DIST_DIR="$PROJECT_ROOT/dist"
-BUILD_DIR="/tmp/fluxwan_iso_build"
+BUILD_DIR="${BUILD_DIR:-/var/tmp/fluxwan_iso_build}"
 ROOTFS_DIR="$BUILD_DIR/rootfs"
 APKOVL_DIR="$BUILD_DIR/apkovl"
 ISO_DIR="$BUILD_DIR/iso"
@@ -27,9 +27,9 @@ mkdir -p "$BUILD_DIR" "$ROOTFS_DIR" "$APKOVL_DIR" "$ISO_DIR"
 # ------------------------------------------------------------------------------
 echo "[1/4] Compiling FluxWAN C Reactor & eBPF XDP Engine..."
 cd "$PROJECT_ROOT"
-python3 scripts/embed_ui.py >/dev/null 2>&1 || true
-make clean >/dev/null 2>&1 || true
-make all >/dev/null 2>&1 || true
+python3 scripts/embed_ui.py || true
+make clean || true
+make fluxwan
 strip --strip-all "$PROJECT_ROOT/fluxwan" 2>/dev/null || true
 
 # ------------------------------------------------------------------------------
