@@ -40,4 +40,14 @@ struct wan_manager_ctx;
  */
 void web_server_set_wan_manager(web_server_ctx_t *ctx, struct wan_manager_ctx *wm);
 
+/**
+ * Start Web Server in a dedicated background worker thread
+ */
+int web_server_start_thread(web_server_ctx_t *ctx);
+
+/**
+ * Stop Web Server background worker thread
+ */
+void web_server_stop_thread(web_server_ctx_t *ctx);
+
 #endif /* WEB_SERVER_H */

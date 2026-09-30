@@ -62,6 +62,9 @@ struct web_server_ctx {
     time_t start_time;
     client_conn_t clients[MAX_CLIENTS];
     char *req_buf;
+    pthread_t worker_thread;
+    volatile bool thread_running;
+    pthread_mutex_t lock;
 };
 
 static inline void safe_str_copy(char *dst, const char *src, size_t max_len) {
@@ -382,12 +385,64 @@ web_server_ctx_t *web_server_init(fluxwan_config_t *config, netlink_ctx_t *nl, d
         return NULL;
     }
 
+    pthread_mutex_init(&ctx->lock, NULL);
+    ctx->thread_running = false;
+
     LOG_INFO("Embedded Web Server & REST API initialized at http://%s:%u", config->web.bind_ip, config->web.port);
     return ctx;
 }
 
+static void *web_server_worker_thread(void *arg) {
+    web_server_ctx_t *ctx = (web_server_ctx_t *)arg;
+    LOG_INFO("Web Server background worker thread started (TID %lu)...", (unsigned long)pthread_self());
+
+    while (ctx->thread_running) {
+        struct pollfd pfd;
+        pfd.fd = ctx->listen_fd;
+        pfd.events = POLLIN;
+        pfd.revents = 0;
+
+        int ret = poll(&pfd, 1, 100);
+        if (ret > 0 && (pfd.revents & POLLIN)) {
+            socket_t client_fd = web_server_accept_client(ctx);
+            if (IS_VALID_SOCK(client_fd)) {
+                web_server_process_client(ctx, client_fd);
+            }
+        }
+    }
+
+    LOG_INFO("Web Server background worker thread terminated.");
+    return NULL;
+}
+
+int web_server_start_thread(web_server_ctx_t *ctx) {
+    if (!ctx || ctx->thread_running) return 0;
+    ctx->thread_running = true;
+
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 4 * 1024 * 1024);
+
+    if (pthread_create(&ctx->worker_thread, &attr, web_server_worker_thread, ctx) != 0) {
+        LOG_ERROR("Failed to create Web Server worker thread: %s", strerror(errno));
+        ctx->thread_running = false;
+        pthread_attr_destroy(&attr);
+        return -1;
+    }
+    pthread_attr_destroy(&attr);
+    return 0;
+}
+
+void web_server_stop_thread(web_server_ctx_t *ctx) {
+    if (!ctx || !ctx->thread_running) return;
+    ctx->thread_running = false;
+    pthread_join(ctx->worker_thread, NULL);
+}
+
 void web_server_close(web_server_ctx_t *ctx) {
     if (!ctx) return;
+    web_server_stop_thread(ctx);
+    pthread_mutex_destroy(&ctx->lock);
     if (IS_VALID_SOCK(ctx->listen_fd)) CLOSE_SOCK(ctx->listen_fd);
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (IS_VALID_SOCK(ctx->clients[i].fd)) CLOSE_SOCK(ctx->clients[i].fd);

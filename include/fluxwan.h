@@ -471,4 +471,19 @@ static inline int safe_system(const char *cmd) {
 #endif
 }
 
+static inline int safe_write_proc(const char *path, const char *val) {
+    if (!path || !val) return -1;
+#if defined(__linux__)
+    int fd = open(path, O_WRONLY);
+    if (fd < 0) return -1;
+    size_t len = strlen(val);
+    ssize_t written = write(fd, val, len);
+    close(fd);
+    return (written == (ssize_t)len) ? 0 : -1;
+#else
+    (void)path; (void)val;
+    return 0;
+#endif
+}
+
 #endif /* FLUXWAN_H */

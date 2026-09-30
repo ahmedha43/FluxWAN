@@ -188,6 +188,9 @@ int netlink_add_ip_rule(netlink_ctx_t *ctx, uint32_t fwmark, uint32_t table_id, 
 
     add_rtattr(n, sizeof(buf), FRA_FWMARK, &fwmark, sizeof(fwmark));
     add_rtattr(n, sizeof(buf), FRA_TABLE, &table_id, sizeof(table_id));
+    if (priority > 0) {
+        add_rtattr(n, sizeof(buf), FRA_PRIORITY, &priority, sizeof(priority));
+    }
 
     if (send(ctx->fd, (const char *)n, (int)n->nlmsg_len, 0) < 0) {
         LOG_ERROR("Netlink add_ip_rule send failed: %s", strerror(errno));

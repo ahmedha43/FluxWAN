@@ -561,6 +561,7 @@ static void ensure_dhcp_hook_script(void) {
         "            ip rule del from \"$ip\" table \"$TABLE_ID\" 2>/dev/null || true\n"
         "            ip rule add from \"$ip\" table \"$TABLE_ID\" pref 100 2>/dev/null || true\n"
         "            ip route replace default via \"$router\" dev \"$interface\" 2>/dev/null || true\n"
+        "            iptables -t nat -C POSTROUTING -o \"$interface\" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o \"$interface\" -j MASQUERADE 2>/dev/null || iptables-legacy -t nat -A POSTROUTING -o \"$interface\" -j MASQUERADE 2>/dev/null || true\n"
         "        fi\n"
         "        sysctl -w net.ipv4.conf.${interface}.rp_filter=2 >/dev/null 2>&1 || true\n"
         "        ;;\n"
@@ -620,12 +621,12 @@ void wan_manager_periodic_tick(wan_manager_ctx_t *ctx, uint64_t now_ms) {
         /* WAN DHCP Client Engine */
         if (w->type == WAN_TYPE_DHCP && w->enabled) {
             /* DHCP Dead Gateway Watchdog:
-             * If an interface is in WAN_STATE_DOWN or packet loss >= 99% for 5 consecutive checks (~10s),
-             * and at least 15s elapsed since last rebind, the network environment likely changed (e.g. router moved).
+             * If an interface is in WAN_STATE_DOWN or packet loss >= 99% for 15 consecutive checks (~30s),
+             * and at least 60s elapsed since last rebind, the network environment likely changed (e.g. router moved).
              * Automatically trigger a rebind to discover the new gateway. */
             if (w->state == WAN_STATE_DOWN || w->metrics.packet_loss_pct >= 99.0f) {
                 ctx->dhcp_dead_cycles[i]++;
-                if (ctx->dhcp_dead_cycles[i] >= 5 && (now_ms - ctx->last_dhcp_rebind_ms[i] >= 15000)) {
+                if (ctx->dhcp_dead_cycles[i] >= 15 && (now_ms - ctx->last_dhcp_rebind_ms[i] >= 60000)) {
                     ctx->last_dhcp_rebind_ms[i] = now_ms;
                     ctx->dhcp_dead_cycles[i] = 0;
                     LOG_WARN("[DHCP Watchdog] Gateway unreachable on %s (100%% packet loss). Auto-rebinding DHCP...", w->name);

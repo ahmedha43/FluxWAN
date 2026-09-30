@@ -389,7 +389,15 @@ int dhcp_server_process(dhcp_server_ctx_t *ctx) {
         dest.sin_port = htons(DHCP_CLIENT_PORT);
         dest.sin_addr.s_addr = htonl(INADDR_BROADCAST);
 
-        sendto(ctx->sock_fd, (const char *)&reply, (int)sizeof(reply), 0, (struct sockaddr *)&dest, sizeof(dest));
+        ssize_t sent = sendto(ctx->sock_fd, (const char *)&reply, (int)sizeof(reply), 0, (struct sockaddr *)&dest, sizeof(dest));
+        if (sent < 0) {
+            /* Fallback to directed subnet broadcast */
+            dest.sin_addr.s_addr = (ctx->config.lan.ip_addr | ~ctx->config.lan.netmask);
+            sent = sendto(ctx->sock_fd, (const char *)&reply, (int)sizeof(reply), 0, (struct sockaddr *)&dest, sizeof(dest));
+        }
+        if (sent < 0) {
+            LOG_WARN("[DHCP] sendto DHCPOFFER failed: %s", strerror(errno));
+        }
         char ip_str[32];
         ip_to_str(offer_ip, ip_str, sizeof(ip_str));
         LOG_INFO("[DHCP] Sent DHCPOFFER -> %s for MAC %02x:%02x:%02x:%02x:%02x:%02x",
@@ -439,7 +447,15 @@ int dhcp_server_process(dhcp_server_ctx_t *ctx) {
         dest.sin_port = htons(DHCP_CLIENT_PORT);
         dest.sin_addr.s_addr = htonl(INADDR_BROADCAST);
 
-        sendto(ctx->sock_fd, (const char *)&reply, (int)sizeof(reply), 0, (struct sockaddr *)&dest, sizeof(dest));
+        ssize_t sent = sendto(ctx->sock_fd, (const char *)&reply, (int)sizeof(reply), 0, (struct sockaddr *)&dest, sizeof(dest));
+        if (sent < 0) {
+            /* Fallback to directed subnet broadcast */
+            dest.sin_addr.s_addr = (ctx->config.lan.ip_addr | ~ctx->config.lan.netmask);
+            sent = sendto(ctx->sock_fd, (const char *)&reply, (int)sizeof(reply), 0, (struct sockaddr *)&dest, sizeof(dest));
+        }
+        if (sent < 0) {
+            LOG_WARN("[DHCP] sendto DHCPACK failed: %s", strerror(errno));
+        }
         char ip_str[32];
         ip_to_str(assigned_ip, ip_str, sizeof(ip_str));
         LOG_INFO("[DHCP] Sent DHCPACK -> %s (MAC: %02x:%02x:%02x:%02x:%02x:%02x)",

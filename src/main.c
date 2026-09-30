@@ -112,6 +112,7 @@ int main(int argc, char *argv[]) {
     /* 11. Initialize Embedded Web Server & REST Engine */
     web_server_ctx_t *web = web_server_init(&config, nl, dhcp);
     web_server_set_wan_manager(web, wan_mgr);
+    web_server_start_thread(web);
 
     LOG_INFO("FluxWAN Core Daemon fully initialized and running on Bare-Metal reactor loop...");
 
@@ -120,15 +121,8 @@ int main(int argc, char *argv[]) {
 
     /* Main Non-Blocking Event Reactor Loop */
     while (g_running) {
-        struct pollfd fds[4];
+        struct pollfd fds[3];
         int nfds = 0;
-
-        socket_t web_fd = web_server_get_fd(web);
-        if (IS_VALID_SOCK(web_fd)) {
-            fds[nfds].fd = (int)web_fd;
-            fds[nfds].events = POLLIN;
-            nfds++;
-        }
 
         socket_t dhcp_fd = dhcp_server_get_fd(dhcp);
         if (IS_VALID_SOCK(dhcp_fd)) {
@@ -156,12 +150,7 @@ int main(int argc, char *argv[]) {
         if (poll_res > 0) {
             for (int i = 0; i < nfds; i++) {
                 if (fds[i].revents & POLLIN) {
-                    if ((socket_t)fds[i].fd == web_fd) {
-                        socket_t client_fd = web_server_accept_client(web);
-                        if (IS_VALID_SOCK(client_fd)) {
-                            web_server_process_client(web, client_fd);
-                        }
-                    } else if (IS_VALID_SOCK(dhcp_fd) && (socket_t)fds[i].fd == dhcp_fd) {
+                    if (IS_VALID_SOCK(dhcp_fd) && (socket_t)fds[i].fd == dhcp_fd) {
                         dhcp_server_process(dhcp);
                     } else if (IS_VALID_SOCK(nl_fd) && (socket_t)fds[i].fd == nl_fd) {
                         netlink_process_events(nl, &config);

@@ -9,18 +9,12 @@
 
 int net_apply_set_ip_forward(bool enable) {
 #if defined(__linux__)
-    int fd = open("/proc/sys/net/ipv4/ip_forward", O_WRONLY);
-    if (fd < 0) {
-        LOG_WARN("Could not open /proc/sys/net/ipv4/ip_forward (root privileges required)");
-        return -1;
-    }
-    const char *val = enable ? "1\n" : "0\n";
-    ssize_t written = write(fd, val, strlen(val));
-    close(fd);
-    if (written > 0) {
+    int rc = safe_write_proc("/proc/sys/net/ipv4/ip_forward", enable ? "1\n" : "0\n");
+    if (rc == 0) {
         LOG_INFO("Kernel IPv4 packet forwarding %s", enable ? "ENABLED" : "DISABLED");
         return 0;
     }
+    LOG_WARN("Could not write to /proc/sys/net/ipv4/ip_forward (root privileges required)");
     return -1;
 #else
     LOG_INFO("[Simulation] Kernel IPv4 forwarding set to %d", enable);
@@ -29,13 +23,24 @@ int net_apply_set_ip_forward(bool enable) {
 }
 
 int net_apply_wan_nat(const char *wan_ifname, bool enable) {
-    if (!wan_ifname) return -1;
+    if (!wan_ifname || !wan_ifname[0]) return -1;
 #if defined(__linux__)
-    char cmd[512];
+    char cmd[1024];
     if (enable) {
-        snprintf(cmd, sizeof(cmd), "iptables -t nat -C POSTROUTING -o %s -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o %s -j MASQUERADE 2>/dev/null", wan_ifname, wan_ifname);
+        snprintf(cmd, sizeof(cmd),
+                 "iptables -t nat -C POSTROUTING -o %s -j MASQUERADE 2>/dev/null || "
+                 "iptables -t nat -A POSTROUTING -o %s -j MASQUERADE 2>/dev/null || "
+                 "iptables-legacy -t nat -C POSTROUTING -o %s -j MASQUERADE 2>/dev/null || "
+                 "iptables-legacy -t nat -A POSTROUTING -o %s -j MASQUERADE 2>/dev/null || "
+                 "(nft add table ip nat 2>/dev/null; "
+                 "nft 'add chain ip nat postrouting { type nat hook postrouting priority 100; }' 2>/dev/null; "
+                 "nft add rule ip nat postrouting oifname \"%s\" masquerade 2>/dev/null) || true",
+                 wan_ifname, wan_ifname, wan_ifname, wan_ifname, wan_ifname);
     } else {
-        snprintf(cmd, sizeof(cmd), "iptables -t nat -D POSTROUTING -o %s -j MASQUERADE 2>/dev/null", wan_ifname);
+        snprintf(cmd, sizeof(cmd),
+                 "iptables -t nat -D POSTROUTING -o %s -j MASQUERADE 2>/dev/null || "
+                 "iptables-legacy -t nat -D POSTROUTING -o %s -j MASQUERADE 2>/dev/null || true",
+                 wan_ifname, wan_ifname);
     }
     safe_system(cmd);
 #endif
@@ -67,10 +72,10 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
     net_apply_set_ip_forward(true);
 #if defined(__linux__)
     /* Multi-WAN ARP Isolation & RP Filter for overlapping subnets/identical gateways (e.g. Starlink 192.168.1.1) */
-    safe_system("sysctl -w net.ipv4.conf.all.arp_ignore=1 >/dev/null 2>&1");
-    safe_system("sysctl -w net.ipv4.conf.all.arp_announce=2 >/dev/null 2>&1");
-    safe_system("sysctl -w net.ipv4.conf.all.rp_filter=0 >/dev/null 2>&1");
-    safe_system("sysctl -w net.ipv4.conf.default.rp_filter=0 >/dev/null 2>&1");
+    safe_write_proc("/proc/sys/net/ipv4/conf/all/arp_ignore", "1\n");
+    safe_write_proc("/proc/sys/net/ipv4/conf/all/arp_announce", "2\n");
+    safe_write_proc("/proc/sys/net/ipv4/conf/all/rp_filter", "0\n");
+    safe_write_proc("/proc/sys/net/ipv4/conf/default/rp_filter", "0\n");
 #endif
 
     /* 2. Configure Dedicated LAN Interface */
@@ -95,8 +100,31 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
     net_apply_policy_routes(config);
 
     /* Ensure all locally connected LAN traffic bypasses fwmark tables to allow reply packets back to LAN */
-    char lan_bypass[256];
-    snprintf(lan_bypass, sizeof(lan_bypass), "ip rule add to %s/24 table main prio 100 2>/dev/null", lan_ip);
+    uint32_t lan_net = config->lan.ip_addr & config->lan.netmask;
+    char lan_net_str[32];
+    ip_to_str(lan_net, lan_net_str, sizeof(lan_net_str));
+    int lan_cidr = 24;
+    uint32_t m_h = ntohl(config->lan.netmask);
+    if (m_h != 0) {
+        lan_cidr = 0;
+        while (m_h & 0x80000000) {
+            lan_cidr++;
+            m_h <<= 1;
+        }
+    }
+
+    char lan_bypass[1024];
+    snprintf(lan_bypass, sizeof(lan_bypass),
+             "ip rule del to %s/%d 2>/dev/null || true; "
+             "ip rule add to %s/%d table main prio 50 2>/dev/null || true; "
+             "ip rule del to 10.0.0.0/8 2>/dev/null || true; "
+             "ip rule add to 10.0.0.0/8 table main prio 51 2>/dev/null || true; "
+             "ip rule del to 172.16.0.0/12 2>/dev/null || true; "
+             "ip rule add to 172.16.0.0/12 table main prio 52 2>/dev/null || true; "
+             "ip rule del to 192.168.0.0/16 2>/dev/null || true; "
+             "ip rule add to 192.168.0.0/16 table main prio 53 2>/dev/null || true; "
+             "ip route add 255.255.255.255 dev %s 2>/dev/null || true",
+             lan_net_str, lan_cidr, lan_net_str, lan_cidr, config->lan.name);
     safe_system(lan_bypass);
 #endif
 
@@ -170,13 +198,13 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
                          wan_gw, w->name, 100 + i + 1);
                 safe_system(route_cmd);
 
-                char rp_cmd[256];
-                snprintf(rp_cmd, sizeof(rp_cmd),
-                         "sysctl -w net.ipv4.conf.%s.rp_filter=0 >/dev/null 2>&1 || true; "
-                         "sysctl -w net.ipv4.conf.%s.arp_ignore=1 >/dev/null 2>&1 || true; "
-                         "sysctl -w net.ipv4.conf.%s.arp_announce=2 >/dev/null 2>&1 || true",
-                         w->name, w->name, w->name);
-                safe_system(rp_cmd);
+                char proc_path[128];
+                snprintf(proc_path, sizeof(proc_path), "/proc/sys/net/ipv4/conf/%s/rp_filter", w->name);
+                safe_write_proc(proc_path, "0\n");
+                snprintf(proc_path, sizeof(proc_path), "/proc/sys/net/ipv4/conf/%s/arp_ignore", w->name);
+                safe_write_proc(proc_path, "1\n");
+                snprintf(proc_path, sizeof(proc_path), "/proc/sys/net/ipv4/conf/%s/arp_announce", w->name);
+                safe_write_proc(proc_path, "2\n");
             }
 #endif
 
@@ -220,19 +248,24 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
 
 #if defined(__linux__)
     /* 4. Configure Linux Kernel Mangle Rules with Conntrack Sticky Marks */
-    safe_system("iptables -t mangle -F PREROUTING 2>/dev/null || true");
-    safe_system("iptables -t mangle -A PREROUTING -j CONNMARK --restore-mark --mask 0x0000ffff 2>/dev/null || true");
+    safe_write_proc("/proc/sys/net/ipv4/ip_forward", "1\n");
+    safe_write_proc("/proc/sys/net/ipv4/conf/all/forwarding", "1\n");
+    safe_system("iptables -P FORWARD ACCEPT 2>/dev/null || iptables-legacy -P FORWARD ACCEPT 2>/dev/null || true");
+    safe_system("iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables-legacy -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true");
+
+    safe_system("iptables -t mangle -F PREROUTING 2>/dev/null || iptables-legacy -t mangle -F PREROUTING 2>/dev/null || true");
+    safe_system("iptables -t mangle -A PREROUTING -j CONNMARK --restore-mark --mask 0x0000ffff 2>/dev/null || iptables-legacy -t mangle -A PREROUTING -j CONNMARK --restore-mark --mask 0x0000ffff 2>/dev/null || true");
 
     /* Bypass Multi-WAN load balancing for local, broadcast and directly-connected subnets */
-    safe_system("iptables -t mangle -A PREROUTING -m addrtype --dst-type LOCAL -j RETURN 2>/dev/null || true");
-    safe_system("iptables -t mangle -A PREROUTING -d 10.10.0.0/16 -j RETURN 2>/dev/null || true");
-    safe_system("iptables -t mangle -A PREROUTING -d 192.168.0.0/16 -j RETURN 2>/dev/null || true");
-    safe_system("iptables -t mangle -A PREROUTING -d 172.16.0.0/12 -j RETURN 2>/dev/null || true");
+    safe_system("iptables -t mangle -A PREROUTING -m addrtype --dst-type LOCAL -j RETURN 2>/dev/null || iptables-legacy -t mangle -A PREROUTING -m addrtype --dst-type LOCAL -j RETURN 2>/dev/null || true");
+    safe_system("iptables -t mangle -A PREROUTING -d 10.10.0.0/16 -j RETURN 2>/dev/null || iptables-legacy -t mangle -A PREROUTING -d 10.10.0.0/16 -j RETURN 2>/dev/null || true");
+    safe_system("iptables -t mangle -A PREROUTING -d 192.168.0.0/16 -j RETURN 2>/dev/null || iptables-legacy -t mangle -A PREROUTING -d 192.168.0.0/16 -j RETURN 2>/dev/null || true");
+    safe_system("iptables -t mangle -A PREROUTING -d 172.16.0.0/12 -j RETURN 2>/dev/null || iptables-legacy -t mangle -A PREROUTING -d 172.16.0.0/12 -j RETURN 2>/dev/null || true");
 
     /* Address Lists Steering (evaluated before default load balancing) */
-    safe_system("iptables -t mangle -N FLUXWAN_ADDRLIST 2>/dev/null || true");
-    safe_system("iptables -t mangle -A PREROUTING -j FLUXWAN_ADDRLIST 2>/dev/null || true");
-    safe_system("iptables -t mangle -A OUTPUT -j FLUXWAN_ADDRLIST 2>/dev/null || true");
+    safe_system("iptables -t mangle -N FLUXWAN_ADDRLIST 2>/dev/null || iptables-legacy -t mangle -N FLUXWAN_ADDRLIST 2>/dev/null || true");
+    safe_system("iptables -t mangle -A PREROUTING -j FLUXWAN_ADDRLIST 2>/dev/null || iptables-legacy -t mangle -A PREROUTING -j FLUXWAN_ADDRLIST 2>/dev/null || true");
+    safe_system("iptables -t mangle -A OUTPUT -j FLUXWAN_ADDRLIST 2>/dev/null || iptables-legacy -t mangle -A OUTPUT -j FLUXWAN_ADDRLIST 2>/dev/null || true");
 
     /* Calculate total active dynamic weight (strictly exclude disabled WANs) */
     uint32_t total_active_weight = 0;
@@ -249,23 +282,28 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
             if (!w->enabled || w->state == WAN_STATE_DOWN || w->dynamic_weight == 0) continue;
 
             uint32_t fwmark = 0x100 + i + 1;
-            char cmd[512];
+            char cmd[1024];
             if (i == config->wan_count - 1 || remaining_weight == w->dynamic_weight) {
                 /* Last active WAN catches remaining flows */
                 snprintf(cmd, sizeof(cmd),
-                         "iptables -t mangle -A PREROUTING -i %s -m mark --mark 0 -j MARK --set-mark 0x%x 2>/dev/null",
-                         config->lan.name, fwmark);
+                         "iptables -t mangle -A PREROUTING -i %s -m mark --mark 0 -j MARK --set-mark 0x%x 2>/dev/null || "
+                         "iptables-legacy -t mangle -A PREROUTING -i %s -m mark --mark 0 -j MARK --set-mark 0x%x 2>/dev/null || true",
+                         config->lan.name, fwmark, config->lan.name, fwmark);
             } else {
                 double prob = (double)w->dynamic_weight / (double)remaining_weight;
                 snprintf(cmd, sizeof(cmd),
-                         "iptables -t mangle -A PREROUTING -i %s -m mark --mark 0 -m statistic --mode random --probability %.4f -j MARK --set-mark 0x%x 2>/dev/null",
-                         config->lan.name, prob, fwmark);
+                         "iptables -t mangle -A PREROUTING -i %s -m mark --mark 0 -m statistic --mode random --probability %.4f -j MARK --set-mark 0x%x 2>/dev/null || "
+                         "iptables-legacy -t mangle -A PREROUTING -i %s -m mark --mark 0 -m statistic --mode random --probability %.4f -j MARK --set-mark 0x%x 2>/dev/null || "
+                         "iptables -t mangle -A PREROUTING -i %s -m mark --mark 0 -j MARK --set-mark 0x%x 2>/dev/null || true",
+                         config->lan.name, prob, fwmark,
+                         config->lan.name, prob, fwmark,
+                         config->lan.name, fwmark);
                 remaining_weight -= w->dynamic_weight;
             }
             safe_system(cmd);
         }
     }
-    safe_system("iptables -t mangle -A PREROUTING -j CONNMARK --save-mark --mask 0x0000ffff 2>/dev/null || true");
+    safe_system("iptables -t mangle -A PREROUTING -j CONNMARK --save-mark --mask 0x0000ffff 2>/dev/null || iptables-legacy -t mangle -A PREROUTING -j CONNMARK --save-mark --mask 0x0000ffff 2>/dev/null || true");
 #endif
 
     /* 5. Apply QoS, Rate Limits, Application Steering, DPI, and DNS Redirection */
