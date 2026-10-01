@@ -22,7 +22,8 @@ SRCS = src/main.c \
        src/net_apply.c \
        src/dhcp_server.c \
        src/dns64_daemon.c \
-       src/diagnostics.c
+       src/diagnostics.c \
+       src/wifi_manager.c
 
 OBJS = $(SRCS:.c=.o)
 BPF_OBJS = bpf/xdp_router.bpf.o bpf/xdp_nat46.bpf.o
@@ -40,7 +41,8 @@ LAB_SRCS = tests/lab_runner.c \
            src/net_discovery.c \
            src/net_apply.c \
            src/dhcp_server.c \
-           src/dns64_daemon.c
+           src/dns64_daemon.c \
+           src/wifi_manager.c
 
 LAB_OBJS = $(LAB_SRCS:.c=.o)
 LAB_TARGET = fluxwan_lab

@@ -88,11 +88,8 @@ for kdir in "$BUILD_DIR/modloop_unpacked/modules/"*; do
         # Complete Filesystem Modules (ext4, jbd2, mbcache, vfat, fat, nls, isofs, squashfs)
         [ -d "$kdir/kernel/fs" ] && cp -a "$kdir/kernel/fs" "$K_DEST/kernel/" 2>/dev/null || true
 
-        # Remove irrelevant desktop/SAN modules to keep image compact
-        rm -rf "$K_DEST/kernel/net/wireless" \
-               "$K_DEST/kernel/net/mac80211" \
-               "$K_DEST/kernel/net/bluetooth" \
-               "$K_DEST/kernel/drivers/net/wireless" \
+        # Remove irrelevant bluetooth/SAN modules to keep image compact (preserve WiFi / wireless drivers)
+        rm -rf "$K_DEST/kernel/net/bluetooth" \
                "$K_DEST/kernel/drivers/scsi/qla2xxx" \
                "$K_DEST/kernel/drivers/scsi/lpfc" 2>/dev/null || true
 
@@ -131,6 +128,9 @@ grub-bios
 util-linux
 dropbear
 dropbear-ssh
+wpa_supplicant
+iw
+wireless-regdb
 EOF
 
 # Copy FluxWAN binaries, BPF objects, configs and scripts into apkovl
@@ -208,7 +208,7 @@ if [ "$IS_ALPINE" -eq 1 ]; then
     cp -aL /usr/lib/libblkid.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
 
     # Embed networking utilities
-    for bin in iptables iptables-save iptables-restore ip conntrack ethtool curl dropbear; do
+    for bin in iptables iptables-save iptables-restore ip conntrack ethtool curl dropbear wpa_supplicant wpa_cli iw rfkill; do
         SRC=$(command -v "$bin" 2>/dev/null || true)
         if [ -n "$SRC" ]; then
             cp -f "$SRC" "$APKOVL_DIR/usr/sbin/$bin" 2>/dev/null || true

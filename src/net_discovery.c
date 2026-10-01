@@ -239,6 +239,13 @@ int net_discovery_scan(const fluxwan_config_t *config, iface_discovery_result_t 
         snprintf(device_path, sizeof(device_path), "/sys/class/net/%s/device", p->name);
         p->is_physical = (access(device_path, F_OK) == 0);
 
+        /* Check if wireless (802.11 WiFi) device */
+        char wpath[256];
+        snprintf(wpath, sizeof(wpath), "/sys/class/net/%s/wireless", p->name);
+        char ppath[256];
+        snprintf(ppath, sizeof(ppath), "/sys/class/net/%s/phy80211", p->name);
+        p->is_wireless = (access(wpath, F_OK) == 0 || access(ppath, F_OK) == 0 || strncmp(p->name, "wlan", 4) == 0);
+
         /* Read IPv6 Global Address */
         read_ipv6_addr(p->name, p->ip6_addr, sizeof(p->ip6_addr));
 
@@ -328,6 +335,7 @@ int net_discovery_scan(const fluxwan_config_t *config, iface_discovery_result_t 
             p->is_up = (pCurr->OperStatus == IfOperStatusUp);
             p->has_carrier = p->is_up;
             p->is_physical = (pCurr->IfType == IF_TYPE_ETHERNET_CSMACD || pCurr->IfType == IF_TYPE_IEEE80211);
+            p->is_wireless = (pCurr->IfType == IF_TYPE_IEEE80211);
             p->speed_mbps = (uint32_t)(pCurr->ReceiveLinkSpeed / 1000000ULL);
             if (p->speed_mbps == 0) p->speed_mbps = 1000;
 

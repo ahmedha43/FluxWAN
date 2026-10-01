@@ -136,7 +136,8 @@ struct bpf_session_val {
 typedef enum {
     WAN_TYPE_STATIC = 0,
     WAN_TYPE_DHCP,
-    WAN_TYPE_PPPOE
+    WAN_TYPE_PPPOE,
+    WAN_TYPE_WIFI
 } wan_type_t;
 
 /* WAN Health Status */
@@ -177,6 +178,15 @@ typedef struct {
     char ppp_username[64];
     char ppp_password[64];
     uint16_t mss_clamping;
+    
+    /* WiFi specific */
+    char wifi_ssid[64];
+    char wifi_password[64];
+    char wifi_security[16];   /* "WPA2-PSK", "WPA3-SAE", "OPEN" */
+    char wifi_bssid[32];      /* Optional target BSSID */
+    int  wifi_signal_dbm;     /* Live RSSI (e.g. -54 dBm) */
+    int  wifi_signal_pct;     /* Live Signal quality 0-100% */
+    char wifi_channel[16];    /* e.g. "Ch 36 (5 GHz)" */
     
     /* Routing & Weighting */
     uint32_t table_id;      /* Policy routing table ID (e.g. 101) */

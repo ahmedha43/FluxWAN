@@ -34,6 +34,7 @@ set(CORE_LIB_SOURCES
     src/dhcp_server.c
     src/dns64_daemon.c
     src/diagnostics.c
+    src/wifi_manager.c
 )
 
 add_executable(fluxwan src/main.c ${CORE_LIB_SOURCES})

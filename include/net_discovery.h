@@ -19,6 +19,7 @@ typedef struct {
     bool is_up;
     bool has_carrier;         /* Cable connected */
     bool is_physical;         /* True if physical hardware PCI/USB NIC */
+    bool is_wireless;         /* True if 802.11 WiFi interface (wlan0, etc.) */
     
     iface_role_t role;
     uint32_t wan_id;          /* If role == ROLE_WAN (1, 2, 3...) */

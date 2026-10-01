@@ -20,6 +20,7 @@
 #include "diagnostics.h"
 #include "dyn_buf.h"
 #include "pppoe_server.h"
+#include "wifi_manager.h"
 #include <pthread.h>
 #include <fcntl.h>
 #include <ctype.h>
@@ -524,6 +525,7 @@ static void build_json_interfaces(fluxwan_config_t *config, char *buf, size_t ma
             "      \"is_up\": %s,\n"
             "      \"has_carrier\": %s,\n"
             "      \"is_physical\": %s,\n"
+            "      \"is_wireless\": %s,\n"
             "      \"role\": \"%s\",\n"
             "      \"wan_id\": %u,\n"
             "      \"ip6\": \"%s\",\n"
@@ -534,6 +536,7 @@ static void build_json_interfaces(fluxwan_config_t *config, char *buf, size_t ma
             p->is_up ? "true" : "false",
             p->has_carrier ? "true" : "false",
             p->is_physical ? "true" : "false",
+            p->is_wireless ? "true" : "false",
             role_str, p->wan_id,
             p->ip6_addr[0] ? p->ip6_addr : "",
             (unsigned long long)p->rx_bytes,
@@ -581,12 +584,13 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
         const char *type_str = "static";
         if (w->type == WAN_TYPE_DHCP) type_str = "dhcp";
         else if (w->type == WAN_TYPE_PPPOE) type_str = "pppoe";
+        else if (w->type == WAN_TYPE_WIFI) type_str = "wifi";
 
         time_t now = time(NULL);
         uint64_t uptime_sec = (w->state != WAN_STATE_DOWN && now >= ctx->start_time) ?
                               (uint64_t)(now - ctx->start_time) : 0;
 
-        uint32_t lease_total = (w->type == WAN_TYPE_DHCP) ? 43200 : 0;
+        uint32_t lease_total = (w->type == WAN_TYPE_DHCP || w->type == WAN_TYPE_WIFI) ? 43200 : 0;
         uint32_t lease_remaining = 0;
         if (lease_total > 0 && uptime_sec > 0) {
             uint32_t elapsed = (uint32_t)(uptime_sec % lease_total);
@@ -610,6 +614,11 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
             "      \"ppp_username\": \"%s\",\n"
             "      \"password\": \"%s\",\n"
             "      \"ppp_password\": \"%s\",\n"
+            "      \"wifi_ssid\": \"%s\",\n"
+            "      \"wifi_security\": \"%s\",\n"
+            "      \"wifi_signal_dbm\": %d,\n"
+            "      \"wifi_signal_pct\": %d,\n"
+            "      \"wifi_channel\": \"%s\",\n"
             "      \"ip\": \"%s\",\n"
             "      \"ip6\": \"%s\",\n"
             "      \"netmask\": \"%s\",\n"
@@ -635,12 +644,17 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
             w->id, w->name, w->label, type_str,
             w->ppp_username, w->ppp_username,
             w->ppp_password, w->ppp_password,
+            w->wifi_ssid,
+            w->wifi_security[0] ? w->wifi_security : "WPA2-PSK",
+            w->wifi_signal_dbm,
+            w->wifi_signal_pct,
+            w->wifi_channel[0] ? w->wifi_channel : "-",
             ip,
             real_v6,
             mask, gw,
             w->dns_servers[0] ? w->dns_servers : (w->gateway ? gw : "N/A"),
             w->link_mtu ? w->link_mtu : (w->type == WAN_TYPE_PPPOE ? 1492 : 1500),
-            w->enabled ? (w->type == WAN_TYPE_PPPOE ? "CONNECTED (Session Active)" : (w->type == WAN_TYPE_DHCP ? "BOUND (Lease Active)" : "ONLINE (Static)")) : "DISCONNECTED",
+            w->enabled ? (w->type == WAN_TYPE_PPPOE ? "CONNECTED (Session Active)" : (w->type == WAN_TYPE_WIFI ? "CONNECTED (WiFi Associated)" : (w->type == WAN_TYPE_DHCP ? "BOUND (Lease Active)" : "ONLINE (Static)"))) : "DISCONNECTED",
             (unsigned long long)uptime_sec,
             w->ac_name[0] ? w->ac_name : "N/A",
             lease_total,
@@ -2550,6 +2564,103 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
 
         send(client_fd, resp, (int)len, 0);
         close_client_socket(client_fd);
+    } else if (strstr(req, "GET /api/v1/wifi/scan") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+
+        char ifname[MAX_IFNAME_LEN] = "wlan0";
+        const char *q = strstr(req, "iface=");
+        if (q) {
+            sscanf(q + 6, "%15[^& \r\n]", ifname);
+        } else {
+            iface_discovery_result_t disc;
+            net_discovery_scan(ctx->config, &disc);
+            for (uint32_t i = 0; i < disc.count; i++) {
+                if (disc.interfaces[i].is_wireless) {
+                    safe_str_copy(ifname, disc.interfaces[i].name, sizeof(ifname));
+                    break;
+                }
+            }
+        }
+
+        wifi_scan_item_t scan_results[MAX_WIFI_SCAN_RESULTS];
+        uint32_t count = 0;
+        wifi_manager_scan(ifname, scan_results, MAX_WIFI_SCAN_RESULTS, &count);
+
+        char json_buf[16384];
+        int offset = snprintf(json_buf, sizeof(json_buf),
+            "{\n  \"status\": \"ok\",\n  \"interface\": \"%s\",\n  \"count\": %u,\n  \"networks\": [\n",
+            ifname, count);
+
+        for (uint32_t i = 0; i < count; i++) {
+            wifi_scan_item_t *w = &scan_results[i];
+            offset += snprintf(json_buf + offset, sizeof(json_buf) - offset,
+                "    {\n"
+                "      \"ssid\": \"%s\",\n"
+                "      \"bssid\": \"%s\",\n"
+                "      \"signal_dbm\": %d,\n"
+                "      \"signal_pct\": %d,\n"
+                "      \"channel\": %u,\n"
+                "      \"frequency\": \"%s\",\n"
+                "      \"security\": \"%s\"\n"
+                "    }%s\n",
+                w->ssid, w->bssid, w->signal_dbm, w->signal_pct,
+                w->channel, w->frequency, w->security,
+                (i == count - 1) ? "" : ",");
+        }
+        snprintf(json_buf + offset, sizeof(json_buf) - offset, "  ]\n}\n");
+
+        char resp[17000];
+        int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: application/json\r\n"
+            "Access-Control-Allow-Origin: *\r\n"
+            "Content-Length: %zu\r\n"
+            "Connection: close\r\n\r\n%s",
+            strlen(json_buf), json_buf);
+        send(client_fd, resp, (int)len, 0);
+        close_client_socket(client_fd);
+        return 0;
+    } else if (strstr(req, "GET /api/v1/wifi/status") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+
+        char ifname[MAX_IFNAME_LEN] = "wlan0";
+        const char *q = strstr(req, "iface=");
+        if (q) sscanf(q + 6, "%15[^& \r\n]", ifname);
+
+        wifi_link_status_t st;
+        wifi_manager_get_link_status(ifname, &st);
+
+        char json_buf[512];
+        snprintf(json_buf, sizeof(json_buf),
+            "{\n  \"status\": \"ok\",\n  \"interface\": \"%s\",\n  \"connected\": %s,\n"
+            "  \"ssid\": \"%s\",\n  \"bssid\": \"%s\",\n  \"signal_dbm\": %d,\n"
+            "  \"signal_pct\": %d,\n  \"channel\": %u,\n  \"bitrate_mbps\": %u\n}\n",
+            ifname, st.connected ? "true" : "false",
+            st.ssid, st.bssid, st.signal_dbm, st.signal_pct, st.channel, st.bitrate_mbps);
+
+        char resp[1024];
+        int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: application/json\r\n"
+            "Access-Control-Allow-Origin: *\r\n"
+            "Content-Length: %zu\r\n"
+            "Connection: close\r\n\r\n%s",
+            strlen(json_buf), json_buf);
+        send(client_fd, resp, (int)len, 0);
+        close_client_socket(client_fd);
+        return 0;
     } else if (strstr(req, "GET /api/v1/status") != NULL) {
         if (!is_request_authorized(ctx->config, req)) {
             const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";

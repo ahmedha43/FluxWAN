@@ -1,6 +1,7 @@
 #include "wan_manager.h"
 #include "net_apply.h"
 #include "pppoe_manager.h"
+#include "wifi_manager.h"
 #include <stdarg.h>
 
 #if defined(__linux__)
@@ -578,7 +579,7 @@ void wan_manager_dhcp_renew(wan_manager_ctx_t *ctx, int wan_idx) {
     for (uint32_t i = 0; i < ctx->config->wan_count; i++) {
         if (wan_idx >= 0 && (int)i != wan_idx) continue;
         wan_config_t *w = &ctx->config->wans[i];
-        if (w->type == WAN_TYPE_DHCP && w->enabled) {
+        if ((w->type == WAN_TYPE_DHCP || w->type == WAN_TYPE_WIFI) && w->enabled) {
             LOG_INFO("[WAN DHCP] Force-renewing IP lease on %s (Table %u)...", w->name, w->table_id);
             wan_manager_add_log("INFO", "[DHCP Client] Force-renewing IP lease on %s...", w->name);
 #if defined(__linux__)
@@ -618,8 +619,21 @@ void wan_manager_periodic_tick(wan_manager_ctx_t *ctx, uint64_t now_ms) {
     for (uint32_t i = 0; i < ctx->config->wan_count; i++) {
         wan_config_t *w = &ctx->config->wans[i];
 
-        /* WAN DHCP Client Engine */
-        if (w->type == WAN_TYPE_DHCP && w->enabled) {
+        /* WiFi Link Telemetry Polling */
+        if (w->type == WAN_TYPE_WIFI && w->enabled) {
+            wifi_link_status_t wlink;
+            memset(&wlink, 0, sizeof(wlink));
+            if (wifi_manager_get_link_status(w->name, &wlink) == 0 && wlink.connected) {
+                w->wifi_signal_dbm = wlink.signal_dbm;
+                w->wifi_signal_pct = wlink.signal_pct;
+                if (wlink.channel > 0) {
+                    snprintf(w->wifi_channel, sizeof(w->wifi_channel), "Ch %u", wlink.channel);
+                }
+            }
+        }
+
+        /* WAN DHCP & WiFi Client Engine */
+        if ((w->type == WAN_TYPE_DHCP || w->type == WAN_TYPE_WIFI) && w->enabled) {
             /* DHCP Dead Gateway Watchdog:
              * If an interface is in WAN_STATE_DOWN or packet loss >= 99% for 15 consecutive checks (~30s),
              * and at least 60s elapsed since last rebind, the network environment likely changed (e.g. router moved).

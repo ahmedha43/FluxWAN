@@ -460,6 +460,7 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
                         if (strcmp(val, "static") == 0) w->type = WAN_TYPE_STATIC;
                         else if (strcmp(val, "dhcp") == 0) w->type = WAN_TYPE_DHCP;
                         else if (strcmp(val, "pppoe") == 0) w->type = WAN_TYPE_PPPOE;
+                        else if (strcmp(val, "wifi") == 0) w->type = WAN_TYPE_WIFI;
                     }
 
                     if (extract_json_string(obj_str, "ip", val, sizeof(val))) {
@@ -479,6 +480,19 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
                     if (extract_json_string(obj_str, "ppp_password", val, sizeof(val)) ||
                         extract_json_string(obj_str, "password", val, sizeof(val))) {
                         safe_str_copy(w->ppp_password, val, sizeof(w->ppp_password));
+                    }
+
+                    if (extract_json_string(obj_str, "wifi_ssid", val, sizeof(val)) ||
+                        extract_json_string(obj_str, "ssid", val, sizeof(val))) {
+                        safe_str_copy(w->wifi_ssid, val, sizeof(w->wifi_ssid));
+                    }
+                    if (extract_json_string(obj_str, "wifi_password", val, sizeof(val))) {
+                        safe_str_copy(w->wifi_password, val, sizeof(w->wifi_password));
+                    }
+                    if (extract_json_string(obj_str, "wifi_security", val, sizeof(val))) {
+                        safe_str_copy(w->wifi_security, val, sizeof(w->wifi_security));
+                    } else if (w->type == WAN_TYPE_WIFI && !w->wifi_security[0]) {
+                        safe_str_copy(w->wifi_security, "WPA2-PSK", sizeof(w->wifi_security));
                     }
 
                     uint32_t weight = (uint32_t)extract_json_int(obj_str, "weight", 100);
@@ -1217,6 +1231,7 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
             const char *type_str = "static";
             if (w->type == WAN_TYPE_DHCP) type_str = "dhcp";
             else if (w->type == WAN_TYPE_PPPOE) type_str = "pppoe";
+            else if (w->type == WAN_TYPE_WIFI) type_str = "wifi";
 
             fprintf(f, "    {\n");
             fprintf(f, "      \"id\": %u,\n", w->id);
@@ -1226,6 +1241,11 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
             if (w->type == WAN_TYPE_PPPOE || w->ppp_username[0] || w->ppp_password[0]) {
                 fprintf(f, "      \"username\": \"%s\",\n", w->ppp_username);
                 fprintf(f, "      \"password\": \"%s\",\n", w->ppp_password);
+            }
+            if (w->type == WAN_TYPE_WIFI || w->wifi_ssid[0]) {
+                fprintf(f, "      \"wifi_ssid\": \"%s\",\n", w->wifi_ssid);
+                fprintf(f, "      \"wifi_password\": \"%s\",\n", w->wifi_password);
+                fprintf(f, "      \"wifi_security\": \"%s\",\n", w->wifi_security[0] ? w->wifi_security : "WPA2-PSK");
             }
             fprintf(f, "      \"ip\": \"%s\",\n", ip);
             fprintf(f, "      \"netmask\": \"%s\",\n", mask);
@@ -1429,6 +1449,7 @@ bool config_validate_wan_attachments(const fluxwan_config_t *config, char *err_m
         int dhcp_count = 0;
         int static_count = 0;
         int pppoe_count = 0;
+        int wifi_count = 0;
 
         for (uint32_t j = 0; j < config->wan_count; j++) {
             const wan_config_t *w2 = &config->wans[j];
@@ -1436,7 +1457,17 @@ bool config_validate_wan_attachments(const fluxwan_config_t *config, char *err_m
                 if (w2->type == WAN_TYPE_DHCP) dhcp_count++;
                 else if (w2->type == WAN_TYPE_STATIC) static_count++;
                 else if (w2->type == WAN_TYPE_PPPOE) pppoe_count++;
+                else if (w2->type == WAN_TYPE_WIFI) wifi_count++;
             }
+        }
+
+        if (wifi_count > 1) {
+            if (err_msg && err_size > 0) {
+                snprintf(err_msg, err_size,
+                         "Physical interface '%s' has %d WiFi clients configured. A wireless card can only connect to 1 WiFi network concurrently.",
+                         w1->name, wifi_count);
+            }
+            return false;
         }
 
         if (dhcp_count > 1) {
@@ -1458,10 +1489,11 @@ bool config_validate_wan_attachments(const fluxwan_config_t *config, char *err_m
         }
 
         if ((dhcp_count > 0 && static_count > 0) ||
-            ((dhcp_count > 0 || static_count > 0) && pppoe_count > 0)) {
+            ((dhcp_count > 0 || static_count > 0) && pppoe_count > 0) ||
+            (wifi_count > 0 && (dhcp_count > 0 || static_count > 0 || pppoe_count > 0))) {
             if (err_msg && err_size > 0) {
                 snprintf(err_msg, err_size,
-                         "Physical interface '%s' mixes exclusive IP modes (DHCP/Static) with other WANs. DHCP and Static require dedicated 1:1 physical ports.",
+                         "Physical interface '%s' mixes exclusive network modes with other WANs. A dedicated port is required.",
                          w1->name);
             }
             return false;

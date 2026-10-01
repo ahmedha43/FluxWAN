@@ -1,4 +1,5 @@
 #include "net_apply.h"
+#include "wifi_manager.h"
 #include <fcntl.h>
 #include <net/if.h>
 #include <ctype.h>
@@ -216,11 +217,18 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
                 net_apply_wan_nat(ppp_if, true);
             }
 
+            if (w->type == WAN_TYPE_WIFI && w->wifi_ssid[0]) {
+                wifi_manager_connect(w->name, w->wifi_ssid, w->wifi_password, w->wifi_security);
+            }
+
             /* Apply MSS Clamping for PPPoE / Low MTU links */
             apply_mss_clamping(w);
 
         } else {
             /* WAN is DISABLED: Completely halt routing, kill DHCP, drop NAT, and bring link down */
+            if (w->type == WAN_TYPE_WIFI) {
+                wifi_manager_disconnect(w->name);
+            }
 #if defined(__linux__)
             char wan_down[512];
             snprintf(wan_down, sizeof(wan_down),
