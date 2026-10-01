@@ -19,6 +19,7 @@
 #include "wan_manager.h"
 #include "diagnostics.h"
 #include "dyn_buf.h"
+#include "pppoe_server.h"
 #include <pthread.h>
 #include <fcntl.h>
 #include <ctype.h>
@@ -59,6 +60,7 @@ struct web_server_ctx {
     netlink_ctx_t *nl;
     dhcp_server_ctx_t *dhcp;
     struct wan_manager_ctx *wan_mgr;
+    struct pppoe_server_ctx *pppoe_srv;
     time_t start_time;
     client_conn_t clients[MAX_CLIENTS];
     char *req_buf;
@@ -287,6 +289,10 @@ static uint32_t get_real_active_connections(void) {
 
 void web_server_set_wan_manager(web_server_ctx_t *ctx, struct wan_manager_ctx *wm) {
     if (ctx) ctx->wan_mgr = wm;
+}
+
+void web_server_set_pppoe_server(web_server_ctx_t *ctx, struct pppoe_server_ctx *ps) {
+    if (ctx) ctx->pppoe_srv = ps;
 }
 
 static void set_socket_timeout(socket_t fd, int timeout_ms) {
@@ -786,6 +792,19 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
         config->dpi.voip_priority_enabled ? "true" : "false",
         config->dpi.gaming_priority_enabled ? "true" : "false",
         config->dpi.streaming_balance_enabled ? "true" : "false");
+
+    /* Broadband PPPoE Server Summary */
+    offset += snprintf(buf + offset, max_len - offset,
+        "  \"pppoe_server\": { \"enabled\": %s, \"lan_mode\": \"%s\", \"interface\": \"%s\", \"local_ip\": \"%s\", \"pool_start\": \"%s\", \"pool_end\": \"%s\", \"max_sessions\": %u, \"user_count\": %u, \"profile_count\": %u },\n",
+        config->pppoe_server.enabled ? "true" : "false",
+        config->pppoe_server.lan_mode[0] ? config->pppoe_server.lan_mode : "dual",
+        config->pppoe_server.interface[0] ? config->pppoe_server.interface : "eth0",
+        config->pppoe_server.local_ip[0] ? config->pppoe_server.local_ip : "10.100.0.1",
+        config->pppoe_server.pool_start[0] ? config->pppoe_server.pool_start : "10.100.0.2",
+        config->pppoe_server.pool_end[0] ? config->pppoe_server.pool_end : "10.100.0.254",
+        config->pppoe_server.pool_count > 0 ? config->pppoe_server.pool_count : 250,
+        config->pppoe_server.user_count,
+        config->pppoe_server.profile_count);
 
     /* ===== System Telemetry: CPU, RAM, Uptime, Time ===== */
 
@@ -1405,6 +1424,110 @@ static void build_json_clients(web_server_ctx_t *ctx, char *buf, size_t max_len)
     snprintf(buf + offset, max_len - offset, "\n  ],\n  \"count\": %d\n}\n", client_count);
 }
 
+static void build_json_broadband_status(web_server_ctx_t *ctx, char *buf, size_t max_len) {
+    if (!ctx || !buf || max_len == 0) return;
+    const pppoe_server_config_t *cfg = &ctx->config->pppoe_server;
+    bool running = pppoe_server_is_running(ctx->pppoe_srv);
+
+    uint32_t active_sessions = 0;
+    if (ctx->pppoe_srv) {
+        pppoe_active_session_t dummy[MAX_PPPOE_SESSIONS];
+        pppoe_server_get_sessions(ctx->pppoe_srv, dummy, MAX_PPPOE_SESSIONS, &active_sessions);
+    }
+
+    dyn_buf_t db;
+    dyn_buf_init(&db, 4096);
+    dyn_buf_append(&db, "{\n");
+    dyn_buf_append(&db, "  \"status\": \"ok\",\n");
+    dyn_buf_printf(&db, "  \"enabled\": %s,\n", cfg->enabled ? "true" : "false");
+    dyn_buf_printf(&db, "  \"is_running\": %s,\n", running ? "true" : "false");
+    dyn_buf_printf(&db, "  \"lan_mode\": \"%s\",\n", cfg->lan_mode[0] ? cfg->lan_mode : "dual");
+    dyn_buf_printf(&db, "  \"interface\": \"%s\",\n", cfg->interface[0] ? cfg->interface : "eth0");
+    dyn_buf_printf(&db, "  \"service_name\": \"%s\",\n", cfg->service_name[0] ? cfg->service_name : "FluxWAN-Broadband");
+    dyn_buf_printf(&db, "  \"ac_name\": \"%s\",\n", cfg->ac_name[0] ? cfg->ac_name : "FluxWAN-BRAS");
+    dyn_buf_printf(&db, "  \"local_ip\": \"%s\",\n", cfg->local_ip[0] ? cfg->local_ip : "10.100.0.1");
+    dyn_buf_printf(&db, "  \"pool_start\": \"%s\",\n", cfg->pool_start[0] ? cfg->pool_start : "10.100.0.2");
+    dyn_buf_printf(&db, "  \"pool_end\": \"%s\",\n", cfg->pool_end[0] ? cfg->pool_end : "10.100.0.254");
+    dyn_buf_printf(&db, "  \"max_sessions\": %u,\n", cfg->pool_count > 0 ? cfg->pool_count : 250);
+    dyn_buf_printf(&db, "  \"dns1\": \"%s\",\n", cfg->dns1[0] ? cfg->dns1 : "1.1.1.1");
+    dyn_buf_printf(&db, "  \"dns2\": \"%s\",\n", cfg->dns2[0] ? cfg->dns2 : "8.8.8.8");
+    dyn_buf_printf(&db, "  \"mru\": %u,\n", cfg->mru > 0 ? cfg->mru : 1492);
+    dyn_buf_printf(&db, "  \"mss\": %u,\n", cfg->mss > 0 ? cfg->mss : 1452);
+    dyn_buf_printf(&db, "  \"active_sessions_count\": %u,\n", active_sessions);
+    dyn_buf_printf(&db, "  \"total_users\": %u,\n", cfg->user_count);
+    dyn_buf_printf(&db, "  \"total_profiles\": %u,\n", cfg->profile_count);
+
+    /* Profiles list */
+    dyn_buf_append(&db, "  \"profiles\": [\n");
+    for (uint32_t p = 0; p < cfg->profile_count; p++) {
+        const pppoe_profile_t *prof = &cfg->profiles[p];
+        dyn_buf_printf(&db, "    {\"name\":\"%s\",\"rate_down_kbps\":%u,\"rate_up_kbps\":%u,\"validity_days\":%u,\"description\":\"%s\"}%s\n",
+                           prof->name, prof->rate_down_kbps, prof->rate_up_kbps, prof->validity_days, prof->description,
+                           (p == cfg->profile_count - 1) ? "" : ",");
+    }
+    dyn_buf_append(&db, "  ],\n");
+
+    /* Users list */
+    dyn_buf_append(&db, "  \"users\": [\n");
+    time_t now_sec = time(NULL);
+    for (uint32_t u = 0; u < cfg->user_count; u++) {
+        const pppoe_user_t *usr = &cfg->users[u];
+        bool is_expired = (usr->expires_at > 0 && (uint64_t)now_sec >= usr->expires_at);
+        int64_t remaining_sec = (usr->expires_at > 0) ? ((int64_t)usr->expires_at - (int64_t)now_sec) : -1;
+        dyn_buf_printf(&db, "    {\"username\":\"%s\",\"password\":\"%s\",\"profile\":\"%s\",\"static_ip\":\"%s\",\"comment\":\"%s\",\"enabled\":%s,\"created_at\":%llu,\"expires_at\":%llu,\"is_expired\":%s,\"remaining_sec\":%lld}%s\n",
+                           usr->username, usr->password, usr->profile, usr->static_ip, usr->comment, usr->enabled ? "true" : "false",
+                           (unsigned long long)usr->created_at, (unsigned long long)usr->expires_at, is_expired ? "true" : "false", (long long)remaining_sec,
+                           (u == cfg->user_count - 1) ? "" : ",");
+    }
+    dyn_buf_append(&db, "  ]\n");
+    dyn_buf_append(&db, "}\n");
+
+    safe_str_copy(buf, db.data, max_len);
+    dyn_buf_free(&db);
+}
+
+static void build_json_broadband_sessions(web_server_ctx_t *ctx, char *buf, size_t max_len) {
+    if (!ctx || !buf || max_len == 0) return;
+
+    pppoe_active_session_t sessions[MAX_PPPOE_SESSIONS];
+    uint32_t count = 0;
+    if (ctx->pppoe_srv) {
+        pppoe_server_get_sessions(ctx->pppoe_srv, sessions, MAX_PPPOE_SESSIONS, &count);
+    }
+
+    dyn_buf_t db;
+    dyn_buf_init(&db, 8192);
+    dyn_buf_append(&db, "{\n  \"status\": \"ok\",\n  \"count\": ");
+    dyn_buf_printf(&db, "%u,\n  \"sessions\": [\n", count);
+    for (uint32_t i = 0; i < count; i++) {
+        const pppoe_active_session_t *s = &sessions[i];
+        dyn_buf_printf(&db,
+            "    {\n"
+            "      \"ifname\": \"%s\",\n"
+            "      \"username\": \"%s\",\n"
+            "      \"ip\": \"%s\",\n"
+            "      \"mac\": \"%s\",\n"
+            "      \"uptime_sec\": %llu,\n"
+            "      \"rx_bytes\": %llu,\n"
+            "      \"tx_bytes\": %llu,\n"
+            "      \"rx_packets\": %llu,\n"
+            "      \"tx_packets\": %llu,\n"
+            "      \"rx_rate_kbps\": %u,\n"
+            "      \"tx_rate_kbps\": %u,\n"
+            "      \"profile\": \"%s\"\n"
+            "    }%s\n",
+            s->ifname, s->username, s->ip, s->mac,
+            (unsigned long long)s->uptime_sec,
+            (unsigned long long)s->rx_bytes, (unsigned long long)s->tx_bytes,
+            (unsigned long long)s->rx_packets, (unsigned long long)s->tx_packets,
+            s->rx_rate_kbps, s->tx_rate_kbps, s->profile,
+            (i == count - 1) ? "" : ",");
+    }
+    dyn_buf_append(&db, "  ]\n}\n");
+    safe_str_copy(buf, db.data, max_len);
+    dyn_buf_free(&db);
+}
+
 #include "wan_manager.h"
 
 static void build_json_logs(char *buf, size_t max_len) {
@@ -1880,6 +2003,17 @@ static bool extract_json_bool(const char *json, const char *key, bool default_va
     if (strncmp(p, "true", 4) == 0) return true;
     if (strncmp(p, "false", 5) == 0) return false;
     return default_val;
+}
+
+static uint64_t extract_json_uint64(const char *json, const char *key, uint64_t default_val) {
+    char pattern[128];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char *p = strstr(json, pattern);
+    if (!p) return default_val;
+    p += strlen(pattern);
+    while (*p && (*p == ' ' || *p == ':' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
+    if (!*p || (!isdigit((unsigned char)*p) && *p != '-')) return default_val;
+    return (uint64_t)strtoull(p, NULL, 10);
 }
 
 static void parse_json_string_array(const char *json, const char *key, char out_arr[MAX_GROUP_MEMBERS][MAX_LABEL_LEN], uint32_t *out_count) {
@@ -3701,6 +3835,312 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
             free(json_buf); free(resp);
         }
         close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "GET /api/v1/broadband/status") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        char *json_buf = malloc(16384);
+        char *resp = malloc(17000);
+        if (json_buf && resp) {
+            build_json_broadband_status(ctx, json_buf, 16384);
+            int len = snprintf(resp, 17000,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(json_buf), json_buf);
+            send(client_fd, resp, len, 0);
+            free(json_buf); free(resp);
+        }
+        close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "GET /api/v1/broadband/sessions") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        char *json_buf = malloc(32768);
+        char *resp = malloc(34000);
+        if (json_buf && resp) {
+            build_json_broadband_sessions(ctx, json_buf, 32768);
+            int len = snprintf(resp, 34000,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(json_buf), json_buf);
+            send(client_fd, resp, len, 0);
+            free(json_buf); free(resp);
+        }
+        close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "POST /api/v1/broadband/toggle") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        bool enable = true;
+        if (body) {
+            body += 4;
+            enable = extract_json_bool(body, "enabled", true);
+        }
+        ctx->config->pppoe_server.enabled = enable;
+        if (ctx->pppoe_srv) {
+            if (enable) pppoe_server_start(ctx->pppoe_srv);
+            else pppoe_server_stop(ctx->pppoe_srv);
+        }
+        config_save(get_config_target_path(ctx), ctx->config);
+        wan_manager_add_log("INFO", "Broadband PPPoE Server %s via Web UI", enable ? "ENABLED" : "DISABLED");
+
+        char resp_body[256];
+        snprintf(resp_body, sizeof(resp_body), "{\"status\":\"ok\",\"enabled\":%s,\"message\":\"Broadband server state updated\"}", enable ? "true" : "false");
+        char resp[512];
+        int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(resp_body), resp_body);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "POST /api/v1/broadband/config") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        if (body) {
+            body += 4;
+            pppoe_server_config_t *pcfg = &ctx->config->pppoe_server;
+            char sval[64];
+            if (extract_json_string(body, "lan_mode", sval, sizeof(sval))) safe_str_copy(pcfg->lan_mode, sval, sizeof(pcfg->lan_mode));
+            if (extract_json_string(body, "interface", sval, sizeof(sval))) safe_str_copy(pcfg->interface, sval, sizeof(pcfg->interface));
+            if (extract_json_string(body, "service_name", sval, sizeof(sval))) safe_str_copy(pcfg->service_name, sval, sizeof(pcfg->service_name));
+            if (extract_json_string(body, "ac_name", sval, sizeof(sval))) safe_str_copy(pcfg->ac_name, sval, sizeof(pcfg->ac_name));
+            if (extract_json_string(body, "local_ip", sval, sizeof(sval))) safe_str_copy(pcfg->local_ip, sval, sizeof(pcfg->local_ip));
+            if (extract_json_string(body, "pool_start", sval, sizeof(sval))) safe_str_copy(pcfg->pool_start, sval, sizeof(pcfg->pool_start));
+            if (extract_json_string(body, "pool_end", sval, sizeof(sval))) safe_str_copy(pcfg->pool_end, sval, sizeof(pcfg->pool_end));
+            int msess = extract_json_int(body, "max_sessions", 0);
+            if (msess > 0) pcfg->pool_count = (uint32_t)msess;
+            if (extract_json_string(body, "dns1", sval, sizeof(sval))) safe_str_copy(pcfg->dns1, sval, sizeof(pcfg->dns1));
+            if (extract_json_string(body, "dns2", sval, sizeof(sval))) safe_str_copy(pcfg->dns2, sval, sizeof(pcfg->dns2));
+
+            /* If mode is pppoe_only, adjust DHCP enabled */
+            if (strcmp(pcfg->lan_mode, "pppoe_only") == 0) {
+                ctx->config->lan.dhcp_enabled = false;
+            } else {
+                ctx->config->lan.dhcp_enabled = true;
+            }
+
+            if (ctx->pppoe_srv && pcfg->enabled) {
+                pppoe_server_stop(ctx->pppoe_srv);
+                pppoe_server_start(ctx->pppoe_srv);
+            }
+            config_save(get_config_target_path(ctx), ctx->config);
+            wan_manager_add_log("INFO", "Broadband configuration updated (Mode: %s, Pool: %s - %s)", pcfg->lan_mode, pcfg->pool_start, pcfg->pool_end);
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"Broadband configuration saved successfully\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "POST /api/v1/broadband/users/delete") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        char uname[64] = {0};
+        if (body) {
+            body += 4;
+            extract_json_string(body, "username", uname, sizeof(uname));
+        }
+        if (uname[0] && ctx->pppoe_srv) {
+            pppoe_server_delete_user(ctx->pppoe_srv, uname);
+            config_save(get_config_target_path(ctx), ctx->config);
+            wan_manager_add_log("INFO", "Broadband user '%s' deleted", uname);
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"User deleted successfully\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "POST /api/v1/broadband/users/renew") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        char uname[64] = {0};
+        uint32_t days = 0;
+        if (body) {
+            body += 4;
+            extract_json_string(body, "username", uname, sizeof(uname));
+            days = (uint32_t)extract_json_int(body, "days", 0);
+        }
+        if (uname[0] && ctx->pppoe_srv) {
+            pppoe_server_renew_user(ctx->pppoe_srv, uname, days);
+            config_save(get_config_target_path(ctx), ctx->config);
+            wan_manager_add_log("INFO", "Broadband subscriber '%s' renewed (+%u days)", uname, days);
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"Subscriber renewed successfully\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "POST /api/v1/broadband/users/toggle") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        char uname[64] = {0};
+        bool enable = true;
+        if (body) {
+            body += 4;
+            extract_json_string(body, "username", uname, sizeof(uname));
+            enable = extract_json_bool(body, "enabled", true);
+        }
+        if (uname[0] && ctx->pppoe_srv) {
+            pppoe_server_toggle_user(ctx->pppoe_srv, uname, enable);
+            config_save(get_config_target_path(ctx), ctx->config);
+            wan_manager_add_log("INFO", "Broadband subscriber '%s' %s", uname, enable ? "enabled" : "disabled");
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"Subscriber state updated\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "POST /api/v1/broadband/users") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        if (body && ctx->pppoe_srv) {
+            body += 4;
+            pppoe_user_t u;
+            memset(&u, 0, sizeof(u));
+            extract_json_string(body, "username", u.username, sizeof(u.username));
+            extract_json_string(body, "password", u.password, sizeof(u.password));
+            extract_json_string(body, "profile", u.profile, sizeof(u.profile));
+            extract_json_string(body, "static_ip", u.static_ip, sizeof(u.static_ip));
+            extract_json_string(body, "comment", u.comment, sizeof(u.comment));
+            u.enabled = extract_json_bool(body, "enabled", true);
+            u.created_at = extract_json_uint64(body, "created_at", 0);
+            u.expires_at = extract_json_uint64(body, "expires_at", 0);
+            int vdays = extract_json_int(body, "validity_days", -1);
+            if (vdays >= 0) {
+                if (vdays == 0) {
+                    u.expires_at = 0;
+                } else {
+                    u.expires_at = (uint64_t)time(NULL) + (uint64_t)vdays * 86400ULL;
+                }
+            }
+
+            if (u.username[0]) {
+                if (!u.profile[0]) safe_str_copy(u.profile, "Standard_25M", sizeof(u.profile));
+                pppoe_server_set_user(ctx->pppoe_srv, &u);
+                config_save(get_config_target_path(ctx), ctx->config);
+                wan_manager_add_log("INFO", "Broadband user '%s' added/updated (Profile: %s)", u.username, u.profile);
+            }
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"User account saved successfully\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "POST /api/v1/broadband/profiles/delete") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        char pname[64] = {0};
+        if (body) {
+            body += 4;
+            extract_json_string(body, "name", pname, sizeof(pname));
+        }
+        if (pname[0] && ctx->pppoe_srv) {
+            pppoe_server_delete_profile(ctx->pppoe_srv, pname);
+            config_save(get_config_target_path(ctx), ctx->config);
+            wan_manager_add_log("INFO", "Broadband speed profile '%s' deleted", pname);
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"Speed profile deleted successfully\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "POST /api/v1/broadband/profiles") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        if (body && ctx->pppoe_srv) {
+            body += 4;
+            pppoe_profile_t p;
+            memset(&p, 0, sizeof(p));
+            extract_json_string(body, "name", p.name, sizeof(p.name));
+            p.rate_down_kbps = (uint32_t)extract_json_int(body, "rate_down_kbps", 0);
+            p.rate_up_kbps = (uint32_t)extract_json_int(body, "rate_up_kbps", 0);
+            p.validity_days = (uint32_t)extract_json_int(body, "validity_days", 30);
+            extract_json_string(body, "description", p.description, sizeof(p.description));
+
+            if (p.name[0]) {
+                pppoe_server_set_profile(ctx->pppoe_srv, &p);
+                config_save(get_config_target_path(ctx), ctx->config);
+                wan_manager_add_log("INFO", "Broadband speed profile '%s' saved (%u/%u Kbps, %u days)", p.name, p.rate_down_kbps, p.rate_up_kbps, p.validity_days);
+            }
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"Speed profile saved successfully\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "POST /api/v1/broadband/sessions/disconnect") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        char ifname[64] = {0};
+        if (body) {
+            body += 4;
+            extract_json_string(body, "ifname", ifname, sizeof(ifname));
+        }
+        if (ifname[0] && ctx->pppoe_srv) {
+            pppoe_server_disconnect_session(ctx->pppoe_srv, ifname);
+            wan_manager_add_log("WARN", "Broadband session on %s disconnected manually by admin", ifname);
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"Session disconnected successfully\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
     } else if (strstr(req, "POST /api/v1/clients/block") != NULL) {
         if (!is_request_authorized(ctx->config, req)) {
             const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
@@ -3942,6 +4382,20 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
                             safe_str_copy(test_cfg->lan.name, ctx->config->lan.name[0] ? ctx->config->lan.name : "eth0", sizeof(test_cfg->lan.name));
                         }
 
+                        /* Preserve broadband PPPoE server config if omitted from apply payload or if payload has empty users/profiles */
+                        if (strstr(body, "\"pppoe_server\"") == NULL) {
+                            test_cfg->pppoe_server = ctx->config->pppoe_server;
+                        } else {
+                            if (test_cfg->pppoe_server.user_count == 0 && ctx->config->pppoe_server.user_count > 0 && strstr(body, "\"users\"") == NULL) {
+                                test_cfg->pppoe_server.user_count = ctx->config->pppoe_server.user_count;
+                                memcpy(test_cfg->pppoe_server.users, ctx->config->pppoe_server.users, sizeof(test_cfg->pppoe_server.users));
+                            }
+                            if (test_cfg->pppoe_server.profile_count == 0 && ctx->config->pppoe_server.profile_count > 0 && strstr(body, "\"profiles\"") == NULL) {
+                                test_cfg->pppoe_server.profile_count = ctx->config->pppoe_server.profile_count;
+                                memcpy(test_cfg->pppoe_server.profiles, ctx->config->pppoe_server.profiles, sizeof(test_cfg->pppoe_server.profiles));
+                            }
+                        }
+
                         char err_msg[256] = {0};
                         if (!config_validate_wan_attachments(test_cfg, err_msg, sizeof(err_msg))) {
                             LOG_WARN("[Web] Configuration rejected: %s", err_msg);
@@ -3973,6 +4427,9 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
                         LOG_INFO("[Web] Updated %s with new validated settings from UI", save_path);
                         wan_manager_add_log("INFO", "Configuration validated and saved to %s", save_path);
                         config_load(save_path, ctx->config);
+                        if (ctx->pppoe_srv) {
+                            pppoe_server_reload(ctx->pppoe_srv);
+                        }
                     }
                     free(test_cfg);
                 }

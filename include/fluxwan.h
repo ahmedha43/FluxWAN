@@ -61,7 +61,7 @@ typedef int socket_t;
 #define INVALID_SOCKET (-1)
 #endif
 
-#define FLUXWAN_VERSION "1.2.6"
+#define FLUXWAN_VERSION "1.2.7"
 #define FLUXWAN_AUTHOR "Ahmed Al-Dulaimi (أحمد الدليمي)"
 #define FLUXWAN_LICENSE "GNU GPLv3"
 #define FLUXWAN_COPYRIGHT "Copyright (C) 2026 Ahmed Al-Dulaimi. All rights reserved."
@@ -398,6 +398,52 @@ typedef struct {
     char starlink_wan_name[MAX_IFNAME_LEN];
 } nat46_config_t;
 
+#define MAX_PPPOE_USERS 256
+#define MAX_PPPOE_PROFILES 32
+#define MAX_PPPOE_SESSIONS 256
+
+/* PPPoE Bandwidth Profile Definition */
+typedef struct {
+    char name[64];
+    uint32_t rate_down_kbps;  /* 0 = Unlimited */
+    uint32_t rate_up_kbps;    /* 0 = Unlimited */
+    uint32_t validity_days;   /* Subscription validity duration in days, 0 = unlimited / no expiry */
+    char description[64];
+} pppoe_profile_t;
+
+/* PPPoE User Account Definition */
+typedef struct {
+    char username[64];
+    char password[64];
+    char profile[64];
+    char static_ip[32];
+    char comment[128];
+    uint64_t created_at;      /* Account creation epoch timestamp (seconds) */
+    uint64_t expires_at;      /* Account expiration epoch timestamp (seconds), 0 = unlimited */
+    bool enabled;
+} pppoe_user_t;
+
+/* PPPoE Server Configuration */
+typedef struct {
+    bool enabled;
+    char lan_mode[16];        /* "dual" (PPPoE + DHCP) or "pppoe_only" */
+    char interface[MAX_IFNAME_LEN]; /* Interface to bind, e.g. "eth0" */
+    char service_name[64];    /* Service Name advertised to clients */
+    char ac_name[64];         /* Access Concentrator name */
+    char local_ip[32];        /* Local gateway IP for PPP links, e.g. "10.100.0.1" */
+    char pool_start[32];      /* Remote IP start, e.g. "10.100.0.2" */
+    char pool_end[32];        /* Remote IP end, e.g. "10.100.0.254" */
+    uint32_t pool_count;      /* Number of IP addresses in pool */
+    char dns1[32];            /* Primary DNS e.g. "1.1.1.1" */
+    char dns2[32];            /* Secondary DNS e.g. "8.8.8.8" */
+    uint16_t mru;             /* MRU e.g. 1492 */
+    uint16_t mss;             /* MSS clamping e.g. 1452 */
+    pppoe_profile_t profiles[MAX_PPPOE_PROFILES];
+    uint32_t profile_count;
+    pppoe_user_t users[MAX_PPPOE_USERS];
+    uint32_t user_count;
+} pppoe_server_config_t;
+
 /* Global App Configuration Structure */
 typedef struct {
     lan_config_t lan;
@@ -415,6 +461,7 @@ typedef struct {
     auth_config_t auth;
     nat46_config_t nat46;
     dpi_config_t dpi;
+    pppoe_server_config_t pppoe_server;
     char config_file_path[MAX_PATH_LEN];
 } fluxwan_config_t;
 

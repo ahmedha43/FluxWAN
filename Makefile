@@ -15,6 +15,7 @@ SRCS = src/main.c \
        src/prober.c \
        src/wan_manager.c \
        src/pppoe_manager.c \
+       src/pppoe_server.c \
        src/sticky.c \
        src/web_server.c \
        src/net_discovery.c \
@@ -34,6 +35,7 @@ LAB_SRCS = tests/lab_runner.c \
            src/prober.c \
            src/wan_manager.c \
            src/pppoe_manager.c \
+           src/pppoe_server.c \
            src/sticky.c \
            src/net_discovery.c \
            src/net_apply.c \
@@ -55,7 +57,7 @@ TEST_KATRAN = test_katran_nextgen
 all: ui bpf $(TARGET) $(LAB_TARGET)
 
 include/ui_assets.h: web/index.html scripts/embed_ui.py include/fluxwan.h
-	@py scripts/embed_ui.py || python3 scripts/embed_ui.py
+	@python3 scripts/embed_ui.py 2>/dev/null || py scripts/embed_ui.py 2>/dev/null || python scripts/embed_ui.py
 
 ui: include/ui_assets.h
 

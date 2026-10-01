@@ -311,6 +311,11 @@
                 <span class="nav-icon">🏠</span>
                 <span x-text="t('tab_lan')">LAN &amp; DHCP</span>
             </div>
+            <div class="sidebar-item" :class="currentTab==='broadband'?'active':''" @click="currentTab='broadband';fetchBroadbandStatus();fetchBroadbandSessions();">
+                <span class="nav-icon">🌐</span>
+                <span x-text="t('tab_broadband')">Broadband (PPPoE)</span>
+                <span class="nav-badge" style="background:#06b6d4" x-show="broadbandStatus.enabled" x-text="broadbandSessions.length"></span>
+            </div>
             <div class="sidebar-section-label" x-text="currentLang==='ar'?'جودة الخدمة':'TRAFFIC'"></div>
             <div class="sidebar-item" :class="currentTab==='qos'?'active':''" @click="currentTab='qos'">
                 <span class="nav-icon">⚡</span>
@@ -989,6 +994,106 @@
                             class="px-5 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2">
                         <span>🚀 Import &amp; Apply Now</span>
                     </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal: Add Broadband User -->
+        <div x-show="showAddUserModal" x-transition class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+            <div class="glass-card max-w-md w-full p-6 rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl space-y-4">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <h3 class="text-base font-bold text-white flex items-center space-x-2">
+                        <span>👤</span>
+                        <span x-text="currentLang==='ar' ? 'إضافة مشترك برودباند جديد' : 'Add Broadband Subscriber'"></span>
+                    </h3>
+                    <button type="button" @click="showAddUserModal = false" class="text-slate-400 hover:text-white">✕</button>
+                </div>
+
+                <div class="space-y-3 text-xs">
+                    <div>
+                        <label class="text-3xs text-slate-400 block mb-1 font-semibold uppercase" x-text="currentLang==='ar' ? 'اسم المستخدم (Username)' : 'Username'"></label>
+                        <input type="text" x-model="userForm.username" placeholder="e.g. user_fiber1" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono">
+                    </div>
+                    <div>
+                        <label class="text-3xs text-slate-400 block mb-1 font-semibold uppercase" x-text="currentLang==='ar' ? 'كلمة المرور (Password)' : 'Password'"></label>
+                        <input type="text" x-model="userForm.password" placeholder="e.g. pass1234" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono">
+                    </div>
+                    <div>
+                        <label class="text-3xs text-slate-400 block mb-1 font-semibold uppercase" x-text="currentLang==='ar' ? 'باقة السرعة (Speed Profile)' : 'Speed Profile'"></label>
+                        <select x-model="userForm.profile" @change="onUserProfileChange()" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white">
+                            <template x-for="prof in (broadbandStatus.profiles || [])" :key="prof.name">
+                                <option :value="prof.name" x-text="prof.name + ' (' + (prof.validity_days > 0 ? (prof.validity_days + (currentLang==='ar'?' يوم':' Days')) : (currentLang==='ar'?'دائم':'Unlimited')) + ' - ' + (prof.rate_down_kbps > 0 ? (prof.rate_down_kbps/1024).toFixed(0) + ' Mbps' : 'Unlimited') + ')'"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-3xs text-slate-400 block mb-1 font-semibold uppercase" x-text="currentLang==='ar' ? 'آيبي ثابت اختياري (Static IP - اتركه فارغاً للآيبي التلقائي)' : 'Static IP (Optional, leave blank for pool)'"></label>
+                        <input type="text" x-model="userForm.static_ip" placeholder="e.g. 10.100.0.50" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono">
+                    </div>
+                    <div>
+                        <label class="text-3xs text-slate-400 block mb-1 font-semibold uppercase" x-text="currentLang==='ar' ? 'الاسم الكامل أو الملاحظات (Comment)' : 'Customer Name / Notes'"></label>
+                        <input type="text" x-model="userForm.comment" placeholder="e.g. برج المنصور - اشتراك منزلي" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-sans">
+                    </div>
+                    <div>
+                        <label class="text-3xs text-slate-400 block mb-1 font-semibold uppercase" x-text="currentLang==='ar' ? 'صلاحية الاشتراك بالأيام (0 = مفتوح دائم بدون انتهاء)' : 'Subscription Validity in Days (0 = Unlimited)'"></label>
+                        <input type="number" x-model.number="userForm.validity_days" placeholder="30" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono">
+                        <span class="text-3xs text-slate-500 block mt-0.5" x-text="currentLang==='ar' ? 'حدد عدد الأيام (مثلاً 30 يوماً). إذا وضعت 0 سيكون اشتراك دائم بدون تاريخ انتهاء.' : 'Number of days (e.g. 30). Set to 0 for unlimited with no expiration.'"></span>
+                    </div>
+                    <div class="flex items-center space-x-2 pt-1">
+                        <input type="checkbox" id="user-enabled" x-model="userForm.enabled" class="rounded bg-slate-800 border-slate-700 text-cyan-500 focus:ring-0">
+                        <label for="user-enabled" class="text-xs text-slate-300 font-semibold" x-text="currentLang==='ar' ? 'تفعيل الحساب فورياً' : 'Account Enabled'"></label>
+                    </div>
+                </div>
+
+                <div class="flex items-center justify-end space-x-3 pt-3 border-t border-slate-800">
+                    <button type="button" @click="showAddUserModal = false" class="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white border border-slate-700 bg-slate-800 transition" x-text="currentLang==='ar' ? 'إلغاء' : 'Cancel'"></button>
+                    <button type="button" @click="saveBroadbandUser()" class="px-5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-lg transition" x-text="currentLang==='ar' ? '💾 حفظ المشترك' : 'Save Subscriber'"></button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal: Add Speed Profile -->
+        <div x-show="showAddProfileModal" x-transition class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+            <div class="glass-card max-w-md w-full p-6 rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl space-y-4">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <h3 class="text-base font-bold text-white flex items-center space-x-2">
+                        <span>🚀</span>
+                        <span x-text="currentLang==='ar' ? 'إنشاء باقة سرعة جديدة' : 'Add Speed Profile'"></span>
+                    </h3>
+                    <button type="button" @click="showAddProfileModal = false" class="text-slate-400 hover:text-white">✕</button>
+                </div>
+
+                <div class="space-y-3 text-xs">
+                    <div>
+                        <label class="text-3xs text-slate-400 block mb-1 font-semibold uppercase" x-text="currentLang==='ar' ? 'اسم الباقة (Profile Name)' : 'Profile Name'"></label>
+                        <input type="text" x-model="profileForm.name" placeholder="e.g. VIP_100M" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono">
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-3xs text-slate-400 block mb-1 font-semibold uppercase" x-text="currentLang==='ar' ? 'التنزيل (Down Kbps)' : 'Download (Kbps)'"></label>
+                            <input type="number" x-model.number="profileForm.rate_down_kbps" placeholder="10240" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono">
+                            <span class="text-3xs text-emerald-400 block mt-1" x-text="profileForm.rate_down_kbps > 0 ? (profileForm.rate_down_kbps / 1024).toFixed(1) + ' Mbps' : 'Unlimited'"></span>
+                        </div>
+                        <div>
+                            <label class="text-3xs text-slate-400 block mb-1 font-semibold uppercase" x-text="currentLang==='ar' ? 'الرفع (Up Kbps)' : 'Upload (Kbps)'"></label>
+                            <input type="number" x-model.number="profileForm.rate_up_kbps" placeholder="5120" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono">
+                            <span class="text-3xs text-blue-400 block mt-1" x-text="profileForm.rate_up_kbps > 0 ? (profileForm.rate_up_kbps / 1024).toFixed(1) + ' Mbps' : 'Unlimited'"></span>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="text-3xs text-slate-400 block mb-1 font-semibold uppercase" x-text="currentLang==='ar' ? 'صلاحية الباقة بالأيام (0 = مفتوحة بدون انتهاء)' : 'Profile Validity in Days (0 = Unlimited)'"></label>
+                        <input type="number" x-model.number="profileForm.validity_days" placeholder="30" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono">
+                        <span class="text-3xs text-slate-500 block mt-0.5" x-text="currentLang==='ar' ? 'المدة الافتراضية لاشتراك المشترك عند اختيار هذه الباقة (مثلاً 30 يوماً)' : 'Default validity days assigned to subscribers choosing this profile.'"></span>
+                    </div>
+                    <div>
+                        <label class="text-3xs text-slate-400 block mb-1 font-semibold uppercase" x-text="currentLang==='ar' ? 'الوصف' : 'Description'"></label>
+                        <input type="text" x-model="profileForm.description" placeholder="e.g. 100 Mbps Down / 30 Mbps Up (30 Days)" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-sans">
+                    </div>
+                </div>
+
+                <div class="flex items-center justify-end space-x-3 pt-3 border-t border-slate-800">
+                    <button type="button" @click="showAddProfileModal = false" class="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white border border-slate-700 bg-slate-800 transition" x-text="currentLang==='ar' ? 'إلغاء' : 'Cancel'"></button>
+                    <button type="button" @click="saveBroadbandProfile()" class="px-5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-lg transition" x-text="currentLang==='ar' ? '💾 إضافة الباقة' : 'Save Profile'"></button>
                 </div>
             </div>
         </div>
@@ -2034,6 +2139,368 @@
             </div>
         </section>
 
+        <!-- ================= TAB: BROADBAND PPPoE SERVER (مخدّم الوصول وسيرفر البرودباند) ================= -->
+        <section x-show="currentTab === 'broadband'" class="space-y-6">
+            <!-- Header Hero Banner -->
+            <div class="glass-card p-6 rounded-2xl border border-slate-700 bg-gradient-to-r from-cyan-950/40 via-blue-950/30 to-slate-900 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
+                <div class="space-y-1.5">
+                    <div class="flex items-center space-x-3">
+                        <div class="p-2.5 rounded-xl bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
+                            <span class="text-2xl">🌐</span>
+                        </div>
+                        <div>
+                            <div class="flex items-center space-x-2">
+                                <h2 class="text-xl font-bold text-white" x-text="currentLang==='ar' ? 'سيرفر البرودباند ومخدّم الوصول المركزي (Broadband PPPoE Server)' : 'Broadband Remote Access Server (PPPoE / BRAS)'"></h2>
+                                <span class="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold"
+                                      :class="broadbandStatus.enabled ? (broadbandStatus.is_running ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 animate-pulse' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40') : 'bg-slate-700/50 text-slate-400 border border-slate-600'"
+                                      x-text="broadbandStatus.enabled ? (broadbandStatus.is_running ? (currentLang==='ar'?'⚡ السيرفر نشط ويعمل':'⚡ RUNNING') : (currentLang==='ar'?'⏳ جاري البدء...':'STARTING')) : (currentLang==='ar'?'⏸️ متوقف':'STOPPED')">
+                                </span>
+                            </div>
+                            <p class="text-xs text-slate-400 mt-0.5" x-text="currentLang==='ar' ? 'توزيع اشتراكات الإنترنت للعملاء والراوترات عبر بروتوكول PPPoE مع عزل تام، تحكم دقيق بالسرعات، وتكامل مع محرك الدمج Maglev V2.' : 'Distribute internet connections to LAN clients & routers via PPPoE with full isolation, strict speed capping, and multi-WAN balancing.'"></p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Master Actions & 1-Click Toggle -->
+                <div class="flex flex-wrap items-center gap-3">
+                    <button type="button" @click="fetchBroadbandStatus(); fetchBroadbandSessions();" class="text-xs text-slate-300 hover:text-white px-3.5 py-2 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-700 transition flex items-center space-x-1.5">
+                        <span>🔄</span>
+                        <span x-text="currentLang==='ar' ? 'تحديث' : 'Refresh'"></span>
+                    </button>
+                    
+                    <button type="button" @click="toggleBroadband(!broadbandStatus.enabled)"
+                            :class="broadbandStatus.enabled ? 'bg-gradient-to-r from-rose-600 to-red-700 hover:from-rose-500 hover:to-red-600 text-white shadow-lg shadow-rose-900/30' : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-lg shadow-emerald-900/30'"
+                            class="px-5 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center space-x-2">
+                        <span x-show="!broadbandStatus.enabled" class="flex items-center space-x-1.5">
+                            <span class="w-2 h-2 rounded-full bg-white animate-ping"></span>
+                            <span x-text="currentLang==='ar' ? '⚡ تفعيل سيرفر البرودباند على LAN' : '⚡ Enable Broadband Server'"></span>
+                        </span>
+                        <span x-show="broadbandStatus.enabled" class="flex items-center space-x-1.5">
+                            <span>🛑</span>
+                            <span x-text="currentLang==='ar' ? 'إيقاف سيرفر البرودباند' : 'Stop Broadband Server'"></span>
+                        </span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 4 KPI Telemetry Cards -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <!-- Card 1: Server Status -->
+                <div class="glass-card p-4 rounded-xl border border-slate-700 flex items-center space-x-3.5">
+                    <div class="p-3 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-xl">
+                        🖥️
+                    </div>
+                    <div>
+                        <div class="text-2xs text-slate-400 font-semibold uppercase" x-text="currentLang==='ar' ? 'المنفذ واسم الخدمة' : 'Interface & Service'"></div>
+                        <div class="text-sm font-bold text-white font-mono" x-text="broadbandStatus.interface + ' / ' + broadbandStatus.service_name"></div>
+                        <div class="text-3xs text-slate-400" x-text="'BRAS: ' + broadbandStatus.ac_name"></div>
+                    </div>
+                </div>
+
+                <!-- Card 2: LAN Mode -->
+                <div class="glass-card p-4 rounded-xl border border-slate-700 flex items-center space-x-3.5">
+                    <div class="p-3 rounded-xl text-xl" :class="broadbandStatus.lan_mode === 'pppoe_only' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'">
+                        <span x-text="broadbandStatus.lan_mode === 'pppoe_only' ? '🔒' : '🔄'"></span>
+                    </div>
+                    <div>
+                        <div class="text-2xs text-slate-400 font-semibold uppercase" x-text="currentLang==='ar' ? 'نمط التوزيع المحلي' : 'LAN Distribution Mode'"></div>
+                        <div class="text-sm font-bold text-white" x-text="broadbandStatus.lan_mode === 'pppoe_only' ? (currentLang==='ar'?'برودباند حصري (PPPoE Only)':'PPPoE Only') : (currentLang==='ar'?'نمط ثنائي (Dual Mode)':'Dual (PPPoE + DHCP)')"></div>
+                        <div class="text-3xs text-slate-400" x-text="broadbandStatus.lan_mode === 'pppoe_only' ? (currentLang==='ar'?'تم تعطيل DHCP بالكامل':'DHCP Server Disabled') : (currentLang==='ar'?'PPPoE و DHCP معاً على المنفذ':'PPPoE & DHCP Coexist')"></div>
+                    </div>
+                </div>
+
+                <!-- Card 3: Active Sessions -->
+                <div class="glass-card p-4 rounded-xl border border-slate-700 flex items-center space-x-3.5">
+                    <div class="p-3 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xl">
+                        👥
+                    </div>
+                    <div>
+                        <div class="text-2xs text-slate-400 font-semibold uppercase" x-text="currentLang==='ar' ? 'المشتركون المتصلون الآن' : 'Active Connected Sessions'"></div>
+                        <div class="text-sm font-bold text-emerald-400 font-mono" x-text="broadbandSessions.length + ' / ' + (broadbandStatus.max_sessions || 250)"></div>
+                        <div class="text-3xs text-slate-400" x-text="'Pool: ' + broadbandStatus.pool_start + ' - ' + broadbandStatus.pool_end"></div>
+                    </div>
+                </div>
+
+                <!-- Card 4: Registered Users -->
+                <div class="glass-card p-4 rounded-xl border border-slate-700 flex items-center space-x-3.5">
+                    <div class="p-3 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-xl">
+                        📋
+                    </div>
+                    <div>
+                        <div class="text-2xs text-slate-400 font-semibold uppercase" x-text="currentLang==='ar' ? 'إجمالي الحسابات والباقات' : 'Registered Users & Profiles'"></div>
+                        <div class="text-sm font-bold text-white font-mono" x-text="(broadbandStatus.users ? broadbandStatus.users.length : 0) + ' ' + (currentLang==='ar'?'مشترك':'Users')"></div>
+                        <div class="text-3xs text-slate-400" x-text="(broadbandStatus.profiles ? broadbandStatus.profiles.length : 0) + ' ' + (currentLang==='ar'?'باقات سرعة':'Speed Profiles')"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- LAN Distribution Mode Switcher Card -->
+            <div class="glass-card p-5 rounded-2xl border border-slate-700 bg-slate-900/60 space-y-4">
+                <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div>
+                        <h3 class="text-sm font-bold text-white flex items-center space-x-2">
+                            <span>⚙️</span>
+                            <span x-text="currentLang==='ar' ? 'تخصيص نمط توزيع الإنترنت على الشبكة المحلية (LAN Mode)' : 'LAN Distribution Architecture'"></span>
+                        </h3>
+                        <p class="text-xs text-slate-400 mt-0.5" x-text="currentLang==='ar' ? 'اختر كيف يتعامل الراوتر مع الأجهزة المتصلة بكيبل أو سويتش الـ LAN' : 'Select how the router serves clients attached to the local area network.'"></p>
+                    </div>
+
+                    <div class="inline-flex p-1 rounded-xl bg-slate-950 border border-slate-800 self-stretch sm:self-auto">
+                        <button type="button" @click="setBroadbandLanMode('dual')"
+                                :class="broadbandStatus.lan_mode === 'dual' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-white'"
+                                class="px-4 py-2 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 flex-1 sm:flex-initial justify-center">
+                            <span>🔄</span>
+                            <span x-text="currentLang==='ar' ? 'نمط ثنائي (Dual: PPPoE + DHCP)' : 'Dual (PPPoE + DHCP)'"></span>
+                        </button>
+                        <button type="button" @click="setBroadbandLanMode('pppoe_only')"
+                                :class="broadbandStatus.lan_mode === 'pppoe_only' ? 'bg-amber-600 text-white shadow-md' : 'text-slate-400 hover:text-white'"
+                                class="px-4 py-2 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 flex-1 sm:flex-initial justify-center">
+                            <span>🔒</span>
+                            <span x-text="currentLang==='ar' ? 'برودباند فقط (PPPoE Only)' : 'PPPoE Only (Strict)'"></span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                    <div class="p-3.5 rounded-xl border" :class="broadbandStatus.lan_mode === 'dual' ? 'border-blue-500/50 bg-blue-950/20' : 'border-slate-800 bg-slate-900/40 opacity-70'">
+                        <div class="font-bold text-blue-300 flex items-center space-x-1.5 mb-1">
+                            <span>🔄</span>
+                            <span x-text="currentLang==='ar' ? 'النمط الثنائي الهجين (موصى به في معظم الحالات)' : 'Dual Mode (Coexistence)'"></span>
+                        </div>
+                        <p class="text-slate-400 leading-relaxed" x-text="currentLang==='ar' ? 'يتم تشغيل خادم DHCP وسيرفر البرودباند معاً على نفس الكيبل. راوترات المشتركين تطلب الاتصال عبر PPPoE وتأخذ سرعاتها المحددة، بينما الحواسيب وأجهزة الإدارة تأخذ IP تلقائياً عبر DHCP.' : 'Both DHCP and PPPoE run concurrently. Client routers connect via PPPoE tunnels, while management laptops get automatic DHCP leases.'"></p>
+                    </div>
+
+                    <div class="p-3.5 rounded-xl border" :class="broadbandStatus.lan_mode === 'pppoe_only' ? 'border-amber-500/50 bg-amber-950/20' : 'border-slate-800 bg-slate-900/40 opacity-70'">
+                        <div class="font-bold text-amber-300 flex items-center space-x-1.5 mb-1">
+                            <span>🔒</span>
+                            <span x-text="currentLang==='ar' ? 'نمط البرودباند الحصري (أعلى درجات الحماية والعزل)' : 'PPPoE Only Mode (High Security)'"></span>
+                        </div>
+                        <p class="text-slate-400 leading-relaxed" x-text="currentLang==='ar' ? 'يتم إيقاف خادم DHCP كلياً في الشبكة. لن يتمكن أي جهاز من أخذ آيبي أو استخدام الإنترنت دون إدخال اسم مستخدم وكلمة مرور. يمنع تضارب الآيبيات (IP Conflicts) وهجمات ARP نهائياً.' : 'Disables DHCP entirely. No device can access the network without authenticating via PPPoE username/password. Eliminates ARP conflicts and IP theft.'"></p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Card: Live Active Sessions -->
+            <div class="glass-card rounded-2xl border border-slate-700 overflow-hidden">
+                <div class="p-4 sm:p-5 border-b border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                    <div class="flex items-center space-x-2.5">
+                        <span class="text-lg">📡</span>
+                        <div>
+                            <h3 class="text-sm font-bold text-white" x-text="currentLang==='ar' ? 'المشتركون المتصلون حالياً (Live Active Sessions)' : 'Live Active Connected Sessions'"></h3>
+                            <p class="text-xs text-slate-400" x-text="currentLang==='ar' ? 'مراقبة لحظية لاستهلاك المشتركين، الآيبي الممنوح، والسرعة المباشرة' : 'Real-time telemetry and throughput per active PPPoE tunnel.'"></p>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center space-x-2 w-full sm:w-auto">
+                        <input type="text" x-model="broadbandFilter" :placeholder="currentLang==='ar' ? 'بحث عن مشترك أو آيبي أو ماك...' : 'Search user, IP, or MAC...'"
+                               class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 w-full sm:w-64">
+                    </div>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs text-slate-300">
+                        <thead class="bg-slate-900/80 text-3xs text-slate-400 uppercase tracking-wider font-semibold border-b border-slate-800">
+                            <tr>
+                                <th class="px-4 py-3" x-text="currentLang==='ar' ? 'اسم المشترك' : 'Subscriber'"></th>
+                                <th class="px-4 py-3" x-text="currentLang==='ar' ? 'الواجهة' : 'Interface'"></th>
+                                <th class="px-4 py-3" x-text="currentLang==='ar' ? 'الآيبي الممنوح' : 'Client IP'"></th>
+                                <th class="px-4 py-3" x-text="currentLang==='ar' ? 'الماك أدرس' : 'MAC Address'"></th>
+                                <th class="px-4 py-3" x-text="currentLang==='ar' ? 'مدة الاتصال' : 'Uptime'"></th>
+                                <th class="px-4 py-3" x-text="currentLang==='ar' ? 'التنزيل اللحظي (Down)' : 'Down Rate'"></th>
+                                <th class="px-4 py-3" x-text="currentLang==='ar' ? 'الرفع اللحظي (Up)' : 'Up Rate'"></th>
+                                <th class="px-4 py-3" x-text="currentLang==='ar' ? 'الباقة' : 'Profile'"></th>
+                                <th class="px-4 py-3 text-right" x-text="currentLang==='ar' ? 'إجراءات' : 'Actions'"></th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800/60 font-mono">
+                            <template x-for="s in broadbandSessions.filter(x => !broadbandFilter || (x.username + x.ip + x.mac + x.ifname).toLowerCase().includes(broadbandFilter.toLowerCase()))" :key="s.ifname">
+                                <tr class="hover:bg-slate-800/40 transition">
+                                    <td class="px-4 py-3 font-bold text-white flex items-center space-x-2">
+                                        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                                        <span x-text="s.username"></span>
+                                    </td>
+                                    <td class="px-4 py-3 text-cyan-400 font-semibold" x-text="s.ifname"></td>
+                                    <td class="px-4 py-3 text-white" x-text="s.ip"></td>
+                                    <td class="px-4 py-3 text-slate-400 text-3xs" x-text="s.mac || 'N/A'"></td>
+                                    <td class="px-4 py-3 text-slate-300 font-sans" x-text="formatUptime(s.uptime_sec)"></td>
+                                    <td class="px-4 py-3 text-emerald-400 font-bold" x-text="s.rx_rate_kbps > 1024 ? (s.rx_rate_kbps/1024).toFixed(2) + ' Mbps' : s.rx_rate_kbps + ' Kbps'"></td>
+                                    <td class="px-4 py-3 text-blue-400 font-bold" x-text="s.tx_rate_kbps > 1024 ? (s.tx_rate_kbps/1024).toFixed(2) + ' Mbps' : s.tx_rate_kbps + ' Kbps'"></td>
+                                    <td class="px-4 py-3">
+                                        <span class="px-2 py-0.5 rounded-full text-3xs font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30" x-text="s.profile"></span>
+                                    </td>
+                                    <td class="px-4 py-3 text-right">
+                                        <button type="button" @click="disconnectBroadbandSession(s.ifname)"
+                                                class="px-2.5 py-1 rounded-lg text-3xs font-bold text-rose-400 hover:text-white bg-rose-500/10 hover:bg-rose-600 border border-rose-500/30 transition">
+                                            <span x-text="currentLang==='ar' ? 'فصل الاتصال ❌' : 'Kick / Disconnect ❌'"></span>
+                                        </button>
+                                    </td>
+                                </tr>
+                            </template>
+                            <tr x-show="!broadbandSessions || broadbandSessions.length === 0">
+                                <td colspan="9" class="px-4 py-8 text-center text-slate-500 font-sans text-xs">
+                                    <span class="block text-2xl mb-1">📭</span>
+                                    <span x-text="currentLang==='ar' ? 'لا توجد اتصالات برودباند نشطة حالياً. عندما يتصل العميل سيظهر فورياً هنا.' : 'No active PPPoE client sessions at this moment.'"></span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Two-Column Grid: Accounts & Speed Profiles -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- Broadband Accounts (2 Cols) -->
+                <div class="lg:col-span-2 glass-card rounded-2xl border border-slate-700 overflow-hidden space-y-0">
+                    <div class="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between">
+                        <div>
+                            <h3 class="text-sm font-bold text-white flex items-center space-x-2">
+                                <span>🔑</span>
+                                <span x-text="currentLang==='ar' ? 'إدارة حسابات المشتركين (Broadband Accounts)' : 'Broadband User Accounts'"></span>
+                            </h3>
+                            <p class="text-xs text-slate-400" x-text="currentLang==='ar' ? 'إضافة وتعديل وحذف اشتراكات الـ PPPoE وتحديد الباقات' : 'Manage credentials, passwords, and assigned profiles.'"></p>
+                        </div>
+                        <button type="button" @click="openAddUserModal()" class="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold text-xs shadow-md transition flex items-center space-x-1.5">
+                            <span>+</span>
+                            <span x-text="currentLang==='ar' ? 'إضافة مشترك جديد' : 'Add New User'"></span>
+                        </button>
+                    </div>
+
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-xs text-slate-300">
+                            <thead class="bg-slate-900/80 text-3xs text-slate-400 uppercase font-semibold border-b border-slate-800">
+                                <tr>
+                                    <th class="px-4 py-3" x-text="currentLang==='ar' ? 'الحالة' : 'Status'"></th>
+                                    <th class="px-4 py-3" x-text="currentLang==='ar' ? 'اسم المستخدم' : 'Username'"></th>
+                                    <th class="px-4 py-3" x-text="currentLang==='ar' ? 'كلمة المرور' : 'Password'"></th>
+                                    <th class="px-4 py-3" x-text="currentLang==='ar' ? 'باقة السرعة' : 'Profile'"></th>
+                                    <th class="px-4 py-3" x-text="currentLang==='ar' ? 'صلاحية الاشتراك' : 'Subscription Expiry'"></th>
+                                    <th class="px-4 py-3" x-text="currentLang==='ar' ? 'آيبي ثابت (Static IP)' : 'Static IP'"></th>
+                                    <th class="px-4 py-3" x-text="currentLang==='ar' ? 'ملاحظات' : 'Comment'"></th>
+                                    <th class="px-4 py-3 text-right" x-text="currentLang==='ar' ? 'إجراءات' : 'Actions'"></th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-800/60 font-mono">
+                                <template x-for="u in (broadbandStatus.users || [])" :key="u.username">
+                                    <tr class="hover:bg-slate-800/40 transition">
+                                        <td class="px-4 py-3">
+                                            <template x-if="!u.enabled">
+                                                <span class="px-2 py-0.5 rounded-full text-3xs font-bold font-sans bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center w-max gap-1">
+                                                    <span>⏸️</span>
+                                                    <span x-text="currentLang==='ar' ? 'معطّل' : 'Disabled'"></span>
+                                                </span>
+                                            </template>
+                                            <template x-if="u.enabled && u.is_expired">
+                                                <span class="px-2 py-0.5 rounded-full text-3xs font-bold font-sans bg-amber-500/20 text-amber-400 border border-amber-500/30 animate-pulse flex items-center w-max gap-1">
+                                                    <span>⛔</span>
+                                                    <span x-text="currentLang==='ar' ? 'منتهي الصلاحية' : 'Expired'"></span>
+                                                </span>
+                                            </template>
+                                            <template x-if="u.enabled && !u.is_expired">
+                                                <span class="px-2 py-0.5 rounded-full text-3xs font-bold font-sans bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center w-max gap-1">
+                                                    <span>🟢</span>
+                                                    <span x-text="currentLang==='ar' ? 'مفعّل ونشط' : 'Active'"></span>
+                                                </span>
+                                            </template>
+                                        </td>
+                                        <td class="px-4 py-3 font-bold text-white" x-text="u.username"></td>
+                                        <td class="px-4 py-3 text-slate-400 font-mono text-3xs" x-text="u.password"></td>
+                                        <td class="px-4 py-3">
+                                            <span class="px-2 py-0.5 rounded-full text-3xs font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30" x-text="u.profile"></span>
+                                        </td>
+                                        <td class="px-4 py-3 font-sans">
+                                            <template x-if="!u.expires_at || u.expires_at == 0">
+                                                <span class="text-3xs text-cyan-400 font-semibold px-2 py-0.5 rounded bg-cyan-950/40 border border-cyan-800/50" x-text="currentLang==='ar' ? '♾️ دائم (بدون انتهاء)' : '♾️ Unlimited'"></span>
+                                            </template>
+                                            <template x-if="u.expires_at > 0">
+                                                <div class="space-y-1">
+                                                    <div class="text-3xs font-mono text-slate-300" x-text="formatEpoch(u.expires_at)"></div>
+                                                    <div>
+                                                        <template x-if="u.is_expired">
+                                                            <span class="text-3xs font-bold text-rose-400 bg-rose-950/60 px-1.5 py-0.5 rounded border border-rose-800" x-text="currentLang==='ar' ? 'منتهي الصلاحية' : 'Expired'"></span>
+                                                        </template>
+                                                        <template x-if="!u.is_expired">
+                                                            <span class="text-3xs font-bold"
+                                                                  :class="getRemainingDays(u) <= 3 ? 'text-amber-400 bg-amber-950/60 border border-amber-800 px-1.5 py-0.5 rounded' : 'text-emerald-400 bg-emerald-950/60 border border-emerald-800 px-1.5 py-0.5 rounded'"
+                                                                  x-text="getRemainingTimeStr(u)"></span>
+                                                        </template>
+                                                    </div>
+                                                </div>
+                                            </template>
+                                        </td>
+                                        <td class="px-4 py-3 text-slate-400 text-3xs" x-text="u.static_ip || (currentLang==='ar'?'تلقائي من المجمع':'Dynamic Pool')"></td>
+                                        <td class="px-4 py-3 text-slate-400 font-sans text-3xs" x-text="u.comment || '-'"></td>
+                                        <td class="px-4 py-3 text-right font-sans">
+                                            <div class="flex items-center justify-end space-x-1.5">
+                                                <!-- Toggle Enable/Disable Button -->
+                                                <button type="button"
+                                                        @click="toggleBroadbandUser(u.username, !u.enabled)"
+                                                        class="px-2 py-1 rounded text-xs transition border flex items-center"
+                                                        :class="u.enabled ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border-amber-500/30' : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/30'"
+                                                        :title="u.enabled ? (currentLang==='ar'?'إيقاف مؤقت للخدمة':'Disable Account') : (currentLang==='ar'?'تشغيل الحساب':'Enable Account')">
+                                                    <span x-text="u.enabled ? '⏸️' : '▶️'"></span>
+                                                </button>
+                                                <!-- Renew Button -->
+                                                <button type="button"
+                                                        @click="renewBroadbandUser(u.username)"
+                                                        class="px-2.5 py-1 rounded bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/40 text-xs font-bold transition flex items-center space-x-1"
+                                                        :title="currentLang==='ar' ? 'تجديد الاشتراك حسب صلاحية الباقة' : 'Renew Subscription'">
+                                                    <span>🔄</span>
+                                                    <span class="text-3xs font-sans" x-text="currentLang==='ar' ? 'تجديد' : 'Renew'"></span>
+                                                </button>
+                                                <!-- Delete Button -->
+                                                <button type="button"
+                                                        @click="deleteBroadbandUser(u.username)"
+                                                        class="text-slate-500 hover:text-rose-400 text-xs px-2 py-1 transition"
+                                                        title="Delete">🗑️</button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Speed Profiles (1 Col) -->
+                <div class="glass-card rounded-2xl border border-slate-700 overflow-hidden space-y-0">
+                    <div class="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between">
+                        <div>
+                            <h3 class="text-sm font-bold text-white flex items-center space-x-2">
+                                <span>🚀</span>
+                                <span x-text="currentLang==='ar' ? 'باقات السرعة (Profiles)' : 'Speed Profiles'"></span>
+                            </h3>
+                            <p class="text-xs text-slate-400" x-text="currentLang==='ar' ? 'تحديد السرعات القصوى وصلاحيات الباقة' : 'Down / Up limits and duration.'"></p>
+                        </div>
+                        <button type="button" @click="showAddProfileModal = true" class="px-3 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-bold text-xs transition">
+                            <span>+</span>
+                        </button>
+                    </div>
+
+                    <div class="p-4 space-y-3">
+                        <template x-for="p in (broadbandStatus.profiles || [])" :key="p.name">
+                            <div class="p-3 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
+                                <div>
+                                    <div class="text-xs font-bold text-white flex items-center space-x-2">
+                                        <span x-text="p.name"></span>
+                                        <span class="text-3xs font-semibold px-2 py-0.5 rounded"
+                                              :class="p.validity_days > 0 ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30' : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'"
+                                              x-text="p.validity_days > 0 ? (p.validity_days + (currentLang==='ar'?' يوم':' Days')) : (currentLang==='ar'?'♾️ دائم':'♾️ Unlimited')"></span>
+                                    </div>
+                                    <div class="text-3xs text-slate-400 font-mono mt-0.5">
+                                        <span class="text-emerald-400 font-bold" x-text="p.rate_down_kbps > 0 ? (p.rate_down_kbps / 1024).toFixed(0) + ' Mbps ↓' : 'Unlimited ↓'"></span>
+                                        <span class="mx-1">/</span>
+                                        <span class="text-blue-400 font-bold" x-text="p.rate_up_kbps > 0 ? (p.rate_up_kbps / 1024).toFixed(0) + ' Mbps ↑' : 'Unlimited ↑'"></span>
+                                    </div>
+                                    <div class="text-3xs text-slate-500 mt-0.5" x-text="p.description"></div>
+                                </div>
+                                <button type="button" @click="deleteBroadbandProfile(p.name)" class="text-slate-500 hover:text-rose-400 text-xs px-2 py-1">🗑️</button>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <!-- ================= TAB 5: QoS & TRAFFIC SHAPING ================= -->
         <section x-show="currentTab === 'qos'" class="space-y-8">
             <!-- Header Banner -->
@@ -2830,6 +3297,7 @@
                 tab_wan: "WAN Uplinks",
                 tab_groups: "WAN Groups & PBR",
                 tab_lan: "LAN & DHCP",
+                tab_broadband: "Broadband (PPPoE)",
                 tab_qos: "QoS & Limits",
                 tab_dpi: "L7 DPI & Apps",
                 tab_services: "Services & Alerts",
@@ -2887,6 +3355,7 @@
                 tab_wan: "خطوط الإنترنت (WAN)",
                 tab_groups: "مجموعات التوجيه PBR",
                 tab_lan: "الشبكة المحلية و DHCP",
+                tab_broadband: "سيرفر البرودباند",
                 tab_qos: "جودة الخدمة وتحديد السرعة",
                 tab_dpi: "فحص الحزم L7 والتطبيقات",
                 tab_services: "الخدمات والتنبيهات",
@@ -3009,6 +3478,285 @@
                     })
                     .catch(err => {
                         this.showToast('Failed to save DPI policy', 'error');
+                    });
+                },
+                broadbandStatus: {
+                    enabled: false,
+                    is_running: false,
+                    lan_mode: 'dual',
+                    interface: 'eth0',
+                    service_name: 'FluxWAN-Broadband',
+                    ac_name: 'FluxWAN-BRAS',
+                    local_ip: '10.100.0.1',
+                    pool_start: '10.100.0.2',
+                    pool_end: '10.100.0.254',
+                    max_sessions: 250,
+                    dns1: '1.1.1.1',
+                    dns2: '8.8.8.8',
+                    mru: 1492,
+                    mss: 1452,
+                    active_sessions_count: 0,
+                    total_users: 0,
+                    total_profiles: 0,
+                    profiles: [],
+                    users: []
+                },
+                broadbandSessions: [],
+                broadbandFilter: '',
+                showAddUserModal: false,
+                showAddProfileModal: false,
+                userForm: {
+                    username: '',
+                    password: '',
+                    profile: 'Standard_25M',
+                    static_ip: '',
+                    comment: '',
+                    validity_days: 30,
+                    enabled: true
+                },
+                profileForm: {
+                    name: '',
+                    rate_down_kbps: 10240,
+                    rate_up_kbps: 5120,
+                    validity_days: 30,
+                    description: ''
+                },
+                fetchBroadbandStatus() {
+                    if (!this.authToken) return;
+                    fetch('/api/v1/broadband/status', {
+                        headers: { 'X-Auth-Token': this.authToken }
+                    })
+                    .then(r => r.json())
+                    .then(d => {
+                        if (d && d.status === 'ok') {
+                            this.broadbandStatus = d;
+                            if (this.config) this.config.pppoe_server = d;
+                            if (d.profiles && d.profiles.length > 0 && (!this.userForm.profile || this.userForm.profile === '')) {
+                                this.userForm.profile = d.profiles[0].name;
+                                this.userForm.validity_days = (d.profiles[0].validity_days !== undefined) ? d.profiles[0].validity_days : 30;
+                            }
+                        }
+                    })
+                    .catch(e => console.error('Error fetching broadband status:', e));
+                },
+                fetchBroadbandSessions() {
+                    if (!this.authToken) return;
+                    fetch('/api/v1/broadband/sessions', {
+                        headers: { 'X-Auth-Token': this.authToken }
+                    })
+                    .then(r => r.json())
+                    .then(d => {
+                        if (d && d.status === 'ok' && Array.isArray(d.sessions)) {
+                            this.broadbandSessions = d.sessions;
+                        }
+                    })
+                    .catch(e => console.error('Error fetching broadband sessions:', e));
+                },
+                toggleBroadband(newState) {
+                    if (!this.authToken) return;
+                    fetch('/api/v1/broadband/toggle', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': this.authToken },
+                        body: JSON.stringify({ enabled: newState })
+                    })
+                    .then(r => r.json())
+                    .then(d => {
+                        this.isEditing = false;
+                        this.fetchBroadbandStatus();
+                        this.fetchBroadbandSessions();
+                        this.showToast(this.currentLang === 'ar' ? (newState ? 'تم تشغيل سيرفر البرودباند بنجاح!' : 'تم إيقاف سيرفر البرودباند') : (newState ? 'Broadband PPPoE Server Started!' : 'Broadband Server Stopped'));
+                    })
+                    .catch(e => this.showToast('Failed to toggle broadband server'));
+                },
+                setBroadbandLanMode(mode) {
+                    if (!this.authToken) return;
+                    this.broadbandStatus.lan_mode = mode;
+                    this.saveBroadbandConfig();
+                },
+                saveBroadbandConfig() {
+                    if (!this.authToken) return;
+                    fetch('/api/v1/broadband/config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': this.authToken },
+                        body: JSON.stringify(this.broadbandStatus)
+                    })
+                    .then(r => r.json())
+                    .then(d => {
+                        this.isEditing = false;
+                        this.fetchBroadbandStatus();
+                        this.showToast(this.currentLang === 'ar' ? 'تم حفظ إعدادات البرودباند بنجاح' : 'Broadband configuration saved');
+                    })
+                    .catch(e => this.showToast('Failed to save broadband configuration'));
+                },
+                openAddUserModal() {
+                    const profs = this.broadbandStatus.profiles || [];
+                    const defProf = profs.length > 0 ? profs[0] : null;
+                    const defValidity = (defProf && defProf.validity_days !== undefined) ? defProf.validity_days : 30;
+                    this.userForm = {
+                        username: '',
+                        password: '',
+                        profile: defProf ? defProf.name : 'Standard_25M',
+                        static_ip: '',
+                        comment: '',
+                        validity_days: defValidity,
+                        enabled: true
+                    };
+                    this.showAddUserModal = true;
+                },
+                onUserProfileChange() {
+                    const prof = (this.broadbandStatus.profiles || []).find(p => p.name === this.userForm.profile);
+                    if (prof && prof.validity_days !== undefined) {
+                        this.userForm.validity_days = prof.validity_days;
+                    }
+                },
+                saveBroadbandUser() {
+                    if (!this.authToken || !this.userForm.username.trim() || !this.userForm.password.trim()) {
+                        this.showToast(this.currentLang === 'ar' ? 'يرجى إدخال اسم المستخدم وكلمة المرور' : 'Username and password required');
+                        return;
+                    }
+                    if (this.userForm.validity_days === null || this.userForm.validity_days === undefined || isNaN(this.userForm.validity_days) || this.userForm.validity_days === '') {
+                        const prof = (this.broadbandStatus.profiles || []).find(p => p.name === this.userForm.profile);
+                        this.userForm.validity_days = (prof && prof.validity_days !== undefined) ? prof.validity_days : 30;
+                    }
+                    fetch('/api/v1/broadband/users', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': this.authToken },
+                        body: JSON.stringify(this.userForm)
+                    })
+                    .then(r => r.json())
+                    .then(d => {
+                        this.showAddUserModal = false;
+                        this.isEditing = false;
+                        this.fetchBroadbandStatus();
+                        this.showToast(this.currentLang === 'ar' ? 'تم حفظ حساب المشترك بنجاح' : 'User account saved');
+                    })
+                    .catch(e => this.showToast('Failed to save user'));
+                },
+                deleteBroadbandUser(uname) {
+                    if (!confirm(this.currentLang === 'ar' ? `هل أنت متأكد من حذف المشترك (${uname})؟` : `Delete subscriber (${uname})?`)) return;
+                    fetch('/api/v1/broadband/users/delete', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': this.authToken },
+                        body: JSON.stringify({ username: uname })
+                    })
+                    .then(r => r.json())
+                    .then(d => {
+                        this.isEditing = false;
+                        this.fetchBroadbandStatus();
+                        this.showToast(this.currentLang === 'ar' ? 'تم حذف المشترك' : 'User deleted');
+                    });
+                },
+                renewBroadbandUser(uname, days) {
+                    const msg = this.currentLang === 'ar' ? `هل ترغب في تجديد اشتراك المشترك (${uname})؟` : `Renew subscription for (${uname})?`;
+                    if (!confirm(msg)) return;
+                    fetch('/api/v1/broadband/users/renew', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': this.authToken },
+                        body: JSON.stringify({ username: uname, days: days || 0 })
+                    })
+                    .then(r => r.json())
+                    .then(d => {
+                        this.isEditing = false;
+                        this.fetchBroadbandStatus();
+                        this.fetchBroadbandSessions();
+                        this.showToast(this.currentLang === 'ar' ? `تم تجديد اشتراك (${uname}) بنجاح` : `Subscription renewed for (${uname})`);
+                    })
+                    .catch(e => this.showToast('Failed to renew subscription'));
+                },
+                toggleBroadbandUser(uname, enable) {
+                    const actionStr = enable ? (this.currentLang === 'ar' ? 'تشغيل' : 'enable') : (this.currentLang === 'ar' ? 'إيقاف' : 'disable');
+                    if (!confirm(this.currentLang === 'ar' ? `هل أنت متأكد من ${actionStr} حساب المشترك (${uname})؟` : `Are you sure you want to ${actionStr} (${uname})?`)) return;
+                    fetch('/api/v1/broadband/users/toggle', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': this.authToken },
+                        body: JSON.stringify({ username: uname, enabled: enable })
+                    })
+                    .then(r => r.json())
+                    .then(d => {
+                        this.isEditing = false;
+                        this.fetchBroadbandStatus();
+                        this.fetchBroadbandSessions();
+                        this.showToast(this.currentLang === 'ar' ? `تم ${actionStr} المشترك بنجاح` : `User ${actionStr}d successfully`);
+                    })
+                    .catch(e => this.showToast('Failed to update user status'));
+                },
+                formatEpoch(ts) {
+                    if (!ts || ts === 0) return this.currentLang === 'ar' ? '♾️ دائم (بدون انتهاء)' : '♾️ Unlimited';
+                    const d = new Date(ts * 1000);
+                    return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                },
+                getRemainingDays(u) {
+                    if (!u) return null;
+                    let diff = 0;
+                    if (typeof u.remaining_sec === 'number' && u.remaining_sec >= 0) {
+                        diff = u.remaining_sec;
+                    } else {
+                        const ts = (typeof u === 'number') ? u : (u ? u.expires_at : 0);
+                        if (!ts || ts === 0) return null;
+                        diff = ts - Math.floor(Date.now() / 1000);
+                    }
+                    if (diff <= 0) return 0;
+                    return Math.round(diff / 86400);
+                },
+                getRemainingTimeStr(u) {
+                    if (!u) return '';
+                    let diff = 0;
+                    if (typeof u.remaining_sec === 'number' && u.remaining_sec >= 0) {
+                        diff = u.remaining_sec;
+                    } else {
+                        const ts = (typeof u === 'number') ? u : (u ? u.expires_at : 0);
+                        if (!ts || ts === 0) return this.currentLang === 'ar' ? '♾️ دائم (بدون انتهاء)' : '♾️ Unlimited';
+                        diff = ts - Math.floor(Date.now() / 1000);
+                    }
+                    if (diff <= 0) return this.currentLang === 'ar' ? 'منتهي الصلاحية' : 'Expired';
+                    const days = Math.round(diff / 86400);
+                    if (days >= 1) {
+                        return this.currentLang === 'ar' ? `متبقي ${days} يوم` : `${days} days left`;
+                    }
+                    const hours = Math.max(1, Math.round(diff / 3600));
+                    return this.currentLang === 'ar' ? `متبقي ${hours} ساعة` : `${hours} hours left`;
+                },
+                disconnectBroadbandSession(ifname) {
+                    if (!confirm(this.currentLang === 'ar' ? `هل تريد فصل جلسة الاتصال (${ifname})؟` : `Disconnect session (${ifname})?`)) return;
+                    fetch('/api/v1/broadband/sessions/disconnect', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': this.authToken },
+                        body: JSON.stringify({ ifname: ifname })
+                    })
+                    .then(r => r.json())
+                    .then(d => {
+                        this.fetchBroadbandSessions();
+                        this.showToast(this.currentLang === 'ar' ? 'تم فصل الجلسة بنجاح' : 'Session disconnected');
+                    });
+                },
+                saveBroadbandProfile() {
+                    if (!this.authToken || !this.profileForm.name.trim()) return;
+                    fetch('/api/v1/broadband/profiles', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': this.authToken },
+                        body: JSON.stringify(this.profileForm)
+                    })
+                    .then(r => r.json())
+                    .then(d => {
+                        this.showAddProfileModal = false;
+                        this.isEditing = false;
+                        this.profileForm = { name: '', rate_down_kbps: 10240, rate_up_kbps: 5120, validity_days: 30, description: '' };
+                        this.fetchBroadbandStatus();
+                        this.showToast(this.currentLang === 'ar' ? 'تمت إضافة باقة السرعة بنجاح' : 'Speed profile saved');
+                    });
+                },
+                deleteBroadbandProfile(pname) {
+                    if (!confirm(this.currentLang === 'ar' ? `هل تريد حذف الباقة (${pname})؟` : `Delete profile (${pname})?`)) return;
+                    fetch('/api/v1/broadband/profiles/delete', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': this.authToken },
+                        body: JSON.stringify({ name: pname })
+                    })
+                    .then(r => r.json())
+                    .then(d => {
+                        this.isEditing = false;
+                        this.fetchBroadbandStatus();
+                        this.showToast(this.currentLang === 'ar' ? 'تم حذف الباقة' : 'Profile deleted');
                     });
                 },
                 isEditing: false,
@@ -3168,6 +3916,9 @@
                         if (this.currentTab === 'dpi') {
                             this.fetchDpiStats();
                         }
+                        if (this.currentTab === 'broadband') {
+                            this.fetchBroadbandSessions();
+                        }
                         this.fetchStatus();
                     }, 3000);
                 },
@@ -3197,6 +3948,7 @@
                             this.fetchLeases();
                             this.fetchLanClients();
                             this.fetchLogs();
+                            this.fetchBroadbandStatus();
                             this.initChart();
                             this.checkForUpdates(false);
                         }
@@ -3238,6 +3990,7 @@
                             this.fetchLeases();
                             this.fetchLanClients();
                             this.fetchLogs();
+                            this.fetchBroadbandStatus();
                             this.initChart();
                             this.checkForUpdates(false);
                         }
@@ -3897,6 +4650,9 @@
                                 this.config.lan.policy_routes = d.policy_routes;
                             }
                             if (d.address_lists) this.config.address_lists = d.address_lists;
+                            if (d.pppoe_server && (!this.broadbandStatus.users || this.broadbandStatus.users.length === 0)) {
+                                this.fetchBroadbandStatus();
+                            }
                             if (d.wans) {
                                 this.config.wans = d.wans.map((w, idx) => ({
                                     id: w.id || (idx + 1),
@@ -4000,6 +4756,10 @@
                             if (w.username && !w.ppp_username) w.ppp_username = w.username;
                             if (w.password && !w.ppp_password) w.ppp_password = w.password;
                         });
+                    }
+
+                    if (this.broadbandStatus && this.broadbandStatus.interface) {
+                        this.config.pppoe_server = this.broadbandStatus;
                     }
 
                     fetch('/api/v1/apply', {

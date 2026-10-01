@@ -8,6 +8,7 @@
 #   - Dual Boot Architecture: UEFI (GPT + ESP) & Legacy BIOS (MBR + GRUB)
 # ==============================================================================
 set -e
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -706,10 +707,10 @@ menuentry "FluxWAN (Safe Mode / Verbose)" {
 EOF
     mkdir -p "$MOUNT_DIR/boot/grub"
     cp -f "$MOUNT_DIR/boot/efi/EFI/BOOT/grub.cfg" "$MOUNT_DIR/boot/grub/grub.cfg"
-    command -v grub-install >/dev/null 2>&1 || {
-        echo -e "${RED}[!] ERROR: grub-install is missing from the live installer image.${NC}" >&2
+    if ! command -v grub-install >/dev/null 2>&1 || ! grub-install --version >/dev/null 2>&1; then
+        echo -e "${RED}[!] ERROR: grub-install is missing or cannot run on this system.${NC}" >&2
         exit 1
-    }
+    fi
     grub-install --target=x86_64-efi --efi-directory="$MOUNT_DIR/boot/efi" \
         --boot-directory="$MOUNT_DIR/boot" --bootloader-id=FluxWAN --removable --no-nvram || {
         echo -e "${RED}[!] ERROR: GRUB EFI installation failed; the disk is not bootable.${NC}" >&2
@@ -742,7 +743,7 @@ menuentry "FluxWAN (Safe Mode / Verbose)" {
 }
 EOF
 
-    if command -v grub-install >/dev/null 2>&1 && \
+    if command -v grub-install >/dev/null 2>&1 && grub-install --version >/dev/null 2>&1 && \
         grub-install --target=i386-pc --recheck --boot-directory="$MOUNT_DIR/boot" "$TARGET_DEV"; then
         echo -e "    * ${GREEN}GRUB2 MBR installed successfully.${NC}"
     else

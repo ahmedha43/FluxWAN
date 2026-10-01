@@ -31,5 +31,36 @@
     "username": "admin",
     "password": "admin",
     "session_token": "flux_token_abc123"
+  },
+  "pppoe_server": {
+    "enabled": false,
+    "lan_mode": "dual",
+    "interface": "eth0",
+    "service_name": "FluxWAN-Broadband",
+    "ac_name": "FluxWAN-BRAS",
+    "local_ip": "10.100.0.1",
+    "pool_start": "10.100.0.2",
+    "pool_end": "10.100.0.254",
+    "max_sessions": 250,
+    "dns1": "1.1.1.1",
+    "dns2": "8.8.8.8",
+    "mru": 1492,
+    "mss": 1452,
+    "profiles": [
+      { "name": "Economy_10M", "rate_down_kbps": 10240, "rate_up_kbps": 5120, "description": "10 Mbps Down / 5 Mbps Up" },
+      { "name": "Standard_25M", "rate_down_kbps": 25600, "rate_up_kbps": 10240, "description": "25 Mbps Down / 10 Mbps Up" },
+      { "name": "Ultra_50M", "rate_down_kbps": 51200, "rate_up_kbps": 20480, "description": "50 Mbps Down / 20 Mbps Up" },
+      { "name": "Unlimited", "rate_down_kbps": 0, "rate_up_kbps": 0, "description": "Max Line Speed (No Shaping)" }
+    ],
+    "users": [
+      {
+        "username": "fluxwan",
+        "password": "123",
+        "profile": "Standard_25M",
+        "static_ip": "",
+        "comment": "Default Broadband User",
+        "enabled": true
+      }
+    ]
   }
 }

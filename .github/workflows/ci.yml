@@ -87,10 +87,8 @@ jobs:
 
       - name: Build Full Hybrid Bootable ISO (UEFI + BIOS)
         run: |
-          echo "[+] Building full bootable x86_64 ISO image..."
-          make clean
-          make all
-          bash targets/x86_64/build.sh
+          echo "[+] Building full bootable x86_64 ISO image using Alpine Docker builder..."
+          bash build.sh x86_64
           cp -f dist/fluxwan-os-x86_64.iso FluxWAN-OS-x86_64-Bootable.iso
 
       - name: Build Standalone x86_64 Appliance Package

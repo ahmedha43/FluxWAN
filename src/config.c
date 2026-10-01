@@ -129,6 +129,17 @@ static bool extract_json_bool(const char *json, const char *key, bool default_va
     return default_val;
 }
 
+static uint64_t extract_json_uint64(const char *json, const char *key, uint64_t default_val) {
+    char pattern[128];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char *p = strstr(json, pattern);
+    if (!p) return default_val;
+    p += strlen(pattern);
+    while (*p && (*p == ' ' || *p == ':' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
+    if (!*p || (!isdigit((unsigned char)*p) && *p != '-')) return default_val;
+    return (uint64_t)strtoull(p, NULL, 10);
+}
+
 static const char *find_matching_bracket(const char *start) {
     if (!start || *start != '[') return NULL;
     int depth = 0;
@@ -649,6 +660,207 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
         out_config->telegram.notify_on_recovery = true;
     }
 
+    /* Parse Broadband PPPoE Server block */
+    pppoe_server_config_t *pppoe = &out_config->pppoe_server;
+    const char *pppoe_pos = strstr(json, "\"pppoe_server\"");
+    if (pppoe_pos) {
+        pppoe->enabled = extract_json_bool(pppoe_pos, "enabled", false);
+        char sval[64];
+        if (extract_json_string(pppoe_pos, "lan_mode", sval, sizeof(sval))) {
+            safe_str_copy(pppoe->lan_mode, sval, sizeof(pppoe->lan_mode));
+        } else {
+            safe_str_copy(pppoe->lan_mode, "dual", sizeof(pppoe->lan_mode));
+        }
+        if (extract_json_string(pppoe_pos, "interface", sval, sizeof(sval))) {
+            safe_str_copy(pppoe->interface, sval, sizeof(pppoe->interface));
+        } else {
+            safe_str_copy(pppoe->interface, out_config->lan.name[0] ? out_config->lan.name : "eth0", sizeof(pppoe->interface));
+        }
+        if (extract_json_string(pppoe_pos, "service_name", sval, sizeof(sval))) {
+            safe_str_copy(pppoe->service_name, sval, sizeof(pppoe->service_name));
+        } else {
+            safe_str_copy(pppoe->service_name, "FluxWAN-Broadband", sizeof(pppoe->service_name));
+        }
+        if (extract_json_string(pppoe_pos, "ac_name", sval, sizeof(sval))) {
+            safe_str_copy(pppoe->ac_name, sval, sizeof(pppoe->ac_name));
+        } else {
+            safe_str_copy(pppoe->ac_name, "FluxWAN-BRAS", sizeof(pppoe->ac_name));
+        }
+        if (extract_json_string(pppoe_pos, "local_ip", sval, sizeof(sval))) {
+            safe_str_copy(pppoe->local_ip, sval, sizeof(pppoe->local_ip));
+        } else {
+            safe_str_copy(pppoe->local_ip, "10.100.0.1", sizeof(pppoe->local_ip));
+        }
+        if (extract_json_string(pppoe_pos, "pool_start", sval, sizeof(sval))) {
+            safe_str_copy(pppoe->pool_start, sval, sizeof(pppoe->pool_start));
+        } else {
+            safe_str_copy(pppoe->pool_start, "10.100.0.2", sizeof(pppoe->pool_start));
+        }
+        if (extract_json_string(pppoe_pos, "pool_end", sval, sizeof(sval))) {
+            safe_str_copy(pppoe->pool_end, sval, sizeof(pppoe->pool_end));
+        } else {
+            safe_str_copy(pppoe->pool_end, "10.100.0.254", sizeof(pppoe->pool_end));
+        }
+        pppoe->pool_count = (uint32_t)extract_json_int(pppoe_pos, "max_sessions", 250);
+        if (extract_json_string(pppoe_pos, "dns1", sval, sizeof(sval))) {
+            safe_str_copy(pppoe->dns1, sval, sizeof(pppoe->dns1));
+        } else {
+            safe_str_copy(pppoe->dns1, "1.1.1.1", sizeof(pppoe->dns1));
+        }
+        if (extract_json_string(pppoe_pos, "dns2", sval, sizeof(sval))) {
+            safe_str_copy(pppoe->dns2, sval, sizeof(pppoe->dns2));
+        } else {
+            safe_str_copy(pppoe->dns2, "8.8.8.8", sizeof(pppoe->dns2));
+        }
+        pppoe->mru = (uint16_t)extract_json_int(pppoe_pos, "mru", 1492);
+        pppoe->mss = (uint16_t)extract_json_int(pppoe_pos, "mss", 1452);
+
+        /* Parse Profiles */
+        const char *prof_pos = strstr(pppoe_pos, "\"profiles\"");
+        if (prof_pos) {
+            const char *p_arr_start = strchr(prof_pos, '[');
+            const char *p_arr_end = find_matching_bracket(p_arr_start);
+            if (p_arr_start && p_arr_end) {
+                const char *p = p_arr_start;
+                uint32_t p_idx = 0;
+                while (p < p_arr_end && p_idx < MAX_PPPOE_PROFILES) {
+                    const char *obj_start = strchr(p, '{');
+                    if (!obj_start || obj_start > p_arr_end) break;
+                    const char *obj_end = strchr(obj_start, '}');
+                    if (!obj_end || obj_end > p_arr_end) break;
+
+                    size_t obj_len = obj_end - obj_start + 1;
+                    char *obj_str = malloc(obj_len + 1);
+                    if (obj_str) {
+                        strncpy(obj_str, obj_start, obj_len);
+                        obj_str[obj_len] = '\0';
+                        pppoe_profile_t *prof = &pppoe->profiles[p_idx];
+                        extract_json_string(obj_str, "name", prof->name, sizeof(prof->name));
+                        prof->rate_down_kbps = (uint32_t)extract_json_int(obj_str, "rate_down_kbps", 0);
+                        prof->rate_up_kbps = (uint32_t)extract_json_int(obj_str, "rate_up_kbps", 0);
+                        prof->validity_days = (uint32_t)extract_json_int(obj_str, "validity_days", 30);
+                        extract_json_string(obj_str, "description", prof->description, sizeof(prof->description));
+                        free(obj_str);
+                        p_idx++;
+                    }
+                    p = obj_end + 1;
+                }
+                pppoe->profile_count = p_idx;
+            }
+        }
+        if (pppoe->profile_count == 0) {
+            safe_str_copy(pppoe->profiles[0].name, "Economy_10M", sizeof(pppoe->profiles[0].name));
+            pppoe->profiles[0].rate_down_kbps = 10240;
+            pppoe->profiles[0].rate_up_kbps = 5120;
+            pppoe->profiles[0].validity_days = 30;
+            safe_str_copy(pppoe->profiles[0].description, "10 Mbps Down / 5 Mbps Up (30 Days)", sizeof(pppoe->profiles[0].description));
+
+            safe_str_copy(pppoe->profiles[1].name, "Standard_25M", sizeof(pppoe->profiles[1].name));
+            pppoe->profiles[1].rate_down_kbps = 25600;
+            pppoe->profiles[1].rate_up_kbps = 10240;
+            pppoe->profiles[1].validity_days = 30;
+            safe_str_copy(pppoe->profiles[1].description, "25 Mbps Down / 10 Mbps Up (30 Days)", sizeof(pppoe->profiles[1].description));
+
+            safe_str_copy(pppoe->profiles[2].name, "Ultra_50M", sizeof(pppoe->profiles[2].name));
+            pppoe->profiles[2].rate_down_kbps = 51200;
+            pppoe->profiles[2].rate_up_kbps = 20480;
+            pppoe->profiles[2].validity_days = 30;
+            safe_str_copy(pppoe->profiles[2].description, "50 Mbps Down / 20 Mbps Up (30 Days)", sizeof(pppoe->profiles[2].description));
+
+            safe_str_copy(pppoe->profiles[3].name, "Unlimited", sizeof(pppoe->profiles[3].name));
+            pppoe->profiles[3].rate_down_kbps = 0;
+            pppoe->profiles[3].rate_up_kbps = 0;
+            pppoe->profiles[3].validity_days = 0;
+            safe_str_copy(pppoe->profiles[3].description, "Max Line Speed (No Shaping / Unlimited)", sizeof(pppoe->profiles[3].description));
+            pppoe->profile_count = 4;
+        }
+
+        /* Parse Users */
+        const char *user_pos = strstr(pppoe_pos, "\"users\"");
+        if (user_pos) {
+            const char *u_arr_start = strchr(user_pos, '[');
+            const char *u_arr_end = find_matching_bracket(u_arr_start);
+            if (u_arr_start && u_arr_end) {
+                const char *p = u_arr_start;
+                uint32_t u_idx = 0;
+                while (p < u_arr_end && u_idx < MAX_PPPOE_USERS) {
+                    const char *obj_start = strchr(p, '{');
+                    if (!obj_start || obj_start > u_arr_end) break;
+                    const char *obj_end = strchr(obj_start, '}');
+                    if (!obj_end || obj_end > u_arr_end) break;
+
+                    size_t obj_len = obj_end - obj_start + 1;
+                    char *obj_str = malloc(obj_len + 1);
+                    if (obj_str) {
+                        strncpy(obj_str, obj_start, obj_len);
+                        obj_str[obj_len] = '\0';
+                        pppoe_user_t *usr = &pppoe->users[u_idx];
+                        extract_json_string(obj_str, "username", usr->username, sizeof(usr->username));
+                        extract_json_string(obj_str, "password", usr->password, sizeof(usr->password));
+                        extract_json_string(obj_str, "profile", usr->profile, sizeof(usr->profile));
+                        extract_json_string(obj_str, "static_ip", usr->static_ip, sizeof(usr->static_ip));
+                        extract_json_string(obj_str, "comment", usr->comment, sizeof(usr->comment));
+                        usr->enabled = extract_json_bool(obj_str, "enabled", true);
+                        usr->created_at = extract_json_uint64(obj_str, "created_at", (uint64_t)time(NULL));
+                        usr->expires_at = extract_json_uint64(obj_str, "expires_at", 0);
+                        free(obj_str);
+                        u_idx++;
+                    }
+                    p = obj_end + 1;
+                }
+                pppoe->user_count = u_idx;
+            }
+        }
+    } else {
+        safe_str_copy(pppoe->lan_mode, "dual", sizeof(pppoe->lan_mode));
+        safe_str_copy(pppoe->interface, out_config->lan.name[0] ? out_config->lan.name : "eth0", sizeof(pppoe->interface));
+        safe_str_copy(pppoe->service_name, "FluxWAN-Broadband", sizeof(pppoe->service_name));
+        safe_str_copy(pppoe->ac_name, "FluxWAN-BRAS", sizeof(pppoe->ac_name));
+        safe_str_copy(pppoe->local_ip, "10.100.0.1", sizeof(pppoe->local_ip));
+        safe_str_copy(pppoe->pool_start, "10.100.0.2", sizeof(pppoe->pool_start));
+        safe_str_copy(pppoe->pool_end, "10.100.0.254", sizeof(pppoe->pool_end));
+        pppoe->pool_count = 250;
+        safe_str_copy(pppoe->dns1, "1.1.1.1", sizeof(pppoe->dns1));
+        safe_str_copy(pppoe->dns2, "8.8.8.8", sizeof(pppoe->dns2));
+        pppoe->mru = 1492;
+        pppoe->mss = 1452;
+
+        safe_str_copy(pppoe->profiles[0].name, "Economy_10M", sizeof(pppoe->profiles[0].name));
+        pppoe->profiles[0].rate_down_kbps = 10240;
+        pppoe->profiles[0].rate_up_kbps = 5120;
+        pppoe->profiles[0].validity_days = 30;
+        safe_str_copy(pppoe->profiles[0].description, "10 Mbps Down / 5 Mbps Up (30 Days)", sizeof(pppoe->profiles[0].description));
+
+        safe_str_copy(pppoe->profiles[1].name, "Standard_25M", sizeof(pppoe->profiles[1].name));
+        pppoe->profiles[1].rate_down_kbps = 25600;
+        pppoe->profiles[1].rate_up_kbps = 10240;
+        pppoe->profiles[1].validity_days = 30;
+        safe_str_copy(pppoe->profiles[1].description, "25 Mbps Down / 10 Mbps Up (30 Days)", sizeof(pppoe->profiles[1].description));
+
+        safe_str_copy(pppoe->profiles[2].name, "Ultra_50M", sizeof(pppoe->profiles[2].name));
+        pppoe->profiles[2].rate_down_kbps = 51200;
+        pppoe->profiles[2].rate_up_kbps = 20480;
+        pppoe->profiles[2].validity_days = 30;
+        safe_str_copy(pppoe->profiles[2].description, "50 Mbps Down / 20 Mbps Up (30 Days)", sizeof(pppoe->profiles[2].description));
+
+        safe_str_copy(pppoe->profiles[3].name, "Unlimited", sizeof(pppoe->profiles[3].name));
+        pppoe->profiles[3].rate_down_kbps = 0;
+        pppoe->profiles[3].rate_up_kbps = 0;
+        pppoe->profiles[3].validity_days = 0;
+        safe_str_copy(pppoe->profiles[3].description, "Max Line Speed (No Shaping / Unlimited)", sizeof(pppoe->profiles[3].description));
+        pppoe->profile_count = 4;
+
+        safe_str_copy(pppoe->users[0].username, "fluxwan", sizeof(pppoe->users[0].username));
+        safe_str_copy(pppoe->users[0].password, "123456", sizeof(pppoe->users[0].password));
+        safe_str_copy(pppoe->users[0].profile, "Standard_25M", sizeof(pppoe->users[0].profile));
+        pppoe->users[0].enabled = true;
+        pppoe->users[0].created_at = (uint64_t)time(NULL);
+        pppoe->users[0].expires_at = 0;
+        safe_str_copy(pppoe->users[0].comment, "Default Broadband User", sizeof(pppoe->users[0].comment));
+        pppoe->user_count = 1;
+    }
+
+
     /* Parse Groups array */
     const char *groups_pos = strstr(json, "\"groups\"");
     if (groups_pos) {
@@ -1086,6 +1298,54 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
     fprintf(f, "    \"voip_priority_enabled\": %s,\n", config->dpi.voip_priority_enabled ? "true" : "false");
     fprintf(f, "    \"gaming_priority_enabled\": %s,\n", config->dpi.gaming_priority_enabled ? "true" : "false");
     fprintf(f, "    \"streaming_balance_enabled\": %s\n", config->dpi.streaming_balance_enabled ? "true" : "false");
+    fprintf(f, "  },\n");
+
+    /* Serialize Broadband PPPoE Server */
+    fprintf(f, "  \"pppoe_server\": {\n");
+    fprintf(f, "    \"enabled\": %s,\n", config->pppoe_server.enabled ? "true" : "false");
+    fprintf(f, "    \"lan_mode\": \"%s\",\n", config->pppoe_server.lan_mode[0] ? config->pppoe_server.lan_mode : "dual");
+    fprintf(f, "    \"interface\": \"%s\",\n", config->pppoe_server.interface[0] ? config->pppoe_server.interface : "eth0");
+    fprintf(f, "    \"service_name\": \"%s\",\n", config->pppoe_server.service_name[0] ? config->pppoe_server.service_name : "FluxWAN-Broadband");
+    fprintf(f, "    \"ac_name\": \"%s\",\n", config->pppoe_server.ac_name[0] ? config->pppoe_server.ac_name : "FluxWAN-BRAS");
+    fprintf(f, "    \"local_ip\": \"%s\",\n", config->pppoe_server.local_ip[0] ? config->pppoe_server.local_ip : "10.100.0.1");
+    fprintf(f, "    \"pool_start\": \"%s\",\n", config->pppoe_server.pool_start[0] ? config->pppoe_server.pool_start : "10.100.0.2");
+    fprintf(f, "    \"pool_end\": \"%s\",\n", config->pppoe_server.pool_end[0] ? config->pppoe_server.pool_end : "10.100.0.254");
+    fprintf(f, "    \"max_sessions\": %u,\n", config->pppoe_server.pool_count > 0 ? config->pppoe_server.pool_count : 250);
+    fprintf(f, "    \"dns1\": \"%s\",\n", config->pppoe_server.dns1[0] ? config->pppoe_server.dns1 : "1.1.1.1");
+    fprintf(f, "    \"dns2\": \"%s\",\n", config->pppoe_server.dns2[0] ? config->pppoe_server.dns2 : "8.8.8.8");
+    fprintf(f, "    \"mru\": %u,\n", config->pppoe_server.mru > 0 ? config->pppoe_server.mru : 1492);
+    fprintf(f, "    \"mss\": %u", config->pppoe_server.mss > 0 ? config->pppoe_server.mss : 1452);
+
+    /* Profiles */
+    fprintf(f, ",\n    \"profiles\": [\n");
+    for (uint32_t p = 0; p < config->pppoe_server.profile_count; p++) {
+        const pppoe_profile_t *prof = &config->pppoe_server.profiles[p];
+        fprintf(f, "      {\n");
+        fprintf(f, "        \"name\": \"%s\",\n", prof->name);
+        fprintf(f, "        \"rate_down_kbps\": %u,\n", prof->rate_down_kbps);
+        fprintf(f, "        \"rate_up_kbps\": %u,\n", prof->rate_up_kbps);
+        fprintf(f, "        \"validity_days\": %u,\n", prof->validity_days);
+        fprintf(f, "        \"description\": \"%s\"\n", prof->description);
+        fprintf(f, "      }%s\n", (p == config->pppoe_server.profile_count - 1) ? "" : ",");
+    }
+    fprintf(f, "    ],\n");
+
+    /* Users */
+    fprintf(f, "    \"users\": [\n");
+    for (uint32_t u = 0; u < config->pppoe_server.user_count; u++) {
+        const pppoe_user_t *usr = &config->pppoe_server.users[u];
+        fprintf(f, "      {\n");
+        fprintf(f, "        \"username\": \"%s\",\n", usr->username);
+        fprintf(f, "        \"password\": \"%s\",\n", usr->password);
+        fprintf(f, "        \"profile\": \"%s\",\n", usr->profile);
+        fprintf(f, "        \"static_ip\": \"%s\",\n", usr->static_ip);
+        fprintf(f, "        \"comment\": \"%s\",\n", usr->comment);
+        fprintf(f, "        \"created_at\": %llu,\n", (unsigned long long)usr->created_at);
+        fprintf(f, "        \"expires_at\": %llu,\n", (unsigned long long)usr->expires_at);
+        fprintf(f, "        \"enabled\": %s\n", usr->enabled ? "true" : "false");
+        fprintf(f, "      }%s\n", (u == config->pppoe_server.user_count - 1) ? "" : ",");
+    }
+    fprintf(f, "    ]\n");
     fprintf(f, "  }");
 
     if (config->address_list_count > 0) {
@@ -1472,6 +1732,50 @@ int config_reset_to_defaults(fluxwan_config_t *out_config) {
 
     /* Address Lists Default */
     out_config->address_list_count = 0;
+
+    /* PPPoE Server Defaults */
+    pppoe_server_config_t *p_def = &out_config->pppoe_server;
+    p_def->enabled = false;
+    safe_str_copy(p_def->lan_mode, "dual", sizeof(p_def->lan_mode));
+    safe_str_copy(p_def->interface, "eth0", sizeof(p_def->interface));
+    safe_str_copy(p_def->service_name, "FluxWAN-Broadband", sizeof(p_def->service_name));
+    safe_str_copy(p_def->ac_name, "FluxWAN-BRAS", sizeof(p_def->ac_name));
+    safe_str_copy(p_def->local_ip, "10.100.0.1", sizeof(p_def->local_ip));
+    safe_str_copy(p_def->pool_start, "10.100.0.2", sizeof(p_def->pool_start));
+    safe_str_copy(p_def->pool_end, "10.100.0.254", sizeof(p_def->pool_end));
+    p_def->pool_count = 250;
+    safe_str_copy(p_def->dns1, "1.1.1.1", sizeof(p_def->dns1));
+    safe_str_copy(p_def->dns2, "8.8.8.8", sizeof(p_def->dns2));
+    p_def->mru = 1492;
+    p_def->mss = 1452;
+
+    safe_str_copy(p_def->profiles[0].name, "Economy_10M", sizeof(p_def->profiles[0].name));
+    p_def->profiles[0].rate_down_kbps = 10240;
+    p_def->profiles[0].rate_up_kbps = 5120;
+    safe_str_copy(p_def->profiles[0].description, "10 Mbps Down / 5 Mbps Up", sizeof(p_def->profiles[0].description));
+
+    safe_str_copy(p_def->profiles[1].name, "Standard_25M", sizeof(p_def->profiles[1].name));
+    p_def->profiles[1].rate_down_kbps = 25600;
+    p_def->profiles[1].rate_up_kbps = 10240;
+    safe_str_copy(p_def->profiles[1].description, "25 Mbps Down / 10 Mbps Up", sizeof(p_def->profiles[1].description));
+
+    safe_str_copy(p_def->profiles[2].name, "Ultra_50M", sizeof(p_def->profiles[2].name));
+    p_def->profiles[2].rate_down_kbps = 51200;
+    p_def->profiles[2].rate_up_kbps = 20480;
+    safe_str_copy(p_def->profiles[2].description, "50 Mbps Down / 20 Mbps Up", sizeof(p_def->profiles[2].description));
+
+    safe_str_copy(p_def->profiles[3].name, "Unlimited", sizeof(p_def->profiles[3].name));
+    p_def->profiles[3].rate_down_kbps = 0;
+    p_def->profiles[3].rate_up_kbps = 0;
+    safe_str_copy(p_def->profiles[3].description, "Max Line Speed (No Shaping)", sizeof(p_def->profiles[3].description));
+    p_def->profile_count = 4;
+
+    safe_str_copy(p_def->users[0].username, "fluxwan", sizeof(p_def->users[0].username));
+    safe_str_copy(p_def->users[0].password, "123456", sizeof(p_def->users[0].password));
+    safe_str_copy(p_def->users[0].profile, "Standard_25M", sizeof(p_def->users[0].profile));
+    p_def->users[0].enabled = true;
+    safe_str_copy(p_def->users[0].comment, "Default Broadband User", sizeof(p_def->users[0].comment));
+    p_def->user_count = 1;
 
     return 0;
 }

@@ -69,6 +69,8 @@ __pycache__/
 Thumbs.db
 ref_winzard/
 dist/iso_run/
+dist/iso_extracted/
+chr-7.24.4.img*
 WanBlendr-main/
 /test_wan_groups
 /test_policy_routing

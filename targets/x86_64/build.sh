@@ -150,62 +150,110 @@ chmod +x "$APKOVL_DIR/usr/local/bin/"* 2>/dev/null || true
 mkdir -p "$APKOVL_DIR/usr/share/syslinux" "$APKOVL_DIR/boot/syslinux"
 cp -a "$BUILD_DIR/iso_extract/boot/syslinux/"* "$APKOVL_DIR/boot/syslinux/" 2>/dev/null || true
 cp -a "$BUILD_DIR/iso_extract/boot/syslinux/"* "$APKOVL_DIR/usr/share/syslinux/" 2>/dev/null || true
-if [ -d /usr/share/syslinux ]; then
-    cp -a /usr/share/syslinux/. "$APKOVL_DIR/usr/share/syslinux/" 2>/dev/null || true
+
+mkdir -p "$APKOVL_DIR/usr/sbin" "$APKOVL_DIR/sbin" "$APKOVL_DIR/usr/lib" "$APKOVL_DIR/lib" "$BUILD_DIR/iso_extract/apks/x86_64"
+
+# Check if running in an Alpine environment with musl libc
+IS_ALPINE=0
+if [ -f /etc/alpine-release ]; then
+    IS_ALPINE=1
 fi
 
-mkdir -p "$APKOVL_DIR/usr/sbin" "$APKOVL_DIR/sbin" "$APKOVL_DIR/usr/lib" "$APKOVL_DIR/lib"
+CACHE_X86="$PROJECT_ROOT/.cache/x86_64"
+mkdir -p "$CACHE_X86"
+ALPINE_MIRROR_MAIN="https://dl-cdn.alpinelinux.org/alpine/v3.19/main/x86_64"
 
-# Embed the complete offline bootloader toolchain. The disk installer runs from
-# initramfs, so apk/world alone cannot provide these commands at install time.
-if [ -d /usr/lib/grub/i386-pc ]; then
-    mkdir -p "$APKOVL_DIR/usr/lib/grub/i386-pc"
-    cp -a /usr/lib/grub/i386-pc/. "$APKOVL_DIR/usr/lib/grub/i386-pc/"
-fi
-
-if [ -d /usr/lib/grub/x86_64-efi ]; then
-    mkdir -p "$APKOVL_DIR/usr/lib/grub/x86_64-efi"
-    cp -a /usr/lib/grub/x86_64-efi/. "$APKOVL_DIR/usr/lib/grub/x86_64-efi/"
-fi
-
-for bin in grub-install grub-mkimage grub-bios-setup grub-probe grub-setup; do
-    SRC=$(command -v "$bin" 2>/dev/null || true)
-    [ -n "$SRC" ] && cp -f "$SRC" "$APKOVL_DIR/usr/sbin/$bin"
-done
-
-# extlinux is the BIOS fallback and requires its executable in addition to the
-# Syslinux modules and MBR code copied above.
-EXTLINUX_BIN=$(command -v extlinux 2>/dev/null || true)
-[ -n "$EXTLINUX_BIN" ] && cp -f "$EXTLINUX_BIN" "$APKOVL_DIR/sbin/extlinux"
-
-# grub-install is dynamically linked on Alpine; include its non-base runtime
-# libraries in initramfs so it cannot fail after the disk is repartitioned.
-mkdir -p "$APKOVL_DIR/usr/lib" "$APKOVL_DIR/lib"
-cp -aL /usr/lib/liblzma.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
-# Embed networking utilities (iptables, ip, conntrack, ethtool, curl, dropbear)
-for bin in iptables iptables-save iptables-restore ip conntrack ethtool curl dropbear; do
-    SRC=$(command -v "$bin" 2>/dev/null || true)
-    if [ -n "$SRC" ]; then
-        cp -f "$SRC" "$APKOVL_DIR/usr/sbin/$bin" 2>/dev/null || true
-        cp -f "$SRC" "$APKOVL_DIR/sbin/$bin" 2>/dev/null || true
+fetch_and_unpack_apk() {
+    local apk_name="$1"
+    local dest="$2"
+    if [ ! -s "$CACHE_X86/$apk_name" ]; then
+        echo "    * Downloading Alpine package: $apk_name..."
+        curl -fL --retry 3 -sS "$ALPINE_MIRROR_MAIN/$apk_name" -o "$CACHE_X86/$apk_name" || true
     fi
-done
-for bin in dropbearkey dropbearconvert dbclient; do
-    SRC=$(command -v "$bin" 2>/dev/null || true)
-    if [ -n "$SRC" ]; then
-        cp -f "$SRC" "$APKOVL_DIR/usr/bin/$bin" 2>/dev/null || true
-        cp -f "$SRC" "$APKOVL_DIR/bin/$bin" 2>/dev/null || true
+    if [ -s "$CACHE_X86/$apk_name" ]; then
+        tar -xzf "$CACHE_X86/$apk_name" -C "$dest" 2>/dev/null || true
+        cp -f "$CACHE_X86/$apk_name" "$BUILD_DIR/iso_extract/apks/x86_64/" 2>/dev/null || true
     fi
-done
-cp -aL /usr/lib/libxtables.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
-cp -aL /usr/lib/libmnl.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
-cp -aL /usr/lib/libnftnl.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
-cp -aL /usr/lib/libnetfilter_conntrack.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
-cp -aL /usr/lib/libnfnetlink.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
-cp -aL /usr/lib/libelf.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
-cp -aL /usr/lib/libzstd.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
-cp -aL /usr/lib/libcrypt.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
-cp -aL /lib/libcrypt.so* "$APKOVL_DIR/lib/" 2>/dev/null || true
+}
+
+if [ "$IS_ALPINE" -eq 1 ]; then
+    echo "    * Alpine builder environment detected. Copying native Musl bootloader toolchain..."
+    if [ -d /usr/share/syslinux ]; then
+        cp -a /usr/share/syslinux/. "$APKOVL_DIR/usr/share/syslinux/" 2>/dev/null || true
+    fi
+
+    if [ -d /usr/lib/grub/i386-pc ]; then
+        mkdir -p "$APKOVL_DIR/usr/lib/grub/i386-pc"
+        cp -a /usr/lib/grub/i386-pc/. "$APKOVL_DIR/usr/lib/grub/i386-pc/"
+    fi
+
+    if [ -d /usr/lib/grub/x86_64-efi ]; then
+        mkdir -p "$APKOVL_DIR/usr/lib/grub/x86_64-efi"
+        cp -a /usr/lib/grub/x86_64-efi/. "$APKOVL_DIR/usr/lib/grub/x86_64-efi/"
+    fi
+
+    for bin in grub-install grub-mkimage grub-bios-setup grub-probe grub-setup; do
+        SRC=$(command -v "$bin" 2>/dev/null || true)
+        [ -n "$SRC" ] && cp -f "$SRC" "$APKOVL_DIR/usr/sbin/$bin"
+    done
+
+    EXTLINUX_BIN=$(command -v extlinux 2>/dev/null || true)
+    [ -n "$EXTLINUX_BIN" ] && cp -f "$EXTLINUX_BIN" "$APKOVL_DIR/sbin/extlinux"
+
+    # Embed runtime libraries needed by grub-install on Alpine Musl
+    cp -aL /usr/lib/liblzma.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
+    cp -aL /lib/libdevmapper.so* "$APKOVL_DIR/lib/" 2>/dev/null || true
+    cp -aL /usr/lib/libdevmapper.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
+    cp -aL /lib/libblkid.so* "$APKOVL_DIR/lib/" 2>/dev/null || true
+    cp -aL /usr/lib/libblkid.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
+
+    # Embed networking utilities
+    for bin in iptables iptables-save iptables-restore ip conntrack ethtool curl dropbear; do
+        SRC=$(command -v "$bin" 2>/dev/null || true)
+        if [ -n "$SRC" ]; then
+            cp -f "$SRC" "$APKOVL_DIR/usr/sbin/$bin" 2>/dev/null || true
+            cp -f "$SRC" "$APKOVL_DIR/sbin/$bin" 2>/dev/null || true
+        fi
+    done
+    for bin in dropbearkey dropbearconvert dbclient; do
+        SRC=$(command -v "$bin" 2>/dev/null || true)
+        if [ -n "$SRC" ]; then
+            cp -f "$SRC" "$APKOVL_DIR/usr/bin/$bin" 2>/dev/null || true
+            cp -f "$SRC" "$APKOVL_DIR/bin/$bin" 2>/dev/null || true
+        fi
+    done
+    cp -aL /usr/lib/libxtables.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
+    cp -aL /usr/lib/libmnl.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
+    cp -aL /usr/lib/libnftnl.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
+    cp -aL /usr/lib/libnetfilter_conntrack.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
+    cp -aL /usr/lib/libnfnetlink.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
+    cp -aL /usr/lib/libelf.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
+    cp -aL /usr/lib/libzstd.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
+    cp -aL /usr/lib/libcrypt.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
+    cp -aL /lib/libcrypt.so* "$APKOVL_DIR/lib/" 2>/dev/null || true
+else
+    echo "    * Non-Alpine builder detected! Fetching official Alpine 3.19 Musl bootloader packages..."
+    # Pure Alpine packages to prevent copying Ubuntu glibc binaries
+    fetch_and_unpack_apk "grub-2.06-r17.apk" "$APKOVL_DIR"
+    fetch_and_unpack_apk "grub-bios-2.06-r17.apk" "$APKOVL_DIR"
+    fetch_and_unpack_apk "grub-efi-2.06-r17.apk" "$APKOVL_DIR"
+    fetch_and_unpack_apk "syslinux-6.04_pre1-r15.apk" "$APKOVL_DIR"
+    fetch_and_unpack_apk "xz-libs-5.4.5-r1.apk" "$APKOVL_DIR"
+    fetch_and_unpack_apk "device-mapper-libs-2.03.23-r0.apk" "$APKOVL_DIR"
+    fetch_and_unpack_apk "libblkid-2.39.3-r0.apk" "$APKOVL_DIR"
+    fetch_and_unpack_apk "dropbear-2022.83-r4.apk" "$APKOVL_DIR"
+    fetch_and_unpack_apk "dropbear-ssh-2022.83-r4.apk" "$APKOVL_DIR"
+    fetch_and_unpack_apk "iptables-1.8.10-r3.apk" "$APKOVL_DIR"
+    fetch_and_unpack_apk "ethtool-6.6-r0.apk" "$APKOVL_DIR"
+fi
+
+# Ensure syslinux and grub offline packages are in ISO APK repository regardless
+fetch_and_unpack_apk "grub-2.06-r17.apk" "$BUILD_DIR/iso_extract"
+fetch_and_unpack_apk "grub-bios-2.06-r17.apk" "$BUILD_DIR/iso_extract"
+fetch_and_unpack_apk "grub-efi-2.06-r17.apk" "$BUILD_DIR/iso_extract"
+fetch_and_unpack_apk "syslinux-6.04_pre1-r15.apk" "$BUILD_DIR/iso_extract"
+
+chmod +x "$APKOVL_DIR/usr/sbin/"* "$APKOVL_DIR/sbin/"* "$APKOVL_DIR/usr/bin/"* "$APKOVL_DIR/bin/"* 2>/dev/null || true
 
 # Copy appliance configuration files
 cp -f "$PROJECT_ROOT/appliance/etc/inittab" "$APKOVL_DIR/etc/inittab" 2>/dev/null || true

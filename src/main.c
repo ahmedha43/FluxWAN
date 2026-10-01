@@ -24,6 +24,7 @@
 #include "net_apply.h"
 #include "dhcp_server.h"
 #include "dns64_daemon.h"
+#include "pppoe_server.h"
 
 #include <signal.h>
 #if defined(_WIN32) || defined(_WIN64)
@@ -109,9 +110,16 @@ int main(int argc, char *argv[]) {
         dns64 = dns64_init(&config, -1, -1, -1);
     }
 
-    /* 11. Initialize Embedded Web Server & REST Engine */
+    /* 11. Initialize Broadband PPPoE Server (BRAS) */
+    pppoe_server_ctx_t *pppoe_srv = pppoe_server_init(&config);
+    if (config.pppoe_server.enabled) {
+        pppoe_server_start(pppoe_srv);
+    }
+
+    /* 12. Initialize Embedded Web Server & REST Engine */
     web_server_ctx_t *web = web_server_init(&config, nl, dhcp);
     web_server_set_wan_manager(web, wan_mgr);
+    web_server_set_pppoe_server(web, pppoe_srv);
     web_server_start_thread(web);
 
     LOG_INFO("FluxWAN Core Daemon fully initialized and running on Bare-Metal reactor loop...");
@@ -182,12 +190,18 @@ int main(int argc, char *argv[]) {
 
         /* Periodic Timer: WAN Manager Tick (DHCP Lease & PPPoE Auto-Reconnect) */
         wan_manager_periodic_tick(wan_mgr, now_ms);
+
+        /* Periodic Timer: Broadband PPPoE Server Subscriber Tick (Expiry & Session Enforcement) */
+        if (pppoe_srv) {
+            pppoe_server_periodic_tick(pppoe_srv, now_ms);
+        }
     }
 
     LOG_INFO("Shutting down FluxWAN Router Engine...");
 
     /* Graceful Cleanup */
     if (dns64) dns64_destroy(dns64);
+    if (pppoe_srv) pppoe_server_close(pppoe_srv);
     web_server_close(web);
     prober_close(prober);
     if (dhcp) dhcp_server_close(dhcp);
