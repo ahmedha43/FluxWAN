@@ -26,6 +26,7 @@ set(CORE_LIB_SOURCES
     src/prober.c
     src/wan_manager.c
     src/pppoe_manager.c
+    src/pppoe_server.c
     src/sticky.c
     src/web_server.c
     src/net_discovery.c
