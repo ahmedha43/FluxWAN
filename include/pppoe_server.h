@@ -95,9 +95,9 @@ int pppoe_server_set_profile(pppoe_server_ctx_t *ctx, const pppoe_profile_t *pro
 int pppoe_server_delete_profile(pppoe_server_ctx_t *ctx, const char *name);
 
 /**
- * Renew subscriber subscription (extends expires_at by additional_days or by profile's validity_days)
+ * Renew subscriber subscription (extends expires_at by additional_days or by profile's validity_days; optionally switches profile)
  */
-int pppoe_server_renew_user(pppoe_server_ctx_t *ctx, const char *username, uint32_t additional_days);
+int pppoe_server_renew_user(pppoe_server_ctx_t *ctx, const char *username, uint32_t additional_days, const char *new_profile);
 
 /**
  * Toggle user enabled/disabled state (disconnects active session immediately if disabled)

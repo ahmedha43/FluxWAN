@@ -564,7 +564,7 @@ int pppoe_server_delete_user(pppoe_server_ctx_t *ctx, const char *username) {
     return 0;
 }
 
-int pppoe_server_renew_user(pppoe_server_ctx_t *ctx, const char *username, uint32_t additional_days) {
+int pppoe_server_renew_user(pppoe_server_ctx_t *ctx, const char *username, uint32_t additional_days, const char *new_profile) {
     if (!ctx || !username || !username[0]) return -1;
     pthread_mutex_lock(&ctx->lock);
 
@@ -583,7 +583,13 @@ int pppoe_server_renew_user(pppoe_server_ctx_t *ctx, const char *username, uint3
     }
 
     pppoe_user_t *u = &cfg->users[found_idx];
-    /* If additional_days is 0, find validity from user's profile */
+    bool profile_changed = false;
+    if (new_profile && new_profile[0] && strcmp(u->profile, new_profile) != 0) {
+        safe_str_copy(u->profile, new_profile, sizeof(u->profile));
+        profile_changed = true;
+    }
+
+    /* If additional_days is 0, find validity from user's (new or existing) profile */
     if (additional_days == 0) {
         for (uint32_t p = 0; p < cfg->profile_count; p++) {
             if (strcmp(cfg->profiles[p].name, u->profile) == 0) {
@@ -608,8 +614,23 @@ int pppoe_server_renew_user(pppoe_server_ctx_t *ctx, const char *username, uint3
     u->enabled = true;
 
     write_pppoe_secrets(cfg);
-    LOG_INFO("[Broadband] Subscriber '%s' subscription renewed (+%u days, new expires_at: %llu)",
-             username, additional_days, (unsigned long long)u->expires_at);
+    LOG_INFO("[Broadband] Subscriber '%s' subscription renewed (profile: %s, +%u days, new expires_at: %llu)",
+             username, u->profile, additional_days, (unsigned long long)u->expires_at);
+
+    if (profile_changed) {
+        pppoe_active_session_t sessions[MAX_PPPOE_SESSIONS];
+        uint32_t count = 0;
+        pthread_mutex_unlock(&ctx->lock);
+        pppoe_server_get_sessions(ctx, sessions, MAX_PPPOE_SESSIONS, &count);
+        for (uint32_t i = 0; i < count; i++) {
+            if (strcmp(sessions[i].username, username) == 0) {
+                pppoe_server_disconnect_session(ctx, sessions[i].ifname);
+                LOG_INFO("[Broadband] Reconnecting session %s for user '%s' to apply new profile '%s'",
+                         sessions[i].ifname, username, new_profile);
+            }
+        }
+        return 0;
+    }
 
     pthread_mutex_unlock(&ctx->lock);
     return 0;

@@ -3980,16 +3980,19 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
         }
         const char *body = strstr(req, "\r\n\r\n");
         char uname[64] = {0};
+        char prof[64] = {0};
         uint32_t days = 0;
         if (body) {
             body += 4;
             extract_json_string(body, "username", uname, sizeof(uname));
+            extract_json_string(body, "profile", prof, sizeof(prof));
             days = (uint32_t)extract_json_int(body, "days", 0);
         }
         if (uname[0] && ctx->pppoe_srv) {
-            pppoe_server_renew_user(ctx->pppoe_srv, uname, days);
+            pppoe_server_renew_user(ctx->pppoe_srv, uname, days, prof);
             config_save(get_config_target_path(ctx), ctx->config);
-            wan_manager_add_log("INFO", "Broadband subscriber '%s' renewed (+%u days)", uname, days);
+            wan_manager_add_log("INFO", "Broadband subscriber '%s' renewed (profile: %s, +%u days)",
+                                uname, prof[0] ? prof : "current", days);
         }
         const char *rb = "{\"status\":\"ok\",\"message\":\"Subscriber renewed successfully\"}";
         char resp[256]; int len = snprintf(resp, sizeof(resp),
