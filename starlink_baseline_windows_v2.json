@@ -1,0 +1,539 @@
+{
+  "audit_metadata": {
+    "timestamp_utc": "2026-10-01 22:44:00 UTC",
+    "epoch": 1790894640.5694869,
+    "platform": "win32",
+    "hostname": "DESKTOP-V3U5UPD",
+    "purpose": "Normal baseline empirical measurement prior to Suspended/Walled Garden comparison"
+  },
+  "network_topology": {
+    "local_ipv4": {
+      "ip": "192.168.88.54",
+      "type": "RFC1918 Private IPv4 (Subnet 192.168.88.0/24)",
+      "is_globally_routable": false
+    },
+    "default_gateway": {
+      "ip": "192.168.88.1",
+      "mac": "48-8f-5a-46-82-5b"
+    },
+    "primary_interface": {
+      "alias": "Wi-Fi",
+      "mac": "18-1D-EA-BB-F9-40"
+    },
+    "ipv6": {
+      "has_global_unicast": false,
+      "addresses": [
+        "fe80::1d35:3fec:2b6b:6802%9",
+        "fe80::7aca:ac47:16a5:f79d%18",
+        "fe80::a2e2:53ab:2109:701a%39",
+        "fe80::46a8:3c94:81d:fe59%2",
+        "fe80::e593:80e7:f2cf:d89b%25"
+      ],
+      "state": "Link-Local Only / No Global IPv6"
+    },
+    "path_topology_description": "Windows (192.168.88.54, Private IPv4) -> Local Router Gateway (192.168.88.1) -> Starlink Dishy/Network (192.168.100.1 / CGNAT) -> Public Internet"
+  },
+  "dns_evaluations": {
+    "starlink.com": {
+      "system_resolver": {
+        "status": "SUCCESS",
+        "latency_ms": 76.07,
+        "ipv4": [
+          "151.101.129.143",
+          "151.101.193.143",
+          "151.101.1.143",
+          "151.101.65.143"
+        ],
+        "ipv6": []
+      },
+      "google_8_8_8_8": {
+        "A": {
+          "status": "SUCCESS",
+          "latency_ms": 3.2,
+          "ips": [
+            "151.101.193.143",
+            "151.101.1.143",
+            "151.101.65.143",
+            "151.101.129.143"
+          ],
+          "server_ip": "8.8.8.8"
+        },
+        "AAAA": {
+          "status": "SUCCESS",
+          "latency_ms": 55.37,
+          "ips": [],
+          "server_ip": "8.8.8.8"
+        }
+      },
+      "cloudflare_1_1_1_1": {
+        "A": {
+          "status": "SUCCESS",
+          "latency_ms": 6.91,
+          "ips": [
+            "151.101.1.143",
+            "151.101.65.143",
+            "151.101.129.143",
+            "151.101.193.143"
+          ],
+          "server_ip": "1.1.1.1"
+        },
+        "AAAA": {
+          "status": "SUCCESS",
+          "latency_ms": 43.35,
+          "ips": [],
+          "server_ip": "1.1.1.1"
+        }
+      }
+    },
+    "google.com": {
+      "system_resolver": {
+        "status": "SUCCESS",
+        "latency_ms": 0.48,
+        "ipv4": [
+          "142.251.208.110"
+        ],
+        "ipv6": []
+      },
+      "google_8_8_8_8": {
+        "A": {
+          "status": "SUCCESS",
+          "latency_ms": 3.15,
+          "ips": [
+            "142.251.208.110"
+          ],
+          "server_ip": "8.8.8.8"
+        },
+        "AAAA": {
+          "status": "SUCCESS",
+          "latency_ms": 52.26,
+          "ips": [
+            "2a00:1450:4017:821::200e"
+          ],
+          "server_ip": "8.8.8.8"
+        }
+      },
+      "cloudflare_1_1_1_1": {
+        "A": {
+          "status": "SUCCESS",
+          "latency_ms": 5.19,
+          "ips": [
+            "142.251.208.110"
+          ],
+          "server_ip": "1.1.1.1"
+        },
+        "AAAA": {
+          "status": "SUCCESS",
+          "latency_ms": 3.54,
+          "ips": [
+            "2a00:1450:4017:821::200e"
+          ],
+          "server_ip": "1.1.1.1"
+        }
+      }
+    },
+    "cloudflare.com": {
+      "system_resolver": {
+        "status": "SUCCESS",
+        "latency_ms": 0.82,
+        "ipv4": [
+          "104.16.133.229",
+          "104.16.132.229"
+        ],
+        "ipv6": []
+      },
+      "google_8_8_8_8": {
+        "A": {
+          "status": "SUCCESS",
+          "latency_ms": 3.67,
+          "ips": [
+            "104.16.132.229",
+            "104.16.133.229"
+          ],
+          "server_ip": "8.8.8.8"
+        },
+        "AAAA": {
+          "status": "SUCCESS",
+          "latency_ms": 3.54,
+          "ips": [
+            "2606:4700::6810:84e5",
+            "2606:4700::6810:85e5"
+          ],
+          "server_ip": "8.8.8.8"
+        }
+      },
+      "cloudflare_1_1_1_1": {
+        "A": {
+          "status": "SUCCESS",
+          "latency_ms": 5.14,
+          "ips": [
+            "104.16.133.229",
+            "104.16.132.229"
+          ],
+          "server_ip": "1.1.1.1"
+        },
+        "AAAA": {
+          "status": "SUCCESS",
+          "latency_ms": 3.56,
+          "ips": [
+            "2606:4700::6810:85e5",
+            "2606:4700::6810:84e5"
+          ],
+          "server_ip": "1.1.1.1"
+        }
+      }
+    },
+    "microsoft.com": {
+      "system_resolver": {
+        "status": "SUCCESS",
+        "latency_ms": 0.48,
+        "ipv4": [
+          "150.171.109.105"
+        ],
+        "ipv6": []
+      },
+      "google_8_8_8_8": {
+        "A": {
+          "status": "SUCCESS",
+          "latency_ms": 4.01,
+          "ips": [
+            "150.171.109.105"
+          ],
+          "server_ip": "8.8.8.8"
+        },
+        "AAAA": {
+          "status": "SUCCESS",
+          "latency_ms": 64.58,
+          "ips": [
+            "2603:1061:14:67::1"
+          ],
+          "server_ip": "8.8.8.8"
+        }
+      },
+      "cloudflare_1_1_1_1": {
+        "A": {
+          "status": "SUCCESS",
+          "latency_ms": 4.05,
+          "ips": [
+            "150.171.109.105"
+          ],
+          "server_ip": "1.1.1.1"
+        },
+        "AAAA": {
+          "status": "SUCCESS",
+          "latency_ms": 3.53,
+          "ips": [
+            "2603:1061:14:67::1"
+          ],
+          "server_ip": "1.1.1.1"
+        }
+      }
+    }
+  },
+  "domain_probes": {
+    "starlink.com": [
+      {
+        "ip": "151.101.1.143",
+        "domain": "starlink.com",
+        "tcp_443": {
+          "status": "SUCCESS",
+          "latency_ms": 44.91
+        },
+        "tls": {
+          "status": "SUCCESS",
+          "handshake_latency_ms": 47.53,
+          "version": "TLSv1.3",
+          "cipher": "TLS_AES_128_GCM_SHA256",
+          "cert_cn": "starlink.com",
+          "cert_issuer": "YR2",
+          "sans": [
+            "api.starlink.com",
+            "setup.starlink.com",
+            "starlink.com",
+            "support.starlink.com",
+            "web-api.starlink.com",
+            "www.starlink.com"
+          ],
+          "valid_until": "Nov 30 10:43:05 2026 GMT"
+        },
+        "http": {
+          "status": "SUCCESS",
+          "response_latency_ms": 185.6,
+          "status_code": 200,
+          "server": null,
+          "location": null,
+          "content_type": "text/html; charset=utf-8",
+          "cf_ray": null
+        }
+      },
+      {
+        "ip": "151.101.129.143",
+        "domain": "starlink.com",
+        "tcp_443": {
+          "status": "SUCCESS",
+          "latency_ms": 1075.68
+        },
+        "tls": {
+          "status": "SUCCESS",
+          "handshake_latency_ms": 434.91,
+          "version": "TLSv1.3",
+          "cipher": "TLS_AES_128_GCM_SHA256",
+          "cert_cn": "starlink.com",
+          "cert_issuer": "YR2",
+          "sans": [
+            "api.starlink.com",
+            "setup.starlink.com",
+            "starlink.com",
+            "support.starlink.com",
+            "web-api.starlink.com",
+            "www.starlink.com"
+          ],
+          "valid_until": "Nov 30 10:43:05 2026 GMT"
+        },
+        "http": {
+          "status": "SUCCESS",
+          "response_latency_ms": 222.81,
+          "status_code": 200,
+          "server": null,
+          "location": null,
+          "content_type": "text/html; charset=utf-8",
+          "cf_ray": null
+        }
+      },
+      {
+        "ip": "151.101.193.143",
+        "domain": "starlink.com",
+        "tcp_443": {
+          "status": "SUCCESS",
+          "latency_ms": 69.92
+        },
+        "tls": {
+          "status": "SUCCESS",
+          "handshake_latency_ms": 45.31,
+          "version": "TLSv1.3",
+          "cipher": "TLS_AES_128_GCM_SHA256",
+          "cert_cn": "starlink.com",
+          "cert_issuer": "YR2",
+          "sans": [
+            "api.starlink.com",
+            "setup.starlink.com",
+            "starlink.com",
+            "support.starlink.com",
+            "web-api.starlink.com",
+            "www.starlink.com"
+          ],
+          "valid_until": "Nov 30 10:43:05 2026 GMT"
+        },
+        "http": {
+          "status": "SUCCESS",
+          "response_latency_ms": 208.04,
+          "status_code": 200,
+          "server": null,
+          "location": null,
+          "content_type": "text/html; charset=utf-8",
+          "cf_ray": null
+        }
+      },
+      {
+        "ip": "151.101.65.143",
+        "domain": "starlink.com",
+        "tcp_443": {
+          "status": "SUCCESS",
+          "latency_ms": 86.05
+        },
+        "tls": {
+          "status": "SUCCESS",
+          "handshake_latency_ms": 84.91,
+          "version": "TLSv1.3",
+          "cipher": "TLS_AES_128_GCM_SHA256",
+          "cert_cn": "starlink.com",
+          "cert_issuer": "YR2",
+          "sans": [
+            "api.starlink.com",
+            "setup.starlink.com",
+            "starlink.com",
+            "support.starlink.com",
+            "web-api.starlink.com",
+            "www.starlink.com"
+          ],
+          "valid_until": "Nov 30 10:43:05 2026 GMT"
+        },
+        "http": {
+          "status": "SUCCESS",
+          "response_latency_ms": 326.06,
+          "status_code": 200,
+          "server": null,
+          "location": null,
+          "content_type": "text/html; charset=utf-8",
+          "cf_ray": null
+        }
+      }
+    ],
+    "google.com": [
+      {
+        "ip": "142.251.208.110",
+        "domain": "google.com",
+        "tcp_443": {
+          "status": "SUCCESS",
+          "latency_ms": 36.71
+        },
+        "tls": {
+          "status": "SUCCESS",
+          "handshake_latency_ms": 83.12,
+          "version": "TLSv1.3",
+          "cipher": "TLS_AES_256_GCM_SHA384",
+          "cert_cn": "*.google.com",
+          "cert_issuer": "WE2",
+          "sans": [
+            "*.google.com",
+            "*.appengine.google.com",
+            "*.bdn.dev",
+            "*.origin-test.bdn.dev",
+            "*.cloud.google.com",
+            "*.crowdsource.google.com"
+          ],
+          "valid_until": "Dec 11 20:00:18 2026 GMT"
+        },
+        "http": {
+          "status": "SUCCESS",
+          "response_latency_ms": 142.58,
+          "status_code": 301,
+          "server": "gws",
+          "location": "https://www.google.com/",
+          "content_type": "text/html; charset=UTF-8",
+          "cf_ray": null
+        }
+      }
+    ],
+    "cloudflare.com": [
+      {
+        "ip": "104.16.132.229",
+        "domain": "cloudflare.com",
+        "tcp_443": {
+          "status": "SUCCESS",
+          "latency_ms": 43.93
+        },
+        "tls": {
+          "status": "SUCCESS",
+          "handshake_latency_ms": 83.97,
+          "version": "TLSv1.3",
+          "cipher": "TLS_AES_256_GCM_SHA384",
+          "cert_cn": "cloudflare.com",
+          "cert_issuer": "WE1",
+          "sans": [
+            "cloudflare.com",
+            "ns.cloudflare.com",
+            "*.ns.cloudflare.com",
+            "*.secondary.cloudflare.com",
+            "secondary.cloudflare.com"
+          ],
+          "valid_until": "Dec  4 23:29:33 2026 GMT"
+        },
+        "http": {
+          "status": "SUCCESS",
+          "response_latency_ms": 211.28,
+          "status_code": 301,
+          "server": "cloudflare",
+          "location": "https://www.cloudflare.com/",
+          "content_type": "text/html; charset=UTF-8",
+          "cf_ray": "a43efd98ebd2dea0-SOF"
+        }
+      },
+      {
+        "ip": "104.16.133.229",
+        "domain": "cloudflare.com",
+        "tcp_443": {
+          "status": "SUCCESS",
+          "latency_ms": 113.52
+        },
+        "tls": {
+          "status": "SUCCESS",
+          "handshake_latency_ms": 637.14,
+          "version": "TLSv1.3",
+          "cipher": "TLS_AES_256_GCM_SHA384",
+          "cert_cn": "cloudflare.com",
+          "cert_issuer": "WE1",
+          "sans": [
+            "cloudflare.com",
+            "ns.cloudflare.com",
+            "*.ns.cloudflare.com",
+            "*.secondary.cloudflare.com",
+            "secondary.cloudflare.com"
+          ],
+          "valid_until": "Dec  4 23:29:33 2026 GMT"
+        },
+        "http": {
+          "status": "SUCCESS",
+          "response_latency_ms": 166.47,
+          "status_code": 301,
+          "server": "cloudflare",
+          "location": "https://www.cloudflare.com/",
+          "content_type": "text/html; charset=UTF-8",
+          "cf_ray": "a43efd9ed9e1f9bb-SOF"
+        }
+      }
+    ],
+    "microsoft.com": [
+      {
+        "ip": "150.171.109.105",
+        "domain": "microsoft.com",
+        "tcp_443": {
+          "status": "SUCCESS",
+          "latency_ms": 78.25
+        },
+        "tls": {
+          "status": "SUCCESS",
+          "handshake_latency_ms": 192.1,
+          "version": "TLSv1.3",
+          "cipher": "TLS_AES_256_GCM_SHA384",
+          "cert_cn": "microsoft.com",
+          "cert_issuer": "Microsoft TLS G2 RSA CA OCSP 04",
+          "sans": [
+            "microsoft.com",
+            "s.microsoft.com",
+            "ga.microsoft.com",
+            "aep.microsoft.com",
+            "aer.microsoft.com",
+            "grv.microsoft.com"
+          ],
+          "valid_until": "Dec 20 09:04:17 2026 GMT"
+        },
+        "http": {
+          "status": "SUCCESS",
+          "response_latency_ms": 152.4,
+          "status_code": 301,
+          "server": null,
+          "location": "https://www.microsoft.com/",
+          "content_type": "text/html",
+          "cf_ray": null
+        }
+      }
+    ]
+  },
+  "starlink_local_endpoints": {
+    "port_80": {
+      "status": "OPEN",
+      "tcp_latency_ms": 5.5,
+      "http_status": 200,
+      "server": null,
+      "content_security_policy": "default-src 'self'; style-src 'sha256-MtA3i36MxO2Glrybni/lwUTeerfBFO6msupzk/7qYhw=' 'unsafe-hashes' 'sha256-NxRZFEOZ5jm7aEtiWOYZrP2ztLVjRDpL2/xFBMzu0gc=' http://webapp.starlink.com http://192.168.100.1; script-src http://webapp.starlink.com http://192.168.100.1 'sha256-rM+f6bM6Psk1mCdYsr9Tcq2qKu7ek57kgsFB3M8Yf1c='; connect-src http://192.168.100.1:9201/SpaceX.API.Device.Device/Handle https://www.google.com",
+      "device_handle_api": true
+    },
+    "port_9200": {
+      "status": "OPEN",
+      "tcp_latency_ms": 5.28,
+      "protocol": "SpaceX gRPC-Web Service"
+    }
+  },
+  "traceroute_paths": {
+    "microsoft.com": [
+      {
+        "hop": 1,
+        "ip": "192.168.88.1"
+      },
+      {
+        "hop": 2,
+        "ip": "150.171.109.105"
+      }
+    ]
+  }
+}
