@@ -16,6 +16,50 @@ import time
 import base64
 import struct
 import hashlib
+
+# ── Ensure Tcl/Tk data directories are found properly under PyInstaller ───
+def _setup_tcl_tk():
+    base_dir = getattr(sys, '_MEIPASS', None)
+    tcl_found = None
+    tk_found = None
+
+    if base_dir and os.path.isdir(base_dir):
+        for root, dirs, files in os.walk(base_dir):
+            if not tcl_found and 'init.tcl' in files:
+                tcl_found = root
+            if not tk_found and 'tk.tcl' in files:
+                tk_found = root
+            if tcl_found and tk_found:
+                break
+
+    # Fallbacks for system Python paths
+    candidates_tcl = [
+        tcl_found,
+        os.path.join(base_dir, 'lib', 'tcl8.6') if base_dir else None,
+        os.path.join(base_dir, '_tcl_data') if base_dir else None,
+        r"C:\Users\ahmed\AppData\Local\Programs\Python\Python313\tcl\tcl8.6",
+        os.path.join(sys.prefix, 'tcl', 'tcl8.6'),
+    ]
+    candidates_tk = [
+        tk_found,
+        os.path.join(base_dir, 'lib', 'tk8.6') if base_dir else None,
+        os.path.join(base_dir, '_tk_data') if base_dir else None,
+        r"C:\Users\ahmed\AppData\Local\Programs\Python\Python313\tcl\tk8.6",
+        os.path.join(sys.prefix, 'tcl', 'tk8.6'),
+    ]
+
+    for p in candidates_tcl:
+        if p and os.path.isfile(os.path.join(p, 'init.tcl')):
+            os.environ['TCL_LIBRARY'] = p
+            break
+
+    for p in candidates_tk:
+        if p and os.path.isfile(os.path.join(p, 'tk.tcl')):
+            os.environ['TK_LIBRARY'] = p
+            break
+
+_setup_tcl_tk()
+
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
