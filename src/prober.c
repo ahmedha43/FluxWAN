@@ -191,7 +191,18 @@ int prober_send_probes(prober_ctx_t *ctx) {
 
         int send_fd = (ctx->wan_send_fds[i] >= 0) ? ctx->wan_send_fds[i] : ctx->raw_fd;
 
-        if (send_fd >= 0 && w->probe_target_ip != 0) {
+        uint32_t target_ip = w->probe_target_ip;
+        if (target_ip == 0 && w->probe_target[0]) {
+            target_ip = str_to_ip(w->probe_target);
+        }
+        if (target_ip == 0 && w->gateway != 0) {
+            target_ip = w->gateway;
+        }
+        if (target_ip == 0) {
+            target_ip = inet_addr("8.8.8.8");
+        }
+
+        if (send_fd >= 0 && target_ip != 0) {
             char packet[64];
             memset(packet, 0, sizeof(packet));
 
@@ -202,15 +213,14 @@ int prober_send_probes(prober_ctx_t *ctx) {
             icmp->un.echo.sequence = htons(seq);
 
             /* Embed 64-bit microsecond send timestamp in payload */
-            uint64_t *ts_payload = (uint64_t *)(packet + sizeof(struct icmphdr));
-            *ts_payload = now_us;
+            memcpy(packet + sizeof(struct icmphdr), &now_us, sizeof(uint64_t));
 
             icmp->checksum = checksum(packet, sizeof(packet));
 
             struct sockaddr_in dest;
             memset(&dest, 0, sizeof(dest));
             dest.sin_family = AF_INET;
-            dest.sin_addr.s_addr = w->probe_target_ip;
+            dest.sin_addr.s_addr = target_ip;
 
             ssize_t sent = sendto(send_fd, packet, sizeof(packet), 0, (struct sockaddr *)&dest, sizeof(dest));
             if (sent < 0 && ctx->wan_send_fds[i] >= 0) {
@@ -269,9 +279,10 @@ static void prober_handle_packet(prober_ctx_t *ctx, const uint8_t *buf, ssize_t 
     uint16_t id = ntohs(icmp->un.echo.id);
     uint16_t seq = ntohs(icmp->un.echo.sequence);
 
-    if (id < ctx->pid || id >= ctx->pid + ctx->config->wan_count) return;
+    uint16_t diff = (uint16_t)(id - ctx->pid);
+    if (diff >= ctx->config->wan_count) return;
 
-    uint32_t wan_idx = id - ctx->pid;
+    uint32_t wan_idx = diff;
     wan_config_t *w = &ctx->config->wans[wan_idx];
     wan_probe_state_t *ps = &ctx->wan_states[wan_idx];
 
@@ -280,8 +291,7 @@ static void prober_handle_packet(prober_ctx_t *ctx, const uint8_t *buf, ssize_t 
 
     /* Extract embedded timestamp from ICMP payload */
     if (len >= ip_hl + (int)sizeof(struct icmphdr) + (int)sizeof(uint64_t)) {
-        uint64_t *ts_ptr = (uint64_t *)(buf + ip_hl + sizeof(struct icmphdr));
-        send_time_us = *ts_ptr;
+        memcpy(&send_time_us, buf + ip_hl + sizeof(struct icmphdr), sizeof(uint64_t));
     } else {
         send_time_us = ps->pending_probes[seq % 16].send_time_us;
     }
@@ -289,7 +299,7 @@ static void prober_handle_packet(prober_ctx_t *ctx, const uint8_t *buf, ssize_t 
     uint32_t measured_rtt_ms = 1;
     if (send_time_us > 0 && now_us >= send_time_us) {
         uint64_t diff_us = now_us - send_time_us;
-        measured_rtt_ms = (uint32_t)(diff_us / 1000ULL);
+        measured_rtt_ms = (uint32_t)((diff_us + 500ULL) / 1000ULL);
         if (measured_rtt_ms == 0) measured_rtt_ms = 1; /* Sub-millisecond local latency */
     }
 
@@ -324,7 +334,7 @@ int prober_process_responses(prober_ctx_t *ctx) {
                 prober_handle_packet(ctx, buf, len);
             }
 #if !defined(_WIN32) && !defined(_WIN64)
-            if (len < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+            if (len < 0 && (errno == EBADF || errno == ENODEV)) {
                 close(ctx->wan_send_fds[i]);
                 ctx->wan_send_fds[i] = -1;
             }

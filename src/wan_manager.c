@@ -757,6 +757,15 @@ void wan_manager_periodic_tick(wan_manager_ctx_t *ctx, uint64_t now_ms) {
                         w->gateway = new_gw;
                         w->netmask = new_mask;
                         w->state = WAN_STATE_HEALTHY;
+                        if (w->probe_target_ip == 0) {
+                            if (w->probe_target[0]) {
+                                w->probe_target_ip = str_to_ip(w->probe_target);
+                            } else if (new_gw != 0) {
+                                w->probe_target_ip = new_gw;
+                                strncpy(w->probe_target, gw_str, sizeof(w->probe_target) - 1);
+                                w->probe_target[sizeof(w->probe_target) - 1] = '\0';
+                            }
+                        }
 
                         if (new_gw != 0) {
                             char rc[512];
