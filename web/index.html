@@ -1575,6 +1575,11 @@
                                         </button>
                                     </div>
                                 </div>
+                                <div>
+                                    <label class="text-3xs text-slate-400 block mb-0.5 font-semibold" x-text="currentLang==='ar' ? 'ماك أدرس مخصص للخط (اختياري / استنساخ)' : 'Custom Cloned MAC Address (Optional)'"></label>
+                                    <input type="text" x-model="wan.mac" class="w-full bg-slate-950 border border-slate-700 rounded-md px-2.5 py-1.5 text-white font-mono text-xs" placeholder="تلقائي: TP-Link / Tenda / D-Link">
+                                    <p class="text-4xs text-slate-500 mt-0.5" x-text="currentLang==='ar' ? 'اتركه فارغاً للتوليد التلقائي لشركات موثوقة (TP-Link, Tenda, D-Link) بدون تشابه نهائياً وبدون أي مايكروتك' : 'Leave empty to auto-generate authentic TP-Link/Tenda/D-Link MAC'"></p>
+                                </div>
                             </div>
 
                             <!-- Case 4: WiFi Client Configuration -->
@@ -5103,6 +5108,7 @@
                                     ppp_username: w.ppp_username || w.username || '',
                                     password: w.password || w.ppp_password || '',
                                     ppp_password: w.ppp_password || w.password || '',
+                                    mac: w.mac || w.custom_mac || '',
                                     showPassword: false,
                                     ip: w.ip || '',
                                     ip6: w.ip6 || '',
@@ -5195,6 +5201,7 @@
                             if (w.ppp_password) w.password = w.ppp_password;
                             if (w.username && !w.ppp_username) w.ppp_username = w.username;
                             if (w.password && !w.ppp_password) w.ppp_password = w.password;
+                            if (w.mac) w.custom_mac = w.mac;
                         });
                     }
 

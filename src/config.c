@@ -482,6 +482,11 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
                         safe_str_copy(w->ppp_password, val, sizeof(w->ppp_password));
                     }
 
+                    if (extract_json_string(obj_str, "mac", val, sizeof(val)) ||
+                        extract_json_string(obj_str, "custom_mac", val, sizeof(val))) {
+                        safe_str_copy(w->custom_mac, val, sizeof(w->custom_mac));
+                    }
+
                     if (extract_json_string(obj_str, "wifi_ssid", val, sizeof(val)) ||
                         extract_json_string(obj_str, "ssid", val, sizeof(val))) {
                         safe_str_copy(w->wifi_ssid, val, sizeof(w->wifi_ssid));
@@ -1246,6 +1251,9 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
                 fprintf(f, "      \"wifi_ssid\": \"%s\",\n", w->wifi_ssid);
                 fprintf(f, "      \"wifi_password\": \"%s\",\n", w->wifi_password);
                 fprintf(f, "      \"wifi_security\": \"%s\",\n", w->wifi_security[0] ? w->wifi_security : "WPA2-PSK");
+            }
+            if (w->custom_mac[0]) {
+                fprintf(f, "      \"mac\": \"%s\",\n", w->custom_mac);
             }
             fprintf(f, "      \"ip\": \"%s\",\n", ip);
             fprintf(f, "      \"netmask\": \"%s\",\n", mask);

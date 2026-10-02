@@ -143,24 +143,77 @@ static bool get_ppp_interface_ip(const char *ifname, uint32_t *out_ip, uint32_t 
 #endif
 }
 
-static void generate_unique_virtual_mac(int wan_index, const char *parent_ifname, char *out_mac_str) {
-    /* 
-     * Locally Administered Unicast MAC (Bit 1 of byte 0 is 1, Bit 0 is 0 -> 0x02)
-     * Combines hash of parent interface name + wan_index to guarantee a 100% unique MAC per session
-     */
-    uint32_t h = 0x811c9dc5;
+typedef struct {
+    uint8_t oui[3];
+    const char *vendor;
+} router_oui_t;
+
+/* Authorized Consumer CPE Router Vendors (TP-Link, Tenda, D-Link ONLY - Strictly NO MikroTik) */
+static const router_oui_t CONSUMER_ROUTER_OUIS[] = {
+    /* TP-Link Technologies */
+    { { 0xD8, 0x07, 0xB6 }, "TP-Link" },
+    { { 0x50, 0xC7, 0xBF }, "TP-Link" },
+    { { 0xE8, 0x48, 0xB8 }, "TP-Link" },
+    { { 0xB0, 0x4E, 0x26 }, "TP-Link" },
+    { { 0x30, 0xDE, 0x4B }, "TP-Link" },
+    { { 0xEC, 0x08, 0x6B }, "TP-Link" },
+    { { 0x14, 0xEB, 0xB6 }, "TP-Link" },
+    { { 0x60, 0x32, 0xB1 }, "TP-Link" },
+    /* Tenda Technology */
+    { { 0xCC, 0x2D, 0x21 }, "Tenda" },
+    { { 0x50, 0x2B, 0x73 }, "Tenda" },
+    { { 0x04, 0x95, 0xE6 }, "Tenda" },
+    { { 0xC8, 0x3A, 0x35 }, "Tenda" },
+    { { 0xD8, 0x32, 0x14 }, "Tenda" },
+    /* D-Link Corporation */
+    { { 0x14, 0xD6, 0x4D }, "D-Link" },
+    { { 0x28, 0x10, 0x7B }, "D-Link" },
+    { { 0x00, 0x18, 0xE7 }, "D-Link" },
+    { { 0xC4, 0xA8, 0x1D }, "D-Link" },
+    { { 0x20, 0xCF, 0x30 }, "D-Link" },
+    { { 0xB0, 0xC5, 0x54 }, "D-Link" }
+};
+
+static void generate_unique_virtual_mac(int wan_index, const char *parent_ifname, const char *username, char *out_mac_str) {
+    uint32_t h1 = 0x811c9dc5;
     for (const char *p = parent_ifname; p && *p; p++) {
-        h = (h ^ (uint8_t)*p) * 0x01000193;
+        h1 = (h1 ^ (uint8_t)*p) * 0x01000193;
     }
-    uint32_t w_id = (uint32_t)(wan_index + 1);
-    uint8_t b1 = 0x02; /* Locally Administered Unicast */
-    uint8_t b2 = (uint8_t)((h >> 16) & 0xFE);
-    uint8_t b3 = (uint8_t)((h >> 8) & 0xFF);
-    uint8_t b4 = (uint8_t)(h & 0xFF);
-    uint8_t b5 = (uint8_t)((w_id >> 8) & 0xFF);
-    uint8_t b6 = (uint8_t)(w_id & 0xFF);
+    uint32_t h2 = 0x9e3779b9;
+    for (const char *p = username; p && *p; p++) {
+        h2 = (h2 ^ (uint8_t)*p) * 0x85ebca6b;
+    }
+    uint32_t w = (uint32_t)(wan_index + 1);
+
+    /* High-entropy mixing across physical parent port, account name, and WAN slot */
+    uint32_t mixed = h1 ^ (h2 * 31) ^ (w * 0x45d9f3b);
+    mixed ^= (mixed >> 16);
+    mixed *= 0x45d9f3b;
+    mixed ^= (mixed >> 16);
+
+    size_t num_ouis = sizeof(CONSUMER_ROUTER_OUIS) / sizeof(CONSUMER_ROUTER_OUIS[0]);
+    size_t oui_idx = (w - 1 + (mixed % num_ouis)) % num_ouis;
+    const router_oui_t *vendor = &CONSUMER_ROUTER_OUIS[oui_idx];
+
+    /* Generate 3 completely non-sequential, independent pseudo-random lower bytes */
+    uint32_t low_mix = mixed ^ (w * 0x27d4eb2d);
+    low_mix = (low_mix ^ (low_mix >> 15)) * 0x85ebca6b;
+    low_mix = (low_mix ^ (low_mix >> 13)) * 0xc2b2ae35;
+    low_mix ^= (low_mix >> 16);
+
+    uint8_t b1 = vendor->oui[0];
+    uint8_t b2 = vendor->oui[1];
+    uint8_t b3 = vendor->oui[2];
+    uint8_t b4 = (uint8_t)((low_mix >> 16) & 0xFF);
+    uint8_t b5 = (uint8_t)((low_mix >> 8) & 0xFF);
+    uint8_t b6 = (uint8_t)(low_mix & 0xFF);
+
+    if (b6 == 0x00) b6 = 0x12;
+    if (b6 == 0xFF) b6 = 0xFE;
 
     snprintf(out_mac_str, 18, "%02x:%02x:%02x:%02x:%02x:%02x", b1, b2, b3, b4, b5, b6);
+    LOG_INFO("[MAC Stealth] Bound authentic %s MAC for WAN%d on %s: %s",
+             vendor->vendor, wan_index + 1, parent_ifname, out_mac_str);
 }
 
 int pppoe_session_start(pppoe_manager_ctx_t *pctx, int wan_index, const wan_config_t *wan) {
@@ -184,7 +237,12 @@ int pppoe_session_start(pppoe_manager_ctx_t *pctx, int wan_index, const wan_conf
 #if defined(__linux__)
     /* 1. Generate Virtual MAC and create dedicated MACVLAN sub-interface */
     snprintf(sess->macvlan_ifname, sizeof(sess->macvlan_ifname), "mv_wan%d", wan_index);
-    generate_unique_virtual_mac(wan_index, wan->name, sess->virtual_mac);
+    if (wan->custom_mac[0] != '\0' && strlen(wan->custom_mac) >= 17) {
+        safe_str_copy(sess->virtual_mac, wan->custom_mac, sizeof(sess->virtual_mac));
+        LOG_INFO("[PPPoE WAN%d] Using User Custom/Cloned MAC: %s", wan_index + 1, sess->virtual_mac);
+    } else {
+        generate_unique_virtual_mac(wan_index, wan->name, wan->ppp_username, sess->virtual_mac);
+    }
 
     char cmd[256];
     snprintf(cmd, sizeof(cmd), "ip link delete %s 2>/dev/null || true", sess->macvlan_ifname);

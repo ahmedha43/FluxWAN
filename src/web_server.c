@@ -628,6 +628,7 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
             "      \"password\": \"%s\",\n"
             "      \"ppp_password\": \"%s\",\n"
             "      \"wifi_ssid\": \"%s\",\n"
+            "      \"mac\": \"%s\",\n"
             "      \"wifi_security\": \"%s\",\n"
             "      \"wifi_signal_dbm\": %d,\n"
             "      \"wifi_signal_pct\": %d,\n"
@@ -658,6 +659,7 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
             w->ppp_username, w->ppp_username,
             w->ppp_password, w->ppp_password,
             w->wifi_ssid,
+            w->custom_mac,
             w->wifi_security[0] ? w->wifi_security : "WPA2-PSK",
             w->wifi_signal_dbm,
             w->wifi_signal_pct,

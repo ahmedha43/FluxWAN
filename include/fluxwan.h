@@ -174,6 +174,7 @@ typedef struct {
     uint32_t gateway;       /* Network byte order */
     uint32_t dns[2];        /* Network byte order */
     char ip6_addr[48];      /* e.g. "2a02:cb40:1000::1/64" */
+    char custom_mac[20];    /* Custom/cloned MAC address (e.g. "D8:07:B6:12:34:56") */
     
     /* PPPoE specific */
     char ppp_username[64];
