@@ -223,7 +223,7 @@ int prober_send_probes(prober_ctx_t *ctx) {
             dest.sin_addr.s_addr = target_ip;
 
             ssize_t sent = sendto(send_fd, packet, sizeof(packet), 0, (struct sockaddr *)&dest, sizeof(dest));
-            if (sent < 0 && ctx->wan_send_fds[i] >= 0) {
+            if (sent < 0 && (errno == EBADF || errno == ENODEV) && ctx->wan_send_fds[i] >= 0) {
                 close(ctx->wan_send_fds[i]);
                 ctx->wan_send_fds[i] = -1;
             }
