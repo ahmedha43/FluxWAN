@@ -50,12 +50,12 @@ def _setup_tcl_tk():
 
     for p in candidates_tcl:
         if p and os.path.isfile(os.path.join(p, 'init.tcl')):
-            os.environ['TCL_LIBRARY'] = p
+            os.environ['TCL_LIBRARY'] = p.replace('\\', '/')
             break
 
     for p in candidates_tk:
         if p and os.path.isfile(os.path.join(p, 'tk.tcl')):
-            os.environ['TK_LIBRARY'] = p
+            os.environ['TK_LIBRARY'] = p.replace('\\', '/')
             break
 
 _setup_tcl_tk()
