@@ -291,13 +291,6 @@ static void update_license_status_from_payload(const license_payload_t *payload,
 /* ── Public API ─────────────────────────────────────────────────────────── */
 
 int license_manager_init(license_info_t *out_info) {
-#if defined(__linux__)
-    /* Anti-Debugging: Detect and thwart debuggers attaching via ptrace */
-    if (ptrace(PTRACE_TRACEME, 0, 1, 0) < 0) {
-        /* Debugger attached or ptrace restricted */
-    }
-#endif
-
     g_boot_timestamp = (uint64_t)time(NULL);
     g_last_tick_ms = 0;
 

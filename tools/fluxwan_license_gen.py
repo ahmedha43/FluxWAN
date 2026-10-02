@@ -140,10 +140,15 @@ def main():
     parser.add_argument("--type", choices=["days", "lifetime"], default="days", help="License type")
     parser.add_argument("--days", type=int, default=30, help="Duration in days if type is 'days'")
     parser.add_argument("--wans", type=int, default=256, help="Maximum allowed concurrent WAN lines")
+    parser.add_argument("--raw", action="store_true", help="Output only the raw license key string")
 
     args = parser.parse_args()
 
     key = generate_license(args.hwid, args.client, args.type, args.days, args.wans)
+
+    if args.raw:
+        print(key)
+        return
 
     print("\n" + "="*70)
     print("      FluxWAN Official Cryptographic License Key (Ed25519)      ")

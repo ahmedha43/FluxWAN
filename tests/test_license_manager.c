@@ -30,7 +30,28 @@ int main(void) {
     printf("Fake key correctly rejected: %s [PASS]\n", err);
 
     printf("\n[Test 4/6] Testing Valid Key Activation...\n");
-    const char *valid_key = "FLUX-LIC-RkxJQwEBAAFJpr9qAAAAAEkz52oAAAAAHgAAAEZXSUQtRjgzMS0xNDFDLTUyQkUtMzA4OQAAAAAAAAAAV1NMIFRlc3QgU3lzdGVtAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP8AAAAAAAAAAAAAAAAAAABUcGeiFJU+KS2fXvBePYJUCLJmpgnZw0OGiYcV3+UDyVjzY9tSbzPVO8iFu3yFVh0pt84/CC/T29k0nowru2wI";
+    char local_hwid[32] = {0};
+    license_get_hardware_id(local_hwid, sizeof(local_hwid));
+
+    char valid_key[512] = {0};
+    char gen_cmd[512];
+    snprintf(gen_cmd, sizeof(gen_cmd),
+             "python3 tools/fluxwan_license_gen.py --hwid \"%s\" --client \"CI Test System\" --type days --days 30 --raw 2>/dev/null || "
+             "python tools/fluxwan_license_gen.py --hwid \"%s\" --client \"CI Test System\" --type days --days 30 --raw 2>/dev/null || "
+             "py tools/fluxwan_license_gen.py --hwid \"%s\" --client \"CI Test System\" --type days --days 30 --raw 2>/dev/null",
+             local_hwid, local_hwid, local_hwid);
+
+    FILE *pfp = popen(gen_cmd, "r");
+    if (pfp) {
+        if (fgets(valid_key, sizeof(valid_key), pfp)) {
+            size_t klen = strlen(valid_key);
+            while (klen > 0 && (valid_key[klen - 1] == '\r' || valid_key[klen - 1] == '\n' || valid_key[klen - 1] == ' ')) {
+                valid_key[--klen] = '\0';
+            }
+        }
+        pclose(pfp);
+    }
+
     rc = license_manager_activate(valid_key, &info, err, sizeof(err));
     printf("Activation result code: %d, Message: %s\n", rc, err);
     assert(rc == 0);
