@@ -1,21 +1,21 @@
 {
-  "latest_version": "1.2.7",
+  "latest_version": "1.2.8",
   "channel": "stable",
-  "release_date": "2026-10-01",
+  "release_date": "2026-10-02",
   "min_compatible_version": "1.2.0",
   "changelog": [
-    "Enterprise UI redesign with left sidebar navigation and compact topbar",
-    "Hardware telemetry topbar: CPU %, RAM usage, Load average, Uptime, and live Clock/Date",
-    "Dynamic memory buffer (dyn_buf) preventing buffer overflow and JSON truncation",
-    "Carrier-grade Prometheus metrics exporter (/api/v1/metrics) for Grafana/Zabbix",
-    "Automated brute-force login protection rate-limiter (HTTP 429 Too Many Requests)",
-    "Layer-7 Deep Packet Inspection (DPI) application classification and traffic shaping"
+    "Uncrackable Ed25519 asymmetric cryptographic licensing engine (RFC 8032)",
+    "Hardware fingerprint binding (HWID) anti-cloning and anti-theft protection",
+    "Anti-clock rollback monotonic watermark ledger preventing NTP/time tampering",
+    "Functional kernel interlocking with Maglev and eBPF routing weight zeroing",
+    "Web dashboard interactive License & Security tab with 1-click HWID copy and instant activation",
+    "Dedicated desktop GUI FluxWAN License Studio application for vendor key generation"
   ],
   "packages": {
     "core": {
       "url": "https://raw.githubusercontent.com/ahmedha43/FluxWAN/main/dist/fluxwan",
-      "sha256": "dff8e2afe1b5601aa8cf2885abfe4104ac4e7547ae286b992742488d4e947ba0",
-      "size_bytes": 286488
+      "sha256": "0c9e7b2bd73a27fe09d15b6302e4a45525a345278ca1b611bcde8e118277bd13",
+      "size_bytes": 393024
     },
     "full_iso": {
       "url": "https://github.com/ahmedha43/FluxWAN/releases/download/v1.2.5/fluxwan-os-x86_64.iso",
