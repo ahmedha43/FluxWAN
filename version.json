@@ -4,6 +4,7 @@
   "release_date": "2026-10-02",
   "min_compatible_version": "1.2.0",
   "changelog": [
+    "Fixed semver comparison in web UI and OTA daemon to correctly recognize timestamp build updates",
     "Alpine Linux musl-native binary build for 100% hardware & VM appliance compatibility",
     "CI pipeline fully green: all 10 test suites pass on GitHub Actions (CMake + make)",
     "Uncrackable Ed25519 asymmetric cryptographic licensing engine (RFC 8032)",
@@ -16,8 +17,8 @@
   "packages": {
     "core": {
       "url": "https://raw.githubusercontent.com/ahmedha43/FluxWAN/main/dist/fluxwan",
-      "sha256": "909dc73f417cb1fb20f41f56b1e7fb1f7f06f9154ecd205fe18a10db997bb260",
-      "size_bytes": 396752
+      "sha256": "8f1c9120b6b89c5d598d34fb131297b7ab0320587a42c45877b8e8d9d6ac8555",
+      "size_bytes": 380288
     },
     "full_iso": {
       "url": "https://github.com/ahmedha43/FluxWAN/releases/download/v1.2.5/fluxwan-os-x86_64.iso",

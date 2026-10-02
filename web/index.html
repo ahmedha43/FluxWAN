@@ -5602,6 +5602,9 @@
                         return r.json();
                     })
                     .then(d => {
+                        if (d.latest_version && this.systemVersion && d.latest_version !== this.systemVersion) {
+                            d.update_available = true;
+                        }
                         this.updateInfo = d;
                         this.checkingUpdate = false;
                         if (notifyManual) {

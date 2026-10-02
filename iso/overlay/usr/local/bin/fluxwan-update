@@ -118,6 +118,7 @@ case "$CMD" in
         echo "[*] Applying update atomically..."
         chmod +x /tmp/fluxwan_update.tmp
         mv /tmp/fluxwan_update.tmp /opt/fluxwan/fluxwan
+        [ -n "$LATEST_VER" ] && echo "$LATEST_VER" > /opt/fluxwan/version 2>/dev/null || true
         
         echo "[*] Restarting FluxWAN reactor loop..."
         killall fluxwan 2>/dev/null || true

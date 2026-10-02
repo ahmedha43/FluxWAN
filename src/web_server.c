@@ -170,10 +170,22 @@ static int compare_semver(const char *v1, const char *v2) {
     if (!v1 || !v2) return 0;
     while (*v1 == 'v' || *v1 == 'V') v1++;
     while (*v2 == 'v' || *v2 == 'V') v2++;
+    if (strcmp(v1, v2) == 0) return 0;
+
     int maj1 = 0, min1 = 0, pat1 = 0;
     int maj2 = 0, min2 = 0, pat2 = 0;
-    sscanf(v1, "%d.%d.%d", &maj1, &min1, &pat1);
-    sscanf(v2, "%d.%d.%d", &maj2, &min2, &pat2);
+    int n1 = sscanf(v1, "%d.%d.%d", &maj1, &min1, &pat1);
+    int n2 = sscanf(v2, "%d.%d.%d", &maj2, &min2, &pat2);
+
+    /* If current version v2 is a build timestamp (e.g. 20261002_152512) or non-standard format,
+     * any formal release v1 (e.g. 1.2.9) is considered a newer release. */
+    if (maj2 > 1000 || n2 < 2) {
+        return 1;
+    }
+    if (maj1 > 1000 || n1 < 2) {
+        return -1;
+    }
+
     if (maj1 != maj2) return maj1 - maj2;
     if (min1 != min2) return min1 - min2;
     return pat1 - pat2;
