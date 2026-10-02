@@ -12,6 +12,7 @@
     "CI pipeline fully green: all 10 test suites pass on GitHub Actions (CMake + make)",
     "Uncrackable Ed25519 asymmetric cryptographic licensing engine (RFC 8032)",
     "Hardware fingerprint binding (HWID) anti-cloning and anti-theft protection",
+    "Interactive one-click update checking button with bilingual modal and live status indicator",
     "Anti-clock rollback monotonic watermark ledger preventing NTP/time tampering",
     "Functional kernel interlocking with Maglev and eBPF routing weight zeroing",
     "Web dashboard interactive License & Security tab with 1-click HWID copy and instant activation",
@@ -20,8 +21,8 @@
   "packages": {
     "core": {
       "url": "https://raw.githubusercontent.com/ahmedha43/FluxWAN/main/dist/fluxwan",
-      "sha256": "0e2ca7b5bb5ff56f21756be85901ac669daba2b72efd88e4a4fa4efa644e958c",
-      "size_bytes": 380288
+      "sha256": "d420db28df6d98d74e8745ecd04f1d8309678050feeea5cd9c8d900862c1a509",
+      "size_bytes": 384384
     },
     "full_iso": {
       "url": "https://github.com/ahmedha43/FluxWAN/releases/download/v1.2.5/fluxwan-os-x86_64.iso",
