@@ -21,8 +21,10 @@
 /test_xdp_packet
 /test_disparate_speeds_benchmark
 /test_wan_groups
-/test_policy_routing
 /test_katran_nextgen
+/test_rfc8032
+/test_license_suite
+*.txt
 
 # Cache & Temporary Directories
 /.cache/

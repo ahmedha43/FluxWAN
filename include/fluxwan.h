@@ -22,6 +22,7 @@
 #include <string.h>
 #include <errno.h>
 #include <time.h>
+#include "license_manager.h"
 
 #if defined(_WIN32) || defined(_WIN64)
 #include <winsock2.h>
@@ -472,6 +473,7 @@ typedef struct {
     nat46_config_t nat46;
     dpi_config_t dpi;
     pppoe_server_config_t pppoe_server;
+    license_info_t license;
     char config_file_path[MAX_PATH_LEN];
 } fluxwan_config_t;
 

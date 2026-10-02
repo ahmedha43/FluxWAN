@@ -25,6 +25,7 @@
 #include "dhcp_server.h"
 #include "dns64_daemon.h"
 #include "pppoe_server.h"
+#include "license_manager.h"
 
 #include <signal.h>
 #if defined(_WIN32) || defined(_WIN64)
@@ -75,6 +76,13 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
     config_print(&config);
+
+    /* Initialize Cryptographic Licensing Engine */
+    license_manager_init(&config.license);
+    LOG_INFO("Licensing Engine: Status=[%s], Type=[%s], Client=[%s], Days Remaining=[%u], Grace=[%us]",
+             config.license.status_str, config.license.type_str,
+             config.license.client_name, config.license.days_remaining,
+             config.license.grace_seconds_remaining);
 
     /* 2. Hardware Interface Discovery */
     iface_discovery_result_t disc;
@@ -195,6 +203,9 @@ int main(int argc, char *argv[]) {
         if (pppoe_srv) {
             pppoe_server_periodic_tick(pppoe_srv, now_ms);
         }
+
+        /* Periodic Timer: Licensing Engine Tick (Clock Rollback & Grace Period Tracking) */
+        license_manager_tick(&config.license, now_ms);
     }
 
     LOG_INFO("Shutting down FluxWAN Router Engine...");

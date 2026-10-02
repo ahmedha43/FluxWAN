@@ -23,7 +23,9 @@ SRCS = src/main.c \
        src/dhcp_server.c \
        src/dns64_daemon.c \
        src/diagnostics.c \
-       src/wifi_manager.c
+       src/wifi_manager.c \
+       src/crypto_ed25519.c \
+       src/license_manager.c
 
 OBJS = $(SRCS:.c=.o)
 BPF_OBJS = bpf/xdp_router.bpf.o bpf/xdp_nat46.bpf.o
@@ -42,7 +44,9 @@ LAB_SRCS = tests/lab_runner.c \
            src/net_apply.c \
            src/dhcp_server.c \
            src/dns64_daemon.c \
-           src/wifi_manager.c
+           src/wifi_manager.c \
+           src/crypto_ed25519.c \
+           src/license_manager.c
 
 LAB_OBJS = $(LAB_SRCS:.c=.o)
 LAB_TARGET = fluxwan_lab
@@ -55,6 +59,8 @@ TEST_XDP = test_xdp_packet
 TEST_GROUPS = test_wan_groups
 TEST_POLICY = test_policy_routing
 TEST_KATRAN = test_katran_nextgen
+TEST_RFC = test_rfc8032
+TEST_LICENSE = test_license_suite
 
 all: ui bpf $(TARGET) $(LAB_TARGET)
 
@@ -92,19 +98,25 @@ $(TEST_PPPOE): tests/test_pppoe_manager.c src/pppoe_manager.c
 $(TEST_NAT46): tests/test_live_nat46_translation.c
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
-$(TEST_XDP): tests/xdp_packet_test.c src/config.c src/wan_manager.c src/netlink_manager.c src/bpf_loader.c src/prober.c src/sticky.c src/net_discovery.c src/pppoe_manager.c src/dhcp_server.c src/net_apply.c src/dns64_daemon.c src/wifi_manager.c
+$(TEST_XDP): tests/xdp_packet_test.c src/config.c src/wan_manager.c src/netlink_manager.c src/bpf_loader.c src/prober.c src/sticky.c src/net_discovery.c src/pppoe_manager.c src/dhcp_server.c src/net_apply.c src/dns64_daemon.c src/wifi_manager.c src/license_manager.c src/crypto_ed25519.c
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
 
-$(TEST_GROUPS): tests/test_wan_groups.c src/config.c src/wan_manager.c src/netlink_manager.c src/bpf_loader.c src/prober.c src/sticky.c src/net_discovery.c src/pppoe_manager.c src/dhcp_server.c src/net_apply.c src/dns64_daemon.c src/wifi_manager.c
+$(TEST_GROUPS): tests/test_wan_groups.c src/config.c src/wan_manager.c src/netlink_manager.c src/bpf_loader.c src/prober.c src/sticky.c src/net_discovery.c src/pppoe_manager.c src/dhcp_server.c src/net_apply.c src/dns64_daemon.c src/wifi_manager.c src/license_manager.c src/crypto_ed25519.c
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
 
-$(TEST_POLICY): tests/test_policy_routing.c src/config.c src/wan_manager.c src/netlink_manager.c src/bpf_loader.c src/prober.c src/sticky.c src/net_discovery.c src/pppoe_manager.c src/dhcp_server.c src/net_apply.c src/dns64_daemon.c src/wifi_manager.c
+$(TEST_POLICY): tests/test_policy_routing.c src/config.c src/wan_manager.c src/netlink_manager.c src/bpf_loader.c src/prober.c src/sticky.c src/net_discovery.c src/pppoe_manager.c src/dhcp_server.c src/net_apply.c src/dns64_daemon.c src/wifi_manager.c src/license_manager.c src/crypto_ed25519.c
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
 
 $(TEST_KATRAN): tests/test_katran_nextgen.c
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
-test: $(TEST_WAN) $(TEST_PPPOE) $(TEST_NAT46) $(TEST_XDP) $(TEST_GROUPS) $(TEST_POLICY) $(TEST_KATRAN) $(LAB_TARGET)
+$(TEST_RFC): tests/test_rfc8032.c src/crypto_ed25519.c
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+$(TEST_LICENSE): tests/test_license_manager.c src/license_manager.c src/crypto_ed25519.c
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+test: $(TEST_WAN) $(TEST_PPPOE) $(TEST_NAT46) $(TEST_XDP) $(TEST_GROUPS) $(TEST_POLICY) $(TEST_KATRAN) $(TEST_RFC) $(TEST_LICENSE) $(LAB_TARGET)
 	@echo "================================================================"
 	@echo "   Running FluxWAN Automated Test Suites                        "
 	@echo "================================================================"
@@ -122,6 +134,10 @@ test: $(TEST_WAN) $(TEST_PPPOE) $(TEST_NAT46) $(TEST_XDP) $(TEST_GROUPS) $(TEST_
 	@echo ""
 	./$(TEST_KATRAN)
 	@echo ""
+	./$(TEST_RFC)
+	@echo ""
+	./$(TEST_LICENSE)
+	@echo ""
 	./$(LAB_TARGET)
 	@echo ""
 	@echo "================================================================"
@@ -129,7 +145,7 @@ test: $(TEST_WAN) $(TEST_PPPOE) $(TEST_NAT46) $(TEST_XDP) $(TEST_GROUPS) $(TEST_
 	@echo "================================================================"
 
 clean:
-	rm -f $(OBJS) $(LAB_OBJS) $(TARGET) $(LAB_TARGET) $(TEST_WAN) $(TEST_PPPOE) $(TEST_NAT46) $(TEST_XDP) $(TEST_GROUPS) $(TEST_POLICY) $(TEST_KATRAN) bpf/*.o include/ui_assets.h
+	rm -f $(OBJS) $(LAB_OBJS) $(TARGET) $(LAB_TARGET) $(TEST_WAN) $(TEST_PPPOE) $(TEST_NAT46) $(TEST_XDP) $(TEST_GROUPS) $(TEST_POLICY) $(TEST_KATRAN) $(TEST_RFC) $(TEST_LICENSE) bpf/*.o include/ui_assets.h
 
 real-lab: $(TARGET)
 	@echo "Running Real Linux Network Lab (requires root)..."

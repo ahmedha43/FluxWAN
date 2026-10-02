@@ -2,6 +2,7 @@
 #include "net_apply.h"
 #include "pppoe_manager.h"
 #include "wifi_manager.h"
+#include "license_manager.h"
 #include <stdarg.h>
 
 #if defined(__linux__)
@@ -454,6 +455,17 @@ void wan_manager_on_health_update(uint32_t wan_idx, wan_state_t state, const wan
 
 int wan_manager_rebalance(wan_manager_ctx_t *ctx) {
     if (!ctx) return -1;
+
+    /* Cryptographic Licensing Enforcement Gate */
+    if (!license_is_authorized()) {
+        for (uint32_t i = 0; i < ctx->config->wan_count; i++) {
+            ctx->config->wans[i].dynamic_weight = 0;
+            if (ctx->bpf) {
+                bpf_loader_update_wan_map(ctx->bpf, i, &ctx->config->wans[i]);
+            }
+        }
+        return -2;
+    }
 
     /* Find minimum RTT among healthy WANs for latency steering */
     uint32_t min_healthy_rtt = 999999;

@@ -21,6 +21,7 @@
 #include "dyn_buf.h"
 #include "pppoe_server.h"
 #include "wifi_manager.h"
+#include "license_manager.h"
 #include <pthread.h>
 #include <fcntl.h>
 #include <ctype.h>
@@ -890,6 +891,33 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
 
     /* --- Current epoch time --- */
     time_t now_epoch = time(NULL);
+
+    const license_info_t *lic = license_get_info();
+    offset += snprintf(buf + offset, max_len - offset,
+        "  \"license\": {\n"
+        "    \"status\": \"%s\",\n"
+        "    \"type\": \"%s\",\n"
+        "    \"is_valid\": %s,\n"
+        "    \"hwid\": \"%s\",\n"
+        "    \"client_name\": \"%s\",\n"
+        "    \"days_remaining\": %u,\n"
+        "    \"active_seconds_remaining\": %llu,\n"
+        "    \"grace_seconds_remaining\": %u,\n"
+        "    \"max_wans\": %u,\n"
+        "    \"issued_at\": %llu,\n"
+        "    \"expires_at\": %llu\n"
+        "  },\n",
+        lic->status_str,
+        lic->type_str,
+        lic->is_valid ? "true" : "false",
+        lic->hwid,
+        lic->client_name,
+        lic->days_remaining,
+        (unsigned long long)lic->active_seconds_remaining,
+        lic->grace_seconds_remaining,
+        lic->max_wans,
+        (unsigned long long)lic->issued_at,
+        (unsigned long long)lic->expires_at);
 
     snprintf(buf + offset, max_len - offset,
         "  \"sticky_count\": %u,\n"
@@ -2763,6 +2791,117 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
 
         send(client_fd, resp, (int)len, 0);
         close_client_socket(client_fd);
+    } else if (strstr(req, "GET /api/v1/license") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const license_info_t *lic = license_get_info();
+        char json_buf[1024];
+        snprintf(json_buf, sizeof(json_buf),
+            "{\n"
+            "  \"status\": \"ok\",\n"
+            "  \"license\": {\n"
+            "    \"status\": \"%s\",\n"
+            "    \"type\": \"%s\",\n"
+            "    \"is_valid\": %s,\n"
+            "    \"hwid\": \"%s\",\n"
+            "    \"client_name\": \"%s\",\n"
+            "    \"days_remaining\": %u,\n"
+            "    \"active_seconds_remaining\": %llu,\n"
+            "    \"grace_seconds_remaining\": %u,\n"
+            "    \"max_wans\": %u,\n"
+            "    \"issued_at\": %llu,\n"
+            "    \"expires_at\": %llu\n"
+            "  }\n"
+            "}\n",
+            lic->status_str,
+            lic->type_str,
+            lic->is_valid ? "true" : "false",
+            lic->hwid,
+            lic->client_name,
+            lic->days_remaining,
+            (unsigned long long)lic->active_seconds_remaining,
+            lic->grace_seconds_remaining,
+            lic->max_wans,
+            (unsigned long long)lic->issued_at,
+            (unsigned long long)lic->expires_at);
+
+        char resp[1200];
+        int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: application/json\r\n"
+            "Access-Control-Allow-Origin: *\r\n"
+            "Content-Length: %zu\r\n"
+            "Connection: close\r\n\r\n%s",
+            strlen(json_buf), json_buf);
+        send(client_fd, resp, len, 0);
+        close_client_socket(client_fd);
+        return 0;
+    } else if (strstr(req, "POST /api/v1/license/activate") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        char key[512] = {0};
+        if (body) {
+            body += 4;
+            extract_json_string(body, "license_key", key, sizeof(key));
+            if (!key[0]) {
+                extract_json_string(body, "key", key, sizeof(key));
+            }
+        }
+        char err_msg[256] = {0};
+        license_info_t out_info;
+        int rc = license_manager_activate(key, &out_info, err_msg, sizeof(err_msg));
+        char resp_body[1024];
+        if (rc == 0) {
+            ctx->config->license = out_info;
+            snprintf(resp_body, sizeof(resp_body),
+                "{\n"
+                "  \"status\": \"ok\",\n"
+                "  \"message\": \"%s\",\n"
+                "  \"license\": {\n"
+                "    \"status\": \"%s\",\n"
+                "    \"type\": \"%s\",\n"
+                "    \"is_valid\": true,\n"
+                "    \"hwid\": \"%s\",\n"
+                "    \"client_name\": \"%s\",\n"
+                "    \"days_remaining\": %u\n"
+                "  }\n"
+                "}\n",
+                err_msg, out_info.status_str, out_info.type_str,
+                out_info.hwid, out_info.client_name, out_info.days_remaining);
+            wan_manager_add_log("INFO", "License activated: Type=%s, Client=%s",
+                                out_info.type_str, out_info.client_name);
+            if (ctx->wan_mgr) {
+                wan_manager_rebalance(ctx->wan_mgr);
+            }
+        } else {
+            snprintf(resp_body, sizeof(resp_body),
+                "{\"status\":\"error\",\"message\":\"%s\"}\n",
+                err_msg[0] ? err_msg : "Invalid or untrusted license key.");
+            wan_manager_add_log("WARN", "License activation failed: %s", err_msg);
+        }
+        char resp[1200];
+        int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 %s\r\n"
+            "Content-Type: application/json\r\n"
+            "Access-Control-Allow-Origin: *\r\n"
+            "Content-Length: %zu\r\n"
+            "Connection: close\r\n\r\n%s",
+            (rc == 0) ? "200 OK" : "400 Bad Request",
+            strlen(resp_body), resp_body);
+        send(client_fd, resp, len, 0);
+        close_client_socket(client_fd);
+        return 0;
     } else if (strstr(req, "GET /api/v1/groups") != NULL) {
         if (!is_request_authorized(ctx->config, req)) {
             const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";

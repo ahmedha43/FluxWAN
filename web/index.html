@@ -241,6 +241,18 @@
             <!-- Divider -->
             <div style="width:1px;height:22px;background:rgba(255,255,255,0.08);flex-shrink:0"></div>
 
+            <!-- License Indicator -->
+            <div class="topbar-stat" style="padding:5px 12px;gap:6px;cursor:pointer" @click="currentTab='license';fetchLicenseInfo()">
+                <span style="font-size:12px">🔑</span>
+                <span class="label" style="font-weight:700" x-text="currentLang==='ar'?'الترخيص:':'License:'">License:</span>
+                <span style="font-weight:800;font-family:monospace;font-size:12px"
+                      :style="licenseInfo.status==='ACTIVE' ? 'color:#34d399' : (licenseInfo.status==='GRACE_PERIOD' ? 'color:#fbbf24' : 'color:#f87171')"
+                      x-text="licenseInfo.status==='ACTIVE' ? (licenseInfo.type==='LIFETIME' ? (currentLang==='ar'?'دائم (مدى الحياة)':'Lifetime') : (licenseInfo.days_remaining + (currentLang==='ar'?' يوم':'d'))) : (licenseInfo.status==='GRACE_PERIOD' ? (currentLang==='ar'?'فترة سماح':'Grace') : (currentLang==='ar'?'غير مفعل':'Unauthorized'))"></span>
+            </div>
+
+            <!-- Divider -->
+            <div style="width:1px;height:22px;background:rgba(255,255,255,0.08);flex-shrink:0"></div>
+
             <!-- Live Clock + Date -->
             <div class="topbar-stat" style="gap:8px;padding:4px 12px">
                 <span style="font-size:13px">🕐</span>
@@ -333,6 +345,11 @@
             <div class="sidebar-item" :class="currentTab==='backup'?'active':''" @click="currentTab='backup'">
                 <span class="nav-icon">📦</span>
                 <span x-text="t('tab_backup')">Backup &amp; System</span>
+            </div>
+            <div class="sidebar-item" :class="currentTab==='license'?'active':''" @click="currentTab='license';fetchLicenseInfo()">
+                <span class="nav-icon">🔑</span>
+                <span x-text="t('tab_license')">License &amp; Security</span>
+                <span class="nav-badge" :style="licenseInfo.status==='ACTIVE'?'background:rgba(16,185,129,0.2);color:#34d399;border:1px solid rgba(16,185,129,0.3)':'background:rgba(245,158,11,0.2);color:#fbbf24;border:1px solid rgba(245,158,11,0.3)'" x-text="licenseInfo.status==='ACTIVE'?(licenseInfo.type==='LIFETIME'?'∞':(licenseInfo.days_remaining+'d')):(licenseInfo.status==='GRACE_PERIOD'?'GRACE':'LOCK')"></span>
             </div>
             <div id="sidebar-footer">
                 <div style="display:flex;align-items:center;gap:5px;margin-bottom:4px">
@@ -3428,6 +3445,182 @@
             </div>
         </section>
 
+        <!-- ================= TAB: LICENSE & SECURITY (نظام الترخيص والتفعيل المشفر) ================= -->
+        <section x-show="currentTab === 'license'" class="space-y-6">
+            <!-- Header -->
+            <div class="flex items-center justify-between">
+                <div>
+                    <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                        <span>🔑</span>
+                        <span x-text="currentLang==='ar' ? 'نظام التراخيص والحماية المشفرة' : 'Cryptographic License & Security'">Cryptographic License & Security</span>
+                    </h2>
+                    <p class="text-xs text-slate-400" x-text="currentLang==='ar' ? 'إدارة ترخيص النظام المشفر بخوارزمية Ed25519 والمقفل على بصمة العتاد مع حماية كاملة ضد الكسر أو التلاعب بالساعة.' : 'Manage enterprise-grade Ed25519 cryptographically signed license with hardware fingerprinting and anti-clock rollback.'"></p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button @click="fetchLicenseInfo()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1.5 transition">
+                        <span>🔄</span>
+                        <span x-text="currentLang==='ar' ? 'تحديث الحالة' : 'Refresh Status'">Refresh Status</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Top Grid: Hardware Fingerprint & License Status -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- 1. Machine Unique Hardware Fingerprint (بصمة العتاد) -->
+                <div class="glass-card p-6 rounded-2xl border border-blue-500/30 bg-gradient-to-br from-blue-950/30 via-slate-900 to-slate-900 space-y-4 shadow-xl">
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                        <div class="flex items-center space-x-2">
+                            <span class="text-xl">🖥️</span>
+                            <div>
+                                <h3 class="text-base font-bold text-white" x-text="currentLang==='ar' ? 'بصمة العتاد الفريدة (Machine HWID)' : 'Unique Machine Hardware ID'">Unique Machine Hardware ID</h3>
+                                <p class="text-3xs text-slate-400" x-text="currentLang==='ar' ? 'البصمة المشفرة الخاصة بهذا الجهاز فقط لربط التراخيص' : 'Cryptographic hardware fingerprint for license binding'"></p>
+                            </div>
+                        </div>
+                        <span class="text-2xs font-mono font-bold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">SHA-256</span>
+                    </div>
+
+                    <div class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 flex items-center justify-between gap-3">
+                        <div class="font-mono text-sm font-bold text-cyan-300 tracking-wider select-all" x-text="licenseInfo.hwid || 'Detecting HWID...'">FWID-XXXX-XXXX-XXXX-XXXX</div>
+                        <button type="button" @click="copyHwid()"
+                                :class="hwidCopied ? 'bg-emerald-600 text-white border-emerald-500' : 'bg-blue-600 hover:bg-blue-500 text-white border-blue-500/50'"
+                                class="px-3.5 py-1.5 rounded-lg text-2xs font-bold border transition flex items-center gap-1.5 shadow-md shrink-0">
+                            <span x-show="!hwidCopied">📋</span>
+                            <span x-show="hwidCopied">✓</span>
+                            <span x-text="hwidCopied ? (currentLang==='ar' ? 'تم النسخ!' : 'Copied!') : (currentLang==='ar' ? 'نسخ كود الجهاز' : 'Copy HWID')">Copy HWID</span>
+                        </button>
+                    </div>
+
+                    <div class="text-3xs text-slate-400 leading-relaxed space-y-1">
+                        <p x-text="currentLang==='ar' ? 'ℹ️ انسخ هذا الكود وأرسله إلى المطور المعتمد (أحمد الدليمي) لإصدار مفتاح الترخيص المشفر الخاص بسيرفرك.' : 'ℹ️ Copy and send this code to the authorized vendor (Ahmed Al-Dulaimi) to generate your signed license key.'"></p>
+                        <p class="text-slate-500" x-text="currentLang==='ar' ? '• مشتق من الرقم التسلسلي للوحة الأم، معالج CPU، والقرص الصلب. لا يمكن تزويره أو تشغيله على خادم آخر.' : '• Cryptographically derived from Motherboard DMI UUID, Disk Serial, CPU info, and Salt.'"></p>
+                    </div>
+                </div>
+
+                <!-- 2. Current License Status Card (تفاصيل الترخيص النشط) -->
+                <div class="glass-card p-6 rounded-2xl border space-y-4 shadow-xl transition-all"
+                     :class="licenseInfo.status==='ACTIVE' ? 'border-emerald-500/40 bg-gradient-to-br from-emerald-950/20 via-slate-900 to-slate-900' : (licenseInfo.status==='GRACE_PERIOD' ? 'border-amber-500/40 bg-gradient-to-br from-amber-950/20 via-slate-900 to-slate-900' : 'border-rose-500/40 bg-gradient-to-br from-rose-950/20 via-slate-900 to-slate-900')">
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                        <div class="flex items-center space-x-2">
+                            <span class="text-xl">🛡️</span>
+                            <div>
+                                <h3 class="text-base font-bold text-white" x-text="currentLang==='ar' ? 'حالة الترخيص الحالية' : 'Current License Status'">Current License Status</h3>
+                                <p class="text-3xs text-slate-400" x-text="currentLang==='ar' ? 'صلاحية التشغيل والتوجيه اللحظية' : 'Real-time routing authorization state'"></p>
+                            </div>
+                        </div>
+
+                        <!-- Status Badge -->
+                        <span class="text-xs font-mono font-bold px-3 py-1 rounded-full uppercase tracking-wider"
+                              :class="{
+                                  'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40': licenseInfo.status==='ACTIVE',
+                                  'bg-amber-500/20 text-amber-300 border border-amber-500/40': licenseInfo.status==='GRACE_PERIOD',
+                                  'bg-rose-500/20 text-rose-300 border border-rose-500/40': licenseInfo.status!=='ACTIVE' && licenseInfo.status!=='GRACE_PERIOD'
+                              }"
+                              x-text="licenseInfo.status==='ACTIVE' ? (licenseInfo.type==='LIFETIME' ? (currentLang==='ar'?'مفعل دائم (مدى الحياة)':'ACTIVE (LIFETIME)') : (currentLang==='ar'?'اشتراك نشط':'ACTIVE SUBSCRIPTION')) : (licenseInfo.status==='GRACE_PERIOD' ? (currentLang==='ar'?'فترة سماح أولية':'GRACE PERIOD') : (licenseInfo.status==='CLOCK_TAMPERED' ? (currentLang==='ar'?'تم التلاعب بالساعة!':'CLOCK TAMPERED') : (currentLang==='ar'?'منتهي الصلاحية':'EXPIRED')))"></span>
+                    </div>
+
+                    <!-- Details Grid -->
+                    <div class="grid grid-cols-2 gap-3 text-xs font-mono">
+                        <div class="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1">
+                            <span class="text-3xs text-slate-400 block" x-text="currentLang==='ar' ? 'نوع الترخيص:' : 'License Type:'">License Type:</span>
+                            <span class="font-bold text-white text-sm" x-text="licenseInfo.type==='LIFETIME' ? (currentLang==='ar'?'مفتوح مدى الحياة (Lifetime)':'Permanent Lifetime') : (currentLang==='ar'?'اشتراك محدد بالأيام':'Days-Based Subscription')"></span>
+                        </div>
+                        <div class="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1">
+                            <span class="text-3xs text-slate-400 block" x-text="currentLang==='ar' ? 'المدة المتبقية:' : 'Time Remaining:'">Time Remaining:</span>
+                            <span class="font-bold text-sm"
+                                  :class="licenseInfo.status==='ACTIVE' ? 'text-emerald-400' : 'text-amber-400'"
+                                  x-text="licenseInfo.status==='ACTIVE' ? (licenseInfo.type==='LIFETIME' ? (currentLang==='ar'?'♾️ مفتوح بدون انتهاء':'♾️ Unlimited') : (licenseInfo.days_remaining + (currentLang==='ar'?' يوم':' days'))) : (licenseInfo.status==='GRACE_PERIOD' ? (Math.round(licenseInfo.grace_seconds_remaining/60) + (currentLang==='ar'?' دقيقة':' mins')) : '0')"></span>
+                        </div>
+                        <div class="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1">
+                            <span class="text-3xs text-slate-400 block" x-text="currentLang==='ar' ? 'مرخص إلى (العميل):' : 'Licensed To:'">Licensed To:</span>
+                            <span class="font-bold text-slate-200 truncate block" x-text="licenseInfo.client_name || (currentLang==='ar' ? 'غير مسجل' : 'Unregistered')"></span>
+                        </div>
+                        <div class="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1">
+                            <span class="text-3xs text-slate-400 block" x-text="currentLang==='ar' ? 'السعة القصوى للخطوط:' : 'Max WAN Capacity:'">Max WAN Capacity:</span>
+                            <span class="font-bold text-purple-400" x-text="(licenseInfo.max_wans || 256) + (currentLang==='ar' ? ' خط WAN متزامن' : ' Concurrent WANs')">256 Concurrent WANs</span>
+                        </div>
+                    </div>
+
+                    <!-- Authority tag -->
+                    <div class="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800/80 flex items-center justify-between text-3xs font-mono">
+                        <span class="text-slate-400" x-text="currentLang==='ar' ? 'جهة التوقيع والتحقق:' : 'Signing Authority:'">Signing Authority:</span>
+                        <span class="text-emerald-400 font-bold">Ahmed Al-Dulaimi (Ed25519 Pure C Verified)</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- License Activation Box -->
+            <div class="glass-card p-6 rounded-2xl border border-slate-700 space-y-4 shadow-xl">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <div class="flex items-center space-x-2">
+                        <span class="text-xl">⚡</span>
+                        <div>
+                            <h3 class="text-base font-bold text-white" x-text="currentLang==='ar' ? 'تفعيل أو تجديد الترخيص' : 'Activate or Renew License'">Activate or Renew License</h3>
+                            <p class="text-3xs text-slate-400" x-text="currentLang==='ar' ? 'الصق مفتاح الترخيص المشفر الذي تم استلامه من المطور' : 'Paste the cryptographically signed license key received from the vendor'"></p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="space-y-3">
+                    <div>
+                        <label class="text-2xs text-slate-300 font-bold block mb-1.5" x-text="currentLang==='ar' ? 'مفتاح الترخيص (License Key):' : 'License Key:'">License Key:</label>
+                        <textarea x-model="licenseKeyInput" rows="3"
+                                  class="w-full bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-xl px-3.5 py-2.5 text-xs text-cyan-300 font-mono resize-none focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                  placeholder="FLUX-LIC-RkxJQwEBAAFJ..."></textarea>
+                    </div>
+
+                    <div class="flex items-center justify-between pt-1">
+                        <div class="text-xs">
+                            <span x-show="licenseMsg" :class="licenseMsgSuccess ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'" x-text="licenseMsg"></span>
+                        </div>
+                        <button type="button" @click="activateLicense()" :disabled="activatingLicense"
+                                class="bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-bold px-6 py-2.5 rounded-xl text-xs flex items-center space-x-2 transition shadow-lg shadow-blue-500/25">
+                            <span x-show="!activatingLicense">🔑</span>
+                            <span x-show="activatingLicense">⏳</span>
+                            <span x-text="activatingLicense ? (currentLang==='ar' ? 'جاري التحقق والتفعيل...' : 'Verifying...') : (currentLang==='ar' ? 'تفعيل الترخيص الآن' : 'Activate License Now')">Activate License Now</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cryptographic Security Architecture Explanation -->
+            <div class="glass-card p-6 rounded-2xl border border-slate-800 bg-slate-950/40 space-y-4">
+                <div class="flex items-center space-x-2 text-slate-300 font-bold text-xs">
+                    <span>🛡️</span>
+                    <span x-text="currentLang==='ar' ? 'معمارية الحماية والتشفير العسكري في فلوكس وان' : 'FluxWAN Cryptographic Security Architecture'">FluxWAN Cryptographic Security Architecture</span>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-3xs text-slate-400">
+                    <div class="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1">
+                        <div class="font-bold text-white text-2xs flex items-center gap-1.5">
+                            <span>🔐</span>
+                            <span x-text="currentLang==='ar' ? 'تشفير غير متناظر Ed25519' : 'Asymmetric Ed25519'">تشفير غير متناظر Ed25519</span>
+                        </div>
+                        <p x-text="currentLang==='ar' ? 'توقيع رقمي بموجب المعيار RFC 8032. المفتاح الخاص غير موجود إطلاقاً داخل السيرفر، مما يجعل توليد كراك أو كيجين مستحيلاً رياضياً.' : 'RFC 8032 digital signature. Master private key is kept strictly offline, making keygens mathematically impossible.'"></p>
+                    </div>
+                    <div class="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1">
+                        <div class="font-bold text-white text-2xs flex items-center gap-1.5">
+                            <span>⏱️</span>
+                            <span x-text="currentLang==='ar' ? 'مكافحة التلاعب بالساعة' : 'Anti-Clock Rollback'">مكافحة التلاعب بالساعة</span>
+                        </div>
+                        <p x-text="currentLang==='ar' ? 'سجل علامة مائية تصاعدي متراكم. في حال محاولة إرجاع تاريخ أو ساعة السيرفر للخلف للتحايل، يقفل النظام فوراً ويكتشف التلاعب.' : 'Monotonic watermark ledger detects and blocks any NTP spoofing or clock rewinding attempts.'"></p>
+                    </div>
+                    <div class="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1">
+                        <div class="font-bold text-white text-2xs flex items-center gap-1.5">
+                            <span>🔌</span>
+                            <span x-text="currentLang==='ar' ? 'تحقق دون إنترنت' : 'Air-Gapped Offline'">تحقق دون إنترنت</span>
+                        </div>
+                        <p x-text="currentLang==='ar' ? 'لا يتطلب الراوتر أي اتصال بسيرفر خارجي للتحقق. التفعيل والتحقق يتم رياضياً بشكل محلي 100% داخل الشبكات المغلقة والحساسة.' : 'No phone-home or internet connection required. 100% offline verification in high-security air-gapped environments.'"></p>
+                    </div>
+                    <div class="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1">
+                        <div class="font-bold text-white text-2xs flex items-center gap-1.5">
+                            <span>🧬</span>
+                            <span x-text="currentLang==='ar' ? 'قفل العتاد (Anti-Cloning)' : 'Hardware Bound'">قفل العتاد (Anti-Cloning)</span>
+                        </div>
+                        <p x-text="currentLang==='ar' ? 'الترخيص مقفل على بصمة العتاد الفريدة (HWID). استنساخ القرص أو نقل الـ VM إلى جهاز آخر يبطل الترخيص فوراً.' : 'License is cryptographically bound to hardware fingerprint. Cloning disks or copying VMs invalidates the license.'"></p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         </main><!-- #main-content -->
     </div><!-- #app-shell -->
 
@@ -3445,6 +3638,7 @@
                 tab_dpi: "L7 DPI & Apps",
                 tab_services: "Services & Alerts",
                 tab_backup: "Backup & System",
+                tab_license: "License & Security",
                 btn_debug: "Debug",
                 btn_terminal: "Terminal",
                 btn_logs: "Logs",
@@ -3503,6 +3697,7 @@
                 tab_dpi: "فحص الحزم L7 والتطبيقات",
                 tab_services: "الخدمات والتنبيهات",
                 tab_backup: "النسخ الاحتياطي والنظام",
+                tab_license: "الترخيص والحماية",
                 btn_debug: "فحص وتشخيص",
                 btn_terminal: "سطر الأوامر",
                 btn_logs: "سجلات النظام",
@@ -3990,6 +4185,24 @@
                 importListTargetChoice: '',
                 importListDescription: '',
                 importParsedCount: 0,
+                licenseInfo: {
+                    status: 'GRACE_PERIOD',
+                    type: 'DAYS',
+                    is_valid: true,
+                    hwid: '',
+                    client_name: '',
+                    days_remaining: 30,
+                    active_seconds_remaining: 0,
+                    grace_seconds_remaining: 1800,
+                    max_wans: 256,
+                    issued_at: 0,
+                    expires_at: 0
+                },
+                licenseKeyInput: '',
+                activatingLicense: false,
+                licenseMsg: '',
+                licenseMsgSuccess: false,
+                hwidCopied: false,
                 leases: [],
                 systemLogs: [],
                 prevStats: {},
@@ -4846,6 +5059,9 @@
                         }
                         if (d.sysinfo) {
                             this.sysinfo = d.sysinfo;
+                        }
+                        if (d.license) {
+                            this.licenseInfo = d.license;
                         }
 
                         const isFirst = !this.hasLoadedInitialConfig || forceReload;
@@ -6055,6 +6271,71 @@
                             exit_code: -1
                         });
                         this.scrollTerminalBottom();
+                    });
+                },
+
+                fetchLicenseInfo() {
+                    if (!this.authToken) return;
+                    fetch('/api/v1/license', {
+                        headers: { 'X-Auth-Token': this.authToken }
+                    })
+                    .then(r => r.json())
+                    .then(d => {
+                        if (d.license) {
+                            this.licenseInfo = d.license;
+                        }
+                    })
+                    .catch(() => {});
+                },
+
+                copyHwid() {
+                    const text = this.licenseInfo.hwid;
+                    if (!text) return;
+                    if (navigator.clipboard && window.isSecureContext) {
+                        navigator.clipboard.writeText(text).then(() => {
+                            this.hwidCopied = true;
+                            this.toastMessage = (this.currentLang === 'ar') ? '📋 تم نسخ كود الجهاز (Hardware ID) بنجاح!' : '📋 Machine HWID copied to clipboard!';
+                            setTimeout(() => { this.hwidCopied = false; this.toastMessage = ''; }, 3000);
+                        });
+                    } else {
+                        prompt(this.currentLang === 'ar' ? 'كود الجهاز (Hardware ID):' : 'Machine Hardware ID:', text);
+                    }
+                },
+
+                activateLicense() {
+                    if (!this.licenseKeyInput || !this.licenseKeyInput.trim()) {
+                        this.licenseMsg = (this.currentLang === 'ar') ? 'يرجى إدخال مفتاح الترخيص أولاً' : 'Please enter a license key first';
+                        this.licenseMsgSuccess = false;
+                        return;
+                    }
+                    this.activatingLicense = true;
+                    this.licenseMsg = '';
+                    fetch('/api/v1/license/activate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': this.authToken },
+                        body: JSON.stringify({ license_key: this.licenseKeyInput.trim() })
+                    })
+                    .then(r => r.json())
+                    .then(d => {
+                        this.activatingLicense = false;
+                        if (d.status === 'ok') {
+                            this.licenseMsg = d.message || (this.currentLang === 'ar' ? 'تم تفعيل الترخيص بنجاح!' : 'License activated successfully!');
+                            this.licenseMsgSuccess = true;
+                            if (d.license) this.licenseInfo = d.license;
+                            this.licenseKeyInput = '';
+                            this.toastMessage = (this.currentLang === 'ar') ? '✅ تم تفعيل ترخيص FluxWAN بنجاح!' : '✅ FluxWAN License Activated Successfully!';
+                            setTimeout(() => this.toastMessage = '', 4000);
+                            this.fetchLicenseInfo();
+                            this.fetchStatus();
+                        } else {
+                            this.licenseMsg = d.message || (this.currentLang === 'ar' ? 'فشل التفعيل. المفتاح غير صالح أو غير مخصص لهذا الجهاز.' : 'Activation failed. Invalid or untrusted key.');
+                            this.licenseMsgSuccess = false;
+                        }
+                    })
+                    .catch(e => {
+                        this.activatingLicense = false;
+                        this.licenseMsg = (this.currentLang === 'ar' ? 'خطأ في الاتصال: ' : 'Connection error: ') + e.message;
+                        this.licenseMsgSuccess = false;
                     });
                 }
             }
