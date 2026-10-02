@@ -47,7 +47,7 @@ case "$CMD" in
         cat <<EOF > "$TARGET_FILE"
 {
   "fluxwan_backup": {
-    "version": "1.3.0",
+    "version": "1.3.1",
     "created_at": ${EPOCH_NOW},
     "created_at_iso": "${DATE_ISO}",
     "hostname": "${HOSTNAME}",
