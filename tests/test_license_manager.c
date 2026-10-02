@@ -34,12 +34,18 @@ int main(void) {
     license_get_hardware_id(local_hwid, sizeof(local_hwid));
 
     char valid_key[512] = {0};
-    char gen_cmd[512];
+    char gen_cmd[1024];
+#ifdef PROJECT_SOURCE_DIR
+    const char *src_dir = PROJECT_SOURCE_DIR;
+#else
+    /* Fallback: assume CWD is project root (make test) */
+    const char *src_dir = ".";
+#endif
     snprintf(gen_cmd, sizeof(gen_cmd),
-             "python3 tools/fluxwan_license_gen.py --hwid \"%s\" --client \"CI Test System\" --type days --days 30 --raw 2>/dev/null || "
-             "python tools/fluxwan_license_gen.py --hwid \"%s\" --client \"CI Test System\" --type days --days 30 --raw 2>/dev/null || "
-             "py tools/fluxwan_license_gen.py --hwid \"%s\" --client \"CI Test System\" --type days --days 30 --raw 2>/dev/null",
-             local_hwid, local_hwid, local_hwid);
+             "python3 \"%s/tools/fluxwan_license_gen.py\" --hwid \"%s\" --client \"CI Test System\" --type days --days 30 --raw 2>/dev/null || "
+             "python \"%s/tools/fluxwan_license_gen.py\" --hwid \"%s\" --client \"CI Test System\" --type days --days 30 --raw 2>/dev/null || "
+             "py \"%s/tools/fluxwan_license_gen.py\" --hwid \"%s\" --client \"CI Test System\" --type days --days 30 --raw 2>/dev/null",
+             src_dir, local_hwid, src_dir, local_hwid, src_dir, local_hwid);
 
     FILE *pfp = popen(gen_cmd, "r");
     if (pfp) {

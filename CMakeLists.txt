@@ -51,6 +51,9 @@ add_executable(test_policy_routing tests/test_policy_routing.c ${CORE_LIB_SOURCE
 add_executable(test_katran_nextgen tests/test_katran_nextgen.c)
 add_executable(test_rfc8032 tests/test_rfc8032.c src/crypto_ed25519.c)
 add_executable(test_license_suite tests/test_license_manager.c src/license_manager.c src/crypto_ed25519.c)
+target_compile_definitions(test_license_suite PRIVATE
+    PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
 
 if(MSVC)
     target_compile_options(fluxwan PRIVATE /W4 /D_CRT_SECURE_NO_WARNINGS)
