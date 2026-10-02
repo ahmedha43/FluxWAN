@@ -321,6 +321,7 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
     net_apply_app_steering(config);
     net_apply_dpi(config);
     net_apply_dns_features(config);
+    net_apply_wan_shield(config);
 
     LOG_INFO("Network configuration successfully applied to Kernel!");
     return 0;
@@ -871,6 +872,156 @@ int net_apply_address_lists(const fluxwan_config_t *config) {
     }
 #else
     LOG_INFO("[Simulation] Address Lists steering rules applied (%u lists configured)", config->address_list_count);
+#endif
+    return 0;
+}
+
+int net_apply_wan_shield(const fluxwan_config_t *config) {
+    if (!config) return -1;
+#if defined(__linux__)
+    LOG_INFO("[WAN Shield] Hardening Kernel & Activating Full WAN Inbound Drop & Anti-ISP Reconnaissance Shield...");
+
+    /* 1. Kernel Network Hardening & Anti-Fingerprinting Sysctls */
+    safe_write_proc("/proc/sys/net/ipv4/tcp_timestamps", "0\n");              /* Stop TCP uptime & OS fingerprinting */
+    safe_write_proc("/proc/sys/net/ipv4/tcp_sack", "1\n");
+    safe_write_proc("/proc/sys/net/ipv4/tcp_dsack", "0\n");
+    safe_write_proc("/proc/sys/net/ipv4/tcp_fack", "0\n");
+    safe_write_proc("/proc/sys/net/ipv4/tcp_rfc1337", "1\n");                 /* Prevent TCP TIME_WAIT assassination */
+    safe_write_proc("/proc/sys/net/ipv4/tcp_syncookies", "1\n");              /* SYN Flood protection */
+    safe_write_proc("/proc/sys/net/ipv4/icmp_echo_ignore_broadcasts", "1\n"); /* Smurf attack defense */
+    safe_write_proc("/proc/sys/net/ipv4/icmp_ignore_bogus_error_responses", "1\n");
+    safe_write_proc("/proc/sys/net/ipv4/conf/all/send_redirects", "0\n");     /* Never leak ICMP redirects to WAN */
+    safe_write_proc("/proc/sys/net/ipv4/conf/default/send_redirects", "0\n");
+    safe_write_proc("/proc/sys/net/ipv4/conf/all/accept_redirects", "0\n");   /* Disallow ISP routing alterations */
+    safe_write_proc("/proc/sys/net/ipv4/conf/default/accept_redirects", "0\n");
+    safe_write_proc("/proc/sys/net/ipv4/conf/all/accept_source_route", "0\n");/* Drop IP source routing */
+    safe_write_proc("/proc/sys/net/ipv4/conf/default/accept_source_route", "0\n");
+
+    /* 2. Create and Hook Dedicated Inbound Shield Chain into INPUT */
+    safe_system("iptables -N FLUXWAN_WAN_SHIELD 2>/dev/null || iptables-legacy -N FLUXWAN_WAN_SHIELD 2>/dev/null || true");
+    safe_system("iptables -F FLUXWAN_WAN_SHIELD 2>/dev/null || iptables-legacy -F FLUXWAN_WAN_SHIELD 2>/dev/null || true");
+
+    safe_system("iptables -D INPUT -j FLUXWAN_WAN_SHIELD 2>/dev/null || iptables-legacy -D INPUT -j FLUXWAN_WAN_SHIELD 2>/dev/null || true");
+    safe_system("iptables -I INPUT 1 -j FLUXWAN_WAN_SHIELD 2>/dev/null || iptables-legacy -I INPUT 1 -j FLUXWAN_WAN_SHIELD 2>/dev/null || true");
+
+    /* 2.1. Allow Loopback interface completely */
+    safe_system("iptables -A FLUXWAN_WAN_SHIELD -i lo -j ACCEPT 2>/dev/null || iptables-legacy -A FLUXWAN_WAN_SHIELD -i lo -j ACCEPT 2>/dev/null || true");
+
+    /* 2.2. Allow Trusted LAN interface completely (Web UI 8080, DNS 53, DHCP 67) */
+    if (config->lan.name[0]) {
+        char lan_cmd[512];
+        snprintf(lan_cmd, sizeof(lan_cmd),
+                 "iptables -A FLUXWAN_WAN_SHIELD -i %s -j ACCEPT 2>/dev/null || "
+                 "iptables-legacy -A FLUXWAN_WAN_SHIELD -i %s -j ACCEPT 2>/dev/null || true",
+                 config->lan.name, config->lan.name);
+        safe_system(lan_cmd);
+    }
+
+    /* 2.3. If Broadband PPPoE Server is active, allow authenticated LAN PPPoE client subnets */
+    if (config->pppoe_server.enabled && config->pppoe_server.local_ip[0]) {
+        safe_system("iptables -A FLUXWAN_WAN_SHIELD -s 10.0.0.0/8 -j ACCEPT 2>/dev/null || true");
+        safe_system("iptables -A FLUXWAN_WAN_SHIELD -s 10.100.0.0/16 -j ACCEPT 2>/dev/null || true");
+    }
+
+    /* 2.4. Allow Established & Related return packets (for local outbound prober, NTP, speedtest, DNS lookups) */
+    safe_system("iptables -A FLUXWAN_WAN_SHIELD -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || "
+                "iptables-legacy -A FLUXWAN_WAN_SHIELD -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true");
+
+    /* 2.5. Drop INVALID state packets immediately */
+    safe_system("iptables -A FLUXWAN_WAN_SHIELD -m conntrack --ctstate INVALID -j DROP 2>/dev/null || "
+                "iptables-legacy -A FLUXWAN_WAN_SHIELD -m conntrack --ctstate INVALID -j DROP 2>/dev/null || true");
+
+    /* 2.6. Allow Inbound DHCP Client Offers/Acks on WANs (UDP port 67 -> 68) */
+    safe_system("iptables -A FLUXWAN_WAN_SHIELD -p udp --sport 67 --dport 68 -j ACCEPT 2>/dev/null || "
+                "iptables-legacy -A FLUXWAN_WAN_SHIELD -p udp --sport 67 --dport 68 -j ACCEPT 2>/dev/null || true");
+
+    /* 2.7. Drop ALL unsolicited incoming packets on every configured WAN interface */
+    for (uint32_t i = 0; i < config->wan_count; i++) {
+        const wan_config_t *w = &config->wans[i];
+        if (!w->name[0]) continue;
+
+        char wan_shield_cmd[1024];
+        /* Silently DROP ICMP Echo / Ping from ISP on this WAN */
+        snprintf(wan_shield_cmd, sizeof(wan_shield_cmd),
+                 "iptables -A FLUXWAN_WAN_SHIELD -i %s -p icmp -j DROP 2>/dev/null || "
+                 "iptables-legacy -A FLUXWAN_WAN_SHIELD -i %s -p icmp -j DROP 2>/dev/null || true",
+                 w->name, w->name);
+        safe_system(wan_shield_cmd);
+
+        /* Silently DROP all unsolicited TCP, UDP, and any other protocol from ISP to router */
+        snprintf(wan_shield_cmd, sizeof(wan_shield_cmd),
+                 "iptables -A FLUXWAN_WAN_SHIELD -i %s -j DROP 2>/dev/null || "
+                 "iptables-legacy -A FLUXWAN_WAN_SHIELD -i %s -j DROP 2>/dev/null || true",
+                 w->name, w->name);
+        safe_system(wan_shield_cmd);
+
+        /* Disable ICMP redirects on this WAN interface */
+        char proc_path[128];
+        snprintf(proc_path, sizeof(proc_path), "/proc/sys/net/ipv4/conf/%s/send_redirects", w->name);
+        safe_write_proc(proc_path, "0\n");
+        snprintf(proc_path, sizeof(proc_path), "/proc/sys/net/ipv4/conf/%s/accept_redirects", w->name);
+        safe_write_proc(proc_path, "0\n");
+    }
+
+    /* 2.8. Drop on all PPPoE virtual interfaces, Macvlans, and WiFi interfaces */
+    safe_system("iptables -A FLUXWAN_WAN_SHIELD -i ppp+ -p icmp -j DROP 2>/dev/null || true");
+    safe_system("iptables -A FLUXWAN_WAN_SHIELD -i ppp+ -j DROP 2>/dev/null || true");
+    safe_system("iptables -A FLUXWAN_WAN_SHIELD -i macvlan+ -j DROP 2>/dev/null || true");
+    safe_system("iptables -A FLUXWAN_WAN_SHIELD -i mv_+ -j DROP 2>/dev/null || true");
+    safe_system("iptables -A FLUXWAN_WAN_SHIELD -i wlan+ -j DROP 2>/dev/null || true");
+
+    /* 2.9. Catch-all: ANY non-LAN, non-loopback packet targeting the router -> DROP (Blackhole) */
+    if (config->lan.name[0]) {
+        char catchall_cmd[512];
+        snprintf(catchall_cmd, sizeof(catchall_cmd),
+                 "iptables -A FLUXWAN_WAN_SHIELD ! -i %s -j DROP 2>/dev/null || "
+                 "iptables-legacy -A FLUXWAN_WAN_SHIELD ! -i %s -j DROP 2>/dev/null || true",
+                 config->lan.name, config->lan.name);
+        safe_system(catchall_cmd);
+    }
+
+    /* 3. Anti-Tethering & Anti-Hop-Counting: Uniform TTL Normalization (POSTROUTING Mangle) */
+    safe_system("iptables -t mangle -N FLUXWAN_STEALTH_TTL 2>/dev/null || iptables-legacy -t mangle -N FLUXWAN_STEALTH_TTL 2>/dev/null || true");
+    safe_system("iptables -t mangle -F FLUXWAN_STEALTH_TTL 2>/dev/null || iptables-legacy -t mangle -F FLUXWAN_STEALTH_TTL 2>/dev/null || true");
+    safe_system("iptables -t mangle -D POSTROUTING -j FLUXWAN_STEALTH_TTL 2>/dev/null || iptables-legacy -t mangle -D POSTROUTING -j FLUXWAN_STEALTH_TTL 2>/dev/null || true");
+    safe_system("iptables -t mangle -A POSTROUTING -j FLUXWAN_STEALTH_TTL 2>/dev/null || iptables-legacy -t mangle -A POSTROUTING -j FLUXWAN_STEALTH_TTL 2>/dev/null || true");
+
+    /* Clamp outgoing IPv4 TTL to 64 so upstream ISP sees identical single-host TTL for all client traffic */
+    for (uint32_t i = 0; i < config->wan_count; i++) {
+        const wan_config_t *w = &config->wans[i];
+        if (!w->name[0]) continue;
+        char ttl_cmd[512];
+        snprintf(ttl_cmd, sizeof(ttl_cmd),
+                 "iptables -t mangle -A FLUXWAN_STEALTH_TTL -o %s -j TTL --ttl-set 64 2>/dev/null || "
+                 "iptables-legacy -t mangle -A FLUXWAN_STEALTH_TTL -o %s -j TTL --ttl-set 64 2>/dev/null || true",
+                 w->name, w->name);
+        safe_system(ttl_cmd);
+    }
+    safe_system("iptables -t mangle -A FLUXWAN_STEALTH_TTL -o ppp+ -j TTL --ttl-set 64 2>/dev/null || true");
+    safe_system("iptables -t mangle -A FLUXWAN_STEALTH_TTL -o macvlan+ -j TTL --ttl-set 64 2>/dev/null || true");
+    safe_system("iptables -t mangle -A FLUXWAN_STEALTH_TTL -o mv_+ -j TTL --ttl-set 64 2>/dev/null || true");
+    safe_system("iptables -t mangle -A FLUXWAN_STEALTH_TTL -o wlan+ -j TTL --ttl-set 64 2>/dev/null || true");
+
+    /* 4. Traceroute Cloaking: Suppress ICMP Time Exceeded (Type 11) leakage on WAN */
+    safe_system("iptables -D OUTPUT -p icmp --icmp-type time-exceeded -j DROP 2>/dev/null || true");
+    safe_system("iptables -A OUTPUT -p icmp --icmp-type time-exceeded -j DROP 2>/dev/null || true");
+    safe_system("iptables -D OUTPUT -p icmp --icmp-type destination-unreachable -j DROP 2>/dev/null || true");
+    safe_system("iptables -A OUTPUT -p icmp --icmp-type destination-unreachable -j DROP 2>/dev/null || true");
+
+    /* 5. Restrict Web Management Port 80 -> 8080 Redirection strictly to LAN */
+    safe_system("iptables -t nat -D PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 8080 2>/dev/null || true");
+    if (config->lan.name[0]) {
+        char redir_cmd[512];
+        snprintf(redir_cmd, sizeof(redir_cmd),
+                 "iptables -t nat -C PREROUTING -i %s -p tcp --dport 80 -j REDIRECT --to-port 8080 2>/dev/null || "
+                 "iptables -t nat -A PREROUTING -i %s -p tcp --dport 80 -j REDIRECT --to-port 8080 2>/dev/null || true",
+                 config->lan.name, config->lan.name);
+        safe_system(redir_cmd);
+    }
+
+    LOG_INFO("[WAN Shield] Stealth Blackhole & Anti-ISP Protection rules ACTIVE.");
+#else
+    LOG_INFO("[Simulation] WAN Stealth Shield & Anti-ISP Inbound Drop rules applied (%u WANs)", config->wan_count);
 #endif
     return 0;
 }

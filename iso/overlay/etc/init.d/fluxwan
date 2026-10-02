@@ -17,8 +17,7 @@ start_pre() {
     sysctl -w net.ipv4.conf.all.rp_filter=2 >/dev/null 2>&1 || true
     sysctl -w net.ipv4.conf.default.rp_filter=2 >/dev/null 2>&1 || true
 
-    # Port 80 -> 8080 Web UI redirection
-    iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 8080 2>/dev/null || true
+    # Port 80 -> 8080 Web UI redirection is handled strictly on LAN interface by fluxwan core engine
 }
 
 start_post() {

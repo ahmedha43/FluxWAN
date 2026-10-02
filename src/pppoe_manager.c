@@ -242,7 +242,14 @@ int pppoe_session_start(pppoe_manager_ctx_t *pctx, int wan_index, const wan_conf
     fprintf(opts_fp, "mru 1492\n");
     fprintf(opts_fp, "lcp-echo-interval 10\n");
     fprintf(opts_fp, "lcp-echo-failure 3\n");
-    fprintf(opts_fp, "linkname fluxwan_ppp%d\n", wan_index);
+    fprintf(opts_fp, "linkname ppp%d\n", wan_index);
+    fprintf(opts_fp, "hide-password\n");
+    fprintf(opts_fp, "noaccomp\n");
+    fprintf(opts_fp, "nopcomp\n");
+    fprintf(opts_fp, "novj\n");
+    fprintf(opts_fp, "nobsdcomp\n");
+    fprintf(opts_fp, "nodeflate\n");
+    fprintf(opts_fp, "noipx\n");
     fprintf(opts_fp, "nodetach\n");
     fclose(opts_fp);
 

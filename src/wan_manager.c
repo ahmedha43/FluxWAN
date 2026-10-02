@@ -300,6 +300,19 @@ static void on_pppoe_connected_cb(int wan_idx, const char *ppp_ifname, uint32_t 
     }
     net_apply_wan_nat(ppp_ifname, true);
 
+    /* Enforce complete stealth drop protection & uniform TTL normalization on the new PPPoE WAN interface */
+    char ppp_shield_cmd[512];
+    snprintf(ppp_shield_cmd, sizeof(ppp_shield_cmd),
+             "iptables -C FLUXWAN_WAN_SHIELD -i %s -j DROP 2>/dev/null || "
+             "iptables -A FLUXWAN_WAN_SHIELD -i %s -j DROP 2>/dev/null || true",
+             ppp_ifname, ppp_ifname);
+    safe_system(ppp_shield_cmd);
+    snprintf(ppp_shield_cmd, sizeof(ppp_shield_cmd),
+             "iptables -t mangle -C FLUXWAN_STEALTH_TTL -o %s -j TTL --ttl-set 64 2>/dev/null || "
+             "iptables -t mangle -A FLUXWAN_STEALTH_TTL -o %s -j TTL --ttl-set 64 2>/dev/null || true",
+             ppp_ifname, ppp_ifname);
+    safe_system(ppp_shield_cmd);
+
     wan_manager_rebalance(ctx);
 }
 
@@ -563,8 +576,12 @@ static void ensure_dhcp_hook_script(void) {
         "            ip rule add from \"$ip\" table \"$TABLE_ID\" pref 100 2>/dev/null || true\n"
         "            ip route replace default via \"$router\" dev \"$interface\" 2>/dev/null || true\n"
         "            iptables -t nat -C POSTROUTING -o \"$interface\" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o \"$interface\" -j MASQUERADE 2>/dev/null || iptables-legacy -t nat -A POSTROUTING -o \"$interface\" -j MASQUERADE 2>/dev/null || true\n"
+        "            iptables -C FLUXWAN_WAN_SHIELD -i \"$interface\" -j DROP 2>/dev/null || iptables -A FLUXWAN_WAN_SHIELD -i \"$interface\" -j DROP 2>/dev/null || true\n"
+        "            iptables -t mangle -C FLUXWAN_STEALTH_TTL -o \"$interface\" -j TTL --ttl-set 64 2>/dev/null || iptables -t mangle -A FLUXWAN_STEALTH_TTL -o \"$interface\" -j TTL --ttl-set 64 2>/dev/null || true\n"
         "        fi\n"
         "        sysctl -w net.ipv4.conf.${interface}.rp_filter=2 >/dev/null 2>&1 || true\n"
+        "        sysctl -w net.ipv4.conf.${interface}.send_redirects=0 >/dev/null 2>&1 || true\n"
+        "        sysctl -w net.ipv4.conf.${interface}.accept_redirects=0 >/dev/null 2>&1 || true\n"
         "        ;;\n"
         "esac\n"
         "exit 0\n"
@@ -691,7 +708,7 @@ void wan_manager_periodic_tick(wan_manager_ctx_t *ctx, uint64_t now_ms) {
                     wan_manager_add_log("INFO", "[DHCP Client] Starting DHCP client on %s (Table %u)", w->name, w->table_id);
                     char dhcp_cmd[512];
                     snprintf(dhcp_cmd, sizeof(dhcp_cmd),
-                             "udhcpc -i %s -p %s -s %s -b -R -O 33 -x hostname:FluxWAN >/dev/null 2>&1 &",
+                             "udhcpc -i %s -p %s -s %s -b -R -O 33 >/dev/null 2>&1 &",
                              w->name, pid_path, script);
                     safe_system(dhcp_cmd);
                 }

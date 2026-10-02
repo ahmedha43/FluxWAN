@@ -59,4 +59,11 @@ int net_apply_dpi(const fluxwan_config_t *config);
  */
 int net_apply_address_lists(const fluxwan_config_t *config);
 
+/**
+ * Apply Full WAN Stealth Shield, Inbound Drop Rules, and Anti-ISP Reconnaissance / Fingerprinting Protection.
+ * Drops all unsolicited inbound traffic on all WANs (DHCP, Static, PPPoE), normalizes egress TTL to 64,
+ * and hardens kernel sysctls against scanning and OS fingerprinting.
+ */
+int net_apply_wan_shield(const fluxwan_config_t *config);
+
 #endif /* NET_APPLY_H */
