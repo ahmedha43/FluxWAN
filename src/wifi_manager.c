@@ -224,7 +224,7 @@ int wifi_manager_connect(const char *ifname, const char *ssid, const char *passw
 
     /* Start udhcpc client to acquire IP address from the WiFi AP */
     snprintf(cmd, sizeof(cmd),
-             "udhcpc -i %s -p /var/run/udhcpc_%s.pid -s /usr/local/bin/fluxwan_wan_dhcp.sh -b >/dev/null 2>&1",
+             "udhcpc -i %s -p /var/run/udhcpc_%s.pid -s /usr/local/bin/fluxwan_wan_dhcp.sh -b -V \"TP-Link\" -x hostname:Archer_C6 >/dev/null 2>&1",
              ifname, ifname);
     rc = system(cmd);
     (void)rc;

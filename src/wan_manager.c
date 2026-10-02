@@ -720,7 +720,7 @@ void wan_manager_periodic_tick(wan_manager_ctx_t *ctx, uint64_t now_ms) {
                     wan_manager_add_log("INFO", "[DHCP Client] Starting DHCP client on %s (Table %u)", w->name, w->table_id);
                     char dhcp_cmd[512];
                     snprintf(dhcp_cmd, sizeof(dhcp_cmd),
-                             "udhcpc -i %s -p %s -s %s -b -R -O 33 >/dev/null 2>&1 &",
+                             "udhcpc -i %s -p %s -s %s -b -R -O 33 -V \"TP-Link\" -x hostname:Archer_C6 >/dev/null 2>&1 &",
                              w->name, pid_path, script);
                     safe_system(dhcp_cmd);
                 }
