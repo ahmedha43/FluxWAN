@@ -152,12 +152,13 @@ static void generate_unique_virtual_mac(int wan_index, const char *parent_ifname
     for (const char *p = parent_ifname; p && *p; p++) {
         h = (h ^ (uint8_t)*p) * 0x01000193;
     }
+    uint32_t w_id = (uint32_t)(wan_index + 1);
     uint8_t b1 = 0x02; /* Locally Administered Unicast */
     uint8_t b2 = (uint8_t)((h >> 16) & 0xFE);
     uint8_t b3 = (uint8_t)((h >> 8) & 0xFF);
     uint8_t b4 = (uint8_t)(h & 0xFF);
-    uint8_t b5 = (uint8_t)(((wan_index + 1) * 0x2B) & 0xFF);
-    uint8_t b6 = (uint8_t)(((wan_index + 1) * 0x3F) & 0xFF);
+    uint8_t b5 = (uint8_t)((w_id >> 8) & 0xFF);
+    uint8_t b6 = (uint8_t)(w_id & 0xFF);
 
     snprintf(out_mac_str, 18, "%02x:%02x:%02x:%02x:%02x:%02x", b1, b2, b3, b4, b5, b6);
 }

@@ -337,7 +337,7 @@ static void run_test_dhcp_allocation(void) {
     printf(" TEST 4: LAN Embedded RFC 2131 DHCP IP Allocation Pool & Leases\n");
     printf("======================================================================\n");
 
-    fluxwan_config_t cfg;
+    static fluxwan_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
     cfg.lan.dhcp_enabled = true;
     cfg.lan.ip_addr = str_to_ip("192.168.1.1");

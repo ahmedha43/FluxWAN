@@ -52,7 +52,7 @@ static void test_pppoe_multi_session_configuration(void) {
     pppoe_manager_ctx_t *pctx = pppoe_manager_init();
     assert(pctx != NULL);
 
-    fluxwan_config_t config;
+    static fluxwan_config_t config;
     memset(&config, 0, sizeof(config));
     config.wan_count = 2;
 

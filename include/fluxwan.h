@@ -65,7 +65,7 @@ typedef int socket_t;
 #define FLUXWAN_AUTHOR "Ahmed Al-Dulaimi (أحمد الدليمي)"
 #define FLUXWAN_LICENSE "GNU GPLv3"
 #define FLUXWAN_COPYRIGHT "Copyright (C) 2026 Ahmed Al-Dulaimi. All rights reserved."
-#define MAX_WANS 8
+#define MAX_WANS 256
 #define MAX_IFNAME_LEN 32
 #define MAX_LABEL_LEN 64
 #define MAX_PATH_LEN 256
@@ -73,7 +73,7 @@ typedef int socket_t;
 
 /* Maglev Consistent Hashing & BPF Map Dimensions */
 #define MAGLEV_RING_SIZE 65537
-#define MAX_EBPF_WANS 8
+#define MAX_EBPF_WANS 256
 #define MAX_STICKY_ENTRIES 16384
 
 /* 5-Tuple Flow Key Structure */
@@ -218,7 +218,7 @@ typedef struct {
 
 #define MAX_WAN_GROUPS 8
 #define MAX_POLICY_ROUTES 16
-#define MAX_GROUP_MEMBERS 8
+#define MAX_GROUP_MEMBERS 64
 
 /* Policy Route Definition (Multi-Subnet LAN to WAN Group Binding) */
 typedef struct {

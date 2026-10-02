@@ -325,8 +325,15 @@ int diagnostics_run_multiwan_speedtest(const fluxwan_config_t *config, multiwan_
     }
 
     /* 2. Collect all active WAN interfaces */
-    multiwan_speedtest_worker_t workers[MAX_WANS];
-    pthread_t threads[MAX_WANS];
+    multiwan_speedtest_worker_t *workers = calloc(MAX_WANS, sizeof(multiwan_speedtest_worker_t));
+    pthread_t *threads = calloc(MAX_WANS, sizeof(pthread_t));
+    if (!workers || !threads) {
+        free(workers);
+        free(threads);
+        snprintf(out->error_msg, sizeof(out->error_msg), "Out of memory allocating speedtest workers");
+        out->success = false;
+        return -1;
+    }
     uint32_t active_count = 0;
 
     for (uint32_t i = 0; i < config->wan_count && active_count < MAX_WANS; i++) {
@@ -355,6 +362,8 @@ int diagnostics_run_multiwan_speedtest(const fluxwan_config_t *config, multiwan_
     }
 
     if (active_count == 0) {
+        free(workers);
+        free(threads);
         snprintf(out->error_msg, sizeof(out->error_msg), "No active WAN interfaces found");
         out->success = false;
         return -1;
@@ -420,6 +429,8 @@ int diagnostics_run_multiwan_speedtest(const fluxwan_config_t *config, multiwan_
 
     LOG_INFO("[MultiWAN Speedtest] Total Download: %.2f Mbps, Total Upload: %.2f Mbps, Min Ping: %.1f ms across %u lines",
              out->total_download_mbps, out->total_upload_mbps, out->min_ping_ms, out->wan_count);
+    free(workers);
+    free(threads);
     return out->success ? 0 : -1;
 #else
     out->success = false;

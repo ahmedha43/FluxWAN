@@ -20,7 +20,7 @@ int main(void) {
     printf("    FluxWAN Multi-Subnet LAN Policy Routing (PBR) Verification        \n");
     printf("======================================================================\n\n");
 
-    fluxwan_config_t config;
+    static fluxwan_config_t config;
     memset(&config, 0, sizeof(config));
 
     config.wan_count = 4;

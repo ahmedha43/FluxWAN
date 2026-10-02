@@ -2670,10 +2670,10 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
             send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
         }
         dyn_buf_t sbuf;
-        dyn_buf_init(&sbuf, 32768);
-        char *temp_json = malloc(65536);
+        dyn_buf_init(&sbuf, 65536);
+        char *temp_json = malloc(262144);
         if (temp_json) {
-            build_json_status(ctx, temp_json, 65536);
+            build_json_status(ctx, temp_json, 262144);
             dyn_buf_append(&sbuf, temp_json);
             free(temp_json);
         }
@@ -4329,11 +4329,27 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
         }
 
         if (all_mode) {
-            multiwan_speedtest_result_t multi_res;
-            diagnostics_run_multiwan_speedtest(ctx->config, &multi_res);
+            multiwan_speedtest_result_t *multi_res = calloc(1, sizeof(multiwan_speedtest_result_t));
+            if (!multi_res) {
+                const char *rb = "{\"status\":\"error\",\"message\":\"Out of memory\"}";
+                char err_resp[256];
+                int elen = snprintf(err_resp, sizeof(err_resp),
+                    "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                    strlen(rb), rb);
+                send(client_fd, err_resp, elen, 0);
+                close_client_socket(client_fd);
+                return 0;
+            }
+            diagnostics_run_multiwan_speedtest(ctx->config, multi_res);
 
-            char resp_body[4096];
-            int offset = snprintf(resp_body, sizeof(resp_body),
+            size_t body_size = 262144;
+            char *resp_body = malloc(body_size);
+            if (!resp_body) {
+                free(multi_res);
+                close_client_socket(client_fd);
+                return 0;
+            }
+            int offset = snprintf(resp_body, body_size,
                 "{\n"
                 "  \"status\": \"%s\",\n"
                 "  \"success\": %s,\n"
@@ -4347,22 +4363,22 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
                 "  \"avg_ping_ms\": %.1f,\n"
                 "  \"wan_count\": %u,\n"
                 "  \"wans\": [\n",
-                multi_res.success ? "ok" : "error",
-                multi_res.success ? "true" : "false",
-                multi_res.total_download_mbps,
-                multi_res.total_upload_mbps,
-                multi_res.total_download_mbps,
-                multi_res.total_upload_mbps,
-                multi_res.min_ping_ms,
-                multi_res.min_ping_ms,
-                multi_res.avg_ping_ms,
-                multi_res.wan_count);
+                multi_res->success ? "ok" : "error",
+                multi_res->success ? "true" : "false",
+                multi_res->total_download_mbps,
+                multi_res->total_upload_mbps,
+                multi_res->total_download_mbps,
+                multi_res->total_upload_mbps,
+                multi_res->min_ping_ms,
+                multi_res->min_ping_ms,
+                multi_res->avg_ping_ms,
+                multi_res->wan_count);
 
-            for (uint32_t i = 0; i < multi_res.wan_count; i++) {
-                speedtest_result_t *w = &multi_res.wans[i];
-                double share = (multi_res.total_download_mbps > 0.0) ?
-                               (w->download_mbps / multi_res.total_download_mbps * 100.0) : 0.0;
-                offset += snprintf(resp_body + offset, sizeof(resp_body) - offset,
+            for (uint32_t i = 0; i < multi_res->wan_count; i++) {
+                speedtest_result_t *w = &multi_res->wans[i];
+                double share = (multi_res->total_download_mbps > 0.0) ?
+                               (w->download_mbps / multi_res->total_download_mbps * 100.0) : 0.0;
+                offset += snprintf(resp_body + offset, body_size - offset,
                     "    {\n"
                     "      \"interface\": \"%s\",\n"
                     "      \"label\": \"%s\",\n"
@@ -4375,19 +4391,24 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
                     "    }%s\n",
                     w->interface, w->wan_label, w->ping_ms, w->download_mbps, w->upload_mbps,
                     share, w->success ? "true" : "false", w->error_msg,
-                    (i + 1 < multi_res.wan_count) ? "," : "");
+                    (i + 1 < multi_res->wan_count) ? "," : "");
             }
-            snprintf(resp_body + offset, sizeof(resp_body) - offset,
+            snprintf(resp_body + offset, body_size - offset,
                 "  ],\n"
                 "  \"message\": \"%s\"\n"
                 "}",
-                multi_res.success ? "Multi-WAN aggregated speedtest completed successfully" : multi_res.error_msg);
+                multi_res->success ? "Multi-WAN aggregated speedtest completed successfully" : multi_res->error_msg);
 
-            char resp[4608];
-            int len = snprintf(resp, sizeof(resp),
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
-                strlen(resp_body), resp_body);
-            send(client_fd, resp, len, 0);
+            char *resp = malloc(body_size + 1024);
+            if (resp) {
+                int len = snprintf(resp, body_size + 1024,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                    strlen(resp_body), resp_body);
+                send(client_fd, resp, len, 0);
+                free(resp);
+            }
+            free(resp_body);
+            free(multi_res);
             close_client_socket(client_fd);
             return 0;
         } else {
@@ -4581,12 +4602,15 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
             "Access-Control-Allow-Origin: *\r\n\r\n";
         send(client_fd, hdr, (int)strlen(hdr), 0);
 
-        char json_buf[16384];
-        build_json_status(ctx, json_buf, sizeof(json_buf));
-
-        char sse_msg[17000];
-        int len = snprintf(sse_msg, sizeof(sse_msg), "data: %s\n\n", json_buf);
-        send(client_fd, sse_msg, (int)len, 0);
+        char *json_buf = malloc(262144);
+        char *sse_msg = malloc(263000);
+        if (json_buf && sse_msg) {
+            build_json_status(ctx, json_buf, 262144);
+            int len = snprintf(sse_msg, 263000, "data: %s\n\n", json_buf);
+            send(client_fd, sse_msg, (int)len, 0);
+        }
+        free(sse_msg);
+        free(json_buf);
     } else {
         /* Serve embedded HTML Dashboard Gzip Payload */
         char resp_hdr[512];

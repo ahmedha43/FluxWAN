@@ -38,7 +38,7 @@
 #include <bpf/bpf_endian.h>
 #endif
 
-#define MAX_EBPF_WANS      8
+#define MAX_EBPF_WANS      256
 #define MAGLEV_RING_SIZE   65537
 #define MAX_STICKY_ENTRIES 16384
 
@@ -345,7 +345,7 @@ int xdp_lb(struct xdp_md *ctx) {
         /* Health fallback */
         struct bpf_wan_entry *we = bpf_map_lookup_elem(&wan_table_map, &target);
         if (!we || !we->is_active || we->weight == 0) {
-            #pragma unroll
+            #pragma unroll 32
             for (uint32_t i = 0; i < MAX_EBPF_WANS; i++) {
                 uint32_t fi = i;
                 struct bpf_wan_entry *fe = bpf_map_lookup_elem(&wan_table_map, &fi);

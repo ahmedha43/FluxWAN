@@ -8,7 +8,7 @@ int main(void) {
     printf("     FluxWAN WAN Groups & Multi-Pool Maglev Ring Isolation Test       \n");
     printf("======================================================================\n\n");
 
-    fluxwan_config_t config;
+    static fluxwan_config_t config;
     memset(&config, 0, sizeof(config));
 
     /* Setup 4 WAN Uplinks: 2 Starlink + 2 Iraqi PPPoE */

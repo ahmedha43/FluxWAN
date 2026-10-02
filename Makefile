@@ -1,7 +1,7 @@
 TARGET ?= fluxwan
 CC ?= gcc
 CLANG ?= clang
-CFLAGS ?= -O2 -Wall -Wextra -std=c11 -Iinclude -D_GNU_SOURCE -D_DEFAULT_SOURCE
+CFLAGS ?= -O2 -g -Wall -Wextra -std=c11 -Iinclude -D_GNU_SOURCE -D_DEFAULT_SOURCE
 LDFLAGS ?= -pthread
 
 BPF_CLANG ?= clang
@@ -92,13 +92,13 @@ $(TEST_PPPOE): tests/test_pppoe_manager.c src/pppoe_manager.c
 $(TEST_NAT46): tests/test_live_nat46_translation.c
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
-$(TEST_XDP): tests/xdp_packet_test.c src/config.c src/wan_manager.c src/netlink_manager.c src/bpf_loader.c src/prober.c src/sticky.c src/net_discovery.c src/pppoe_manager.c src/dhcp_server.c src/net_apply.c src/dns64_daemon.c
+$(TEST_XDP): tests/xdp_packet_test.c src/config.c src/wan_manager.c src/netlink_manager.c src/bpf_loader.c src/prober.c src/sticky.c src/net_discovery.c src/pppoe_manager.c src/dhcp_server.c src/net_apply.c src/dns64_daemon.c src/wifi_manager.c
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
 
-$(TEST_GROUPS): tests/test_wan_groups.c src/config.c src/wan_manager.c src/netlink_manager.c src/bpf_loader.c src/prober.c src/sticky.c src/net_discovery.c src/pppoe_manager.c src/dhcp_server.c src/net_apply.c src/dns64_daemon.c
+$(TEST_GROUPS): tests/test_wan_groups.c src/config.c src/wan_manager.c src/netlink_manager.c src/bpf_loader.c src/prober.c src/sticky.c src/net_discovery.c src/pppoe_manager.c src/dhcp_server.c src/net_apply.c src/dns64_daemon.c src/wifi_manager.c
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
 
-$(TEST_POLICY): tests/test_policy_routing.c src/config.c src/wan_manager.c src/netlink_manager.c src/bpf_loader.c src/prober.c src/sticky.c src/net_discovery.c src/pppoe_manager.c src/dhcp_server.c src/net_apply.c src/dns64_daemon.c
+$(TEST_POLICY): tests/test_policy_routing.c src/config.c src/wan_manager.c src/netlink_manager.c src/bpf_loader.c src/prober.c src/sticky.c src/net_discovery.c src/pppoe_manager.c src/dhcp_server.c src/net_apply.c src/dns64_daemon.c src/wifi_manager.c
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
 
 $(TEST_KATRAN): tests/test_katran_nextgen.c

@@ -15,8 +15,8 @@
 #include "config.h"
 
 static void test_valid_multi_pppoe_on_same_port(void) {
-    printf("[Test 1/4] Testing 3 PPPoE sessions sharing eth1...");
-    fluxwan_config_t cfg;
+    printf("[Test 1/5] Testing 3 PPPoE sessions sharing eth1...");
+    static fluxwan_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
     strcpy(cfg.lan.name, "eth0");
 
@@ -32,8 +32,8 @@ static void test_valid_multi_pppoe_on_same_port(void) {
 }
 
 static void test_reject_two_dhcp_on_same_port(void) {
-    printf("[Test 2/4] Testing REJECTION of 2 DHCP clients on eth1...");
-    fluxwan_config_t cfg;
+    printf("[Test 2/5] Testing REJECTION of 2 DHCP clients on eth1...");
+    static fluxwan_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
     strcpy(cfg.lan.name, "eth0");
 
@@ -48,8 +48,8 @@ static void test_reject_two_dhcp_on_same_port(void) {
 }
 
 static void test_reject_dhcp_and_static_conflict(void) {
-    printf("[Test 3/4] Testing REJECTION of DHCP + Static mix on eth1...");
-    fluxwan_config_t cfg;
+    printf("[Test 3/5] Testing REJECTION of DHCP + Static mix on eth1...");
+    static fluxwan_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
     strcpy(cfg.lan.name, "eth0");
 
@@ -64,8 +64,8 @@ static void test_reject_dhcp_and_static_conflict(void) {
 }
 
 static void test_reject_lan_and_wan_sharing(void) {
-    printf("[Test 4/4] Testing REJECTION of LAN port (eth0) assigned to WAN...");
-    fluxwan_config_t cfg;
+    printf("[Test 4/5] Testing REJECTION of LAN port (eth0) assigned to WAN...");
+    static fluxwan_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
     strcpy(cfg.lan.name, "eth0");
 
@@ -78,6 +78,30 @@ static void test_reject_lan_and_wan_sharing(void) {
     assert(valid == false);
 }
 
+static void test_valid_high_density_pppoe_macvlan(void) {
+    printf("[Test 5/5] Testing 64 High-Density PPPoE MACVLAN sessions sharing eth1...");
+    fluxwan_config_t *cfg = calloc(1, sizeof(fluxwan_config_t));
+    assert(cfg != NULL);
+    strcpy(cfg->lan.name, "eth0");
+
+    cfg->wan_count = 64;
+    for (uint32_t i = 0; i < 64; i++) {
+        cfg->wans[i].id = i + 1;
+        cfg->wans[i].type = WAN_TYPE_PPPOE;
+        strcpy(cfg->wans[i].name, "eth1");
+        snprintf(cfg->wans[i].label, sizeof(cfg->wans[i].label), "PPPoE_Line_%02u", i + 1);
+        snprintf(cfg->wans[i].ppp_username, sizeof(cfg->wans[i].ppp_username), "user%u@isp.net", i + 1);
+        strcpy(cfg->wans[i].ppp_password, "secret");
+        cfg->wans[i].enabled = true;
+    }
+
+    char err[256] = {0};
+    bool valid = config_validate_wan_attachments(cfg, err, sizeof(err));
+    printf(" [%s] (Expected: VALID - 64 PPPoE MACVLAN sessions attached to eth1)\n", valid ? "PASS" : "FAIL");
+    assert(valid == true);
+    free(cfg);
+}
+
 int main(void) {
     printf("======================================================================\n");
     printf("       FluxWAN C Backend WAN Port Allocation & Exclusivity Tests       \n");
@@ -87,6 +111,7 @@ int main(void) {
     test_reject_two_dhcp_on_same_port();
     test_reject_dhcp_and_static_conflict();
     test_reject_lan_and_wan_sharing();
+    test_valid_high_density_pppoe_macvlan();
 
     printf("\n======================================================================\n");
     printf("       ALL WAN ATTACHMENT BACKEND VALIDATION TESTS PASSED 100%%!       \n");

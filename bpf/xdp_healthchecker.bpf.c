@@ -36,7 +36,7 @@
 #include <bpf/bpf_endian.h>
 #endif
 
-#define MAX_EBPF_WANS      8
+#define MAX_EBPF_WANS      256
 #define HC_PROBE_MAGIC_ID  0xF1A7   /* FluxWAN ICMP probe signature */
 #define HC_PROBE_INTERVAL_NS (500ULL * 1000000ULL) /* 500ms in nanoseconds */
 
@@ -186,7 +186,7 @@ SEC("tc/healthcheck_tx")
 int tc_hc_tx(struct __sk_buff *skb) {
     uint64_t now = bpf_ktime_get_ns();
 
-    #pragma unroll
+    #pragma unroll 32
     for (uint32_t i = 0; i < MAX_EBPF_WANS; i++) {
         uint32_t idx = i;
 

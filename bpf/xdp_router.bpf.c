@@ -101,7 +101,7 @@ struct icmphdr {
  * CONSTANTS
  * ========================================================================= */
 #define MAGLEV_RING_SIZE    65537   /* Prime number — Katran uses 65537 */
-#define MAX_EBPF_WANS       8
+#define MAX_EBPF_WANS       256
 #define MAX_STICKY_ENTRIES  16384   /* LRU evicts old flows automatically */
 
 /* Katran-inspired packet flags (mirrors F_SYN_SET, F_RST_SET, F_ICMP, F_QUIC) */
@@ -917,7 +917,7 @@ skip_maglev_dispatch:;
          * Notice: Draining WANs (is_draining=1) or weight==0 are NOT eligible for new dispatches! */
         struct bpf_wan_entry *we = bpf_map_lookup_elem(&wan_table_map, &target_wan_idx);
         if (!we || !we->is_active || we->weight == 0 || we->is_draining) {
-            #pragma unroll
+            #pragma unroll 32
             for (uint32_t i = 0; i < MAX_EBPF_WANS; i++) {
                 uint32_t fi = i;
                 struct bpf_wan_entry *fe = bpf_map_lookup_elem(&wan_table_map, &fi);

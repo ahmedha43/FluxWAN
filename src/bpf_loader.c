@@ -32,7 +32,7 @@
 
 /* Shared BPF map layout constants — must match xdp_router.bpf.c */
 #define MAGLEV_RING_SIZE    65537
-#define MAX_EBPF_WANS       8
+#define MAX_EBPF_WANS       256
 #define BPF_OBJ_DEFAULT     "/opt/fluxwan/bpf/xdp_router.bpf.o"
 
 #include "../bpf/xdp_control_map.h"
