@@ -1,9 +1,10 @@
 {
-  "latest_version": "1.2.8",
+  "latest_version": "1.2.9",
   "channel": "stable",
   "release_date": "2026-10-02",
   "min_compatible_version": "1.2.0",
   "changelog": [
+    "CI pipeline fully green: all 10 test suites pass on GitHub Actions (CMake + make)",
     "Uncrackable Ed25519 asymmetric cryptographic licensing engine (RFC 8032)",
     "Hardware fingerprint binding (HWID) anti-cloning and anti-theft protection",
     "Anti-clock rollback monotonic watermark ledger preventing NTP/time tampering",
