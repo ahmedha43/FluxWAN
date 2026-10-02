@@ -6,6 +6,7 @@
   "changelog": [
     "Stealth MAC Cloaking: Authentic TP-Link, Tenda, and D-Link OUIs with non-sequential random MACs (Strictly NO MikroTik)",
     "Custom Cloned MAC support in WAN configuration and web management UI",
+    "Real-time update manifest fetching with automatic CDN cache-busting",
     "Fixed semver comparison in web UI and OTA daemon to correctly recognize timestamp build updates",
     "Alpine Linux musl-native binary build for 100% hardware & VM appliance compatibility",
     "CI pipeline fully green: all 10 test suites pass on GitHub Actions (CMake + make)",
@@ -19,7 +20,7 @@
   "packages": {
     "core": {
       "url": "https://raw.githubusercontent.com/ahmedha43/FluxWAN/main/dist/fluxwan",
-      "sha256": "94b6b9a16fa6ebcde0b999675b094bed170bb1e48454ab7babe72f5a6cdb254f",
+      "sha256": "6a8eb4879adc69b270fc7e742874b1a1f265eee2bb9dcec66522cd96e940f344",
       "size_bytes": 380288
     },
     "full_iso": {

@@ -18,7 +18,12 @@ download_file() {
     URL="$1"
     DEST="$2"
     TIMEOUT="$3"
-    wget -q -T "$TIMEOUT" -O "$DEST" "$URL" 2>/dev/null || curl -sSL --connect-timeout 5 -m "$TIMEOUT" "$URL" -o "$DEST" 2>/dev/null
+    case "$URL" in
+        *\?*) SEP="&" ;;
+        *)    SEP="?" ;;
+    esac
+    CACHE_URL="${URL}${SEP}t=$(date +%s)"
+    wget -q -T "$TIMEOUT" -O "$DEST" "$CACHE_URL" 2>/dev/null || curl -sSL --connect-timeout 5 -m "$TIMEOUT" "$CACHE_URL" -o "$DEST" 2>/dev/null
 }
 
 usage() {

@@ -200,9 +200,10 @@ static int fetch_version_manifest(char *out_json, size_t max_len) {
         manifest_url = "https://raw.githubusercontent.com/ahmedha43/FluxWAN/main/version.json";
     }
     char cmd[1024];
+    unsigned long now_t = (unsigned long)time(NULL);
     snprintf(cmd, sizeof(cmd),
-             "wget -q -T 6 -O /tmp/fluxwan_version.json \"%s\" 2>/dev/null || curl -sSL --connect-timeout 4 -m 8 \"%s\" -o /tmp/fluxwan_version.json 2>/dev/null",
-             manifest_url, manifest_url);
+             "wget -q -T 6 -O /tmp/fluxwan_version.json \"%s?t=%lu\" 2>/dev/null || curl -sSL --connect-timeout 4 -m 8 \"%s?t=%lu\" -o /tmp/fluxwan_version.json 2>/dev/null",
+             manifest_url, now_t, manifest_url, now_t);
     int rc = safe_system(cmd);
     if (rc != 0) return -1;
 
