@@ -1,5 +1,5 @@
 {
-  "latest_version": "1.2.9",
+  "latest_version": "1.3.0",
   "channel": "stable",
   "release_date": "2026-10-02",
   "min_compatible_version": "1.2.0",
@@ -19,7 +19,7 @@
   "packages": {
     "core": {
       "url": "https://raw.githubusercontent.com/ahmedha43/FluxWAN/main/dist/fluxwan",
-      "sha256": "06a899cc253cc17f47676136b09f24ad6cbc923bf731c013c65272610fdf55d4",
+      "sha256": "94b6b9a16fa6ebcde0b999675b094bed170bb1e48454ab7babe72f5a6cdb254f",
       "size_bytes": 380288
     },
     "full_iso": {
