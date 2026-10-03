@@ -4667,7 +4667,7 @@
                 <div class="space-y-3 text-xs">
                     <div>
                         <label class="text-3xs text-slate-400 block mb-1" x-text="currentLang==='ar' ? 'معرّف الشبكة المكون من 16 خانة (Network ID)' : '16-Hex ZeroTier Network ID'">Network ID</label>
-                        <input type="text" x-model="ztJoinForm.nwid" maxlength="16" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-amber-300 font-mono text-sm uppercase tracking-wider" placeholder="8056bf8b9113054c">
+                        <input type="text" x-model="ztJoinForm.nwid" @input="ztJoinForm.nwid = ztJoinForm.nwid.replace(/[^0-9a-fA-F]/g, '').toLowerCase().slice(0, 16)" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-amber-300 font-mono text-sm uppercase tracking-wider" placeholder="8056bf8b9113054c">
                     </div>
 
                     <div>
@@ -5071,7 +5071,7 @@
                     .then(d => {
                         if (d && d.status === 'ok') {
                             this.vpnStatus = d;
-                            if (this.config && this.config.vpn) {
+                            if (this.config) {
                                 this.config.vpn = d;
                             }
                         }
@@ -5341,6 +5341,7 @@
                 },
                 joinZtNetwork() {
                     if (!this.authToken || !this.ztJoinForm.nwid) return;
+                    this.ztJoinForm.nwid = this.ztJoinForm.nwid.trim().toLowerCase();
                     fetch('/api/v1/vpn/zerotier/join', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'X-Auth-Token': this.authToken },
@@ -5349,7 +5350,11 @@
                     .then(r => r.json())
                     .then(res => {
                         this.showJoinZtModal = false;
-                        this.showToast(this.currentLang === 'ar' ? 'تم الانضمام لشبكة ZeroTier بنجاح' : 'Joined ZeroTier Network');
+                        if (res.status === 'ok') {
+                            this.showToast(this.currentLang === 'ar' ? 'تم إرسال طلب الانضمام لشبكة ZeroTier بنجاح' : 'ZeroTier join request submitted successfully');
+                        } else {
+                            this.showToast(res.message || 'Failed to join network', 'error');
+                        }
                         this.fetchVpnStatus();
                     })
                     .catch(e => this.showToast('Failed to join network', 'error'));
@@ -7152,6 +7157,26 @@
                     if (applyPayload.pppoe_server) {
                         delete applyPayload.pppoe_server.users;
                         delete applyPayload.pppoe_server.profiles;
+                    }
+
+                    if (this.vpnStatus) {
+                        applyPayload.vpn = {
+                            wireguard: {
+                                enabled: this.vpnStatus.wireguard ? !!this.vpnStatus.wireguard.enabled : false,
+                                interface: (this.vpnStatus.wireguard && this.vpnStatus.wireguard.interface) || 'wg0',
+                                listen_port: (this.vpnStatus.wireguard && this.vpnStatus.wireguard.listen_port) || 51820,
+                                address: (this.vpnStatus.wireguard && this.vpnStatus.wireguard.address) || '10.250.0.1/24',
+                                public_key: (this.vpnStatus.wireguard && this.vpnStatus.wireguard.public_key) || '',
+                                allow_remote_mgmt: this.vpnStatus.wireguard ? this.vpnStatus.wireguard.allow_remote_mgmt !== false : true,
+                                peers: (this.vpnStatus.wireguard && this.vpnStatus.wireguard.peers) || []
+                            },
+                            zerotier: {
+                                enabled: this.vpnStatus.zerotier ? !!this.vpnStatus.zerotier.enabled : false,
+                                node_id: (this.vpnStatus.zerotier && this.vpnStatus.zerotier.node_id) || '',
+                                allow_remote_mgmt: this.vpnStatus.zerotier ? this.vpnStatus.zerotier.allow_remote_mgmt !== false : true,
+                                networks: (this.vpnStatus.zerotier && this.vpnStatus.zerotier.networks) || []
+                            }
+                        };
                     }
 
                     fetch('/api/v1/apply', {

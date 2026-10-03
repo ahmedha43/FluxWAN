@@ -8,6 +8,7 @@
  */
 
 #include "vpn_manager.h"
+#include "wan_manager.h"
 #include "crypto_ed25519.h"
 #include <sys/stat.h>
 #include <ctype.h>
@@ -338,21 +339,40 @@ int vpn_manager_zt_refresh_node_id(zerotier_config_t *zt) {
     if (!zt) return -1;
 
 #if defined(__linux__)
-    FILE *fp = popen("zerotier-cli info 2>/dev/null", "r");
+    FILE *fp = popen("zerotier-cli info 2>/dev/null || zerotier-cli status 2>/dev/null", "r");
     if (fp) {
         char line[256];
         if (fgets(line, sizeof(line), fp)) {
             /* Format: 200 info <node_id> <version> <status> */
             char code[32] = {0}, cmd[32] = {0}, nid[64] = {0};
             if (sscanf(line, "%31s %31s %63s", code, cmd, nid) == 3 && strcmp(code, "200") == 0) {
-                safe_str_copy(zt->node_id, nid, sizeof(zt->node_id));
+                if (strlen(nid) == 10) {
+                    safe_str_copy(zt->node_id, nid, sizeof(zt->node_id));
+                }
             }
         }
         pclose(fp);
     }
 
     if (zt->node_id[0] == '\0') {
-        /* Fallback: read /var/lib/zerotier-one/identity.public */
+        /* Fallback 1: read /var/lib/zerotier-one/identity.public */
+        FILE *f = fopen("/var/lib/zerotier-one/identity.public", "r");
+        if (f) {
+            char buf[64] = {0};
+            if (fgets(buf, sizeof(buf), f)) {
+                char *colon = strchr(buf, ':');
+                if (colon) {
+                    *colon = '\0';
+                    safe_str_copy(zt->node_id, buf, sizeof(zt->node_id));
+                }
+            }
+            fclose(f);
+        }
+    }
+
+    if (zt->node_id[0] == '\0') {
+        /* Fallback 2: Generate identity with zerotier-idtool if daemon not started yet */
+        safe_system("mkdir -p /var/lib/zerotier-one 2>/dev/null && zerotier-idtool generate /var/lib/zerotier-one/identity.secret /var/lib/zerotier-one/identity.public 2>/dev/null");
         FILE *f = fopen("/var/lib/zerotier-one/identity.public", "r");
         if (f) {
             char buf[64] = {0};
@@ -376,12 +396,28 @@ int vpn_manager_apply_zerotier(const zerotier_config_t *zt) {
 
 #if defined(__linux__)
     if (!zt->enabled) {
-        safe_system("systemctl stop zerotier-one 2>/dev/null || service zerotier-one stop 2>/dev/null");
+        safe_system("systemctl stop zerotier-one 2>/dev/null || service zerotier-one stop 2>/dev/null || rc-service zerotier-one stop 2>/dev/null || killall zerotier-one 2>/dev/null");
         return 0;
     }
 
-    /* Start daemon if not running */
-    safe_system("systemctl start zerotier-one 2>/dev/null || service zerotier-one start 2>/dev/null || zerotier-one -d 2>/dev/null");
+    /* Auto-install ZeroTier package if missing on host */
+    if (system("which zerotier-cli >/dev/null 2>&1") != 0 && system("which zerotier-one >/dev/null 2>&1") != 0) {
+        LOG_WARN("[ZeroTier] zerotier-cli not detected! Attempting automatic installation...");
+        wan_manager_add_log("WARN", "ZeroTier daemon not installed. Attempting automatic package installation...");
+        safe_system("curl -s https://install.zerotier.com | bash 2>/dev/null || apt-get update -y && apt-get install -y zerotier-one 2>/dev/null || apk add zerotier-one 2>/dev/null || true");
+    }
+
+    /* Ensure ZeroTier daemon is actively running */
+    if (system("pgrep zerotier-one >/dev/null 2>&1") != 0) {
+        safe_system("systemctl enable --now zerotier-one 2>/dev/null || service zerotier-one start 2>/dev/null || rc-service zerotier-one start 2>/dev/null || zerotier-one -d 2>/dev/null");
+        /* Wait up to 3 seconds for control socket / auth token */
+        for (int retry = 0; retry < 6; retry++) {
+            usleep(500000);
+            if (system("zerotier-cli status >/dev/null 2>&1") == 0) {
+                break;
+            }
+        }
+    }
 
     /* Join configured networks */
     for (uint32_t i = 0; i < zt->network_count; i++) {
@@ -390,11 +426,24 @@ int vpn_manager_apply_zerotier(const zerotier_config_t *zt) {
 
         char cmd[256];
         if (net->enabled) {
-            snprintf(cmd, sizeof(cmd), "zerotier-cli join %s 2>/dev/null", net->nwid);
+            snprintf(cmd, sizeof(cmd), "zerotier-cli join %s", net->nwid);
+            FILE *fp = popen(cmd, "r");
+            if (fp) {
+                char out[256] = {0};
+                if (fgets(out, sizeof(out), fp)) {
+                    char *nl = strchr(out, '\n'); if (nl) *nl = '\0';
+                    nl = strchr(out, '\r'); if (nl) *nl = '\0';
+                    LOG_INFO("[ZeroTier] Join network %s result: %s", net->nwid, out);
+                    wan_manager_add_log("INFO", "ZeroTier network %s join: %s", net->nwid, out);
+                }
+                pclose(fp);
+            } else {
+                safe_system(cmd);
+            }
         } else {
             snprintf(cmd, sizeof(cmd), "zerotier-cli leave %s 2>/dev/null", net->nwid);
+            safe_system(cmd);
         }
-        safe_system(cmd);
     }
 
     /* Configure firewall rules for ZeroTier virtual interfaces */
@@ -414,8 +463,26 @@ int vpn_manager_apply_zerotier(const zerotier_config_t *zt) {
 int vpn_manager_zt_join(zerotier_config_t *zt, const char *nwid, const char *name) {
     if (!zt || !nwid || !nwid[0]) return -1;
 
+    /* Clean and sanitize 16-character hex Network ID */
+    char clean_nwid[32] = {0};
+    size_t c_idx = 0;
+    for (size_t i = 0; nwid[i] != '\0' && c_idx < 16; i++) {
+        char c = nwid[i];
+        if (isxdigit((unsigned char)c)) {
+            clean_nwid[c_idx++] = (char)tolower((unsigned char)c);
+        }
+    }
+    clean_nwid[c_idx] = '\0';
+    if (c_idx != 16) {
+        LOG_WARN("[ZeroTier] Invalid network ID '%s' (must be exactly 16 hex characters)", nwid);
+        return -1;
+    }
+
+    /* Auto-enable ZeroTier subsystem when joining a network */
+    zt->enabled = true;
+
     for (uint32_t i = 0; i < zt->network_count; i++) {
-        if (strcasecmp(zt->networks[i].nwid, nwid) == 0) {
+        if (strcasecmp(zt->networks[i].nwid, clean_nwid) == 0) {
             zt->networks[i].enabled = true;
             if (name && name[0]) safe_str_copy(zt->networks[i].name, name, sizeof(zt->networks[i].name));
             return vpn_manager_apply_zerotier(zt);
@@ -426,7 +493,7 @@ int vpn_manager_zt_join(zerotier_config_t *zt, const char *nwid, const char *nam
 
     zerotier_network_t *net = &zt->networks[zt->network_count++];
     memset(net, 0, sizeof(zerotier_network_t));
-    safe_str_copy(net->nwid, nwid, sizeof(net->nwid));
+    safe_str_copy(net->nwid, clean_nwid, sizeof(net->nwid));
     safe_str_copy(net->name, (name && name[0]) ? name : "ZeroTier Network", sizeof(net->name));
     net->enabled = true;
     safe_str_copy(net->status, "REQUESTING", sizeof(net->status));
@@ -460,6 +527,85 @@ int vpn_manager_zt_leave(zerotier_config_t *zt, const char *nwid) {
 
     return 0;
 }
+
+#if defined(__linux__)
+static void parse_zt_json_networks(const char *jbuf, zerotier_config_t *zt) {
+    if (!jbuf || !zt) return;
+    for (uint32_t i = 0; i < zt->network_count; i++) {
+        zerotier_network_t *net = &zt->networks[i];
+        if (!net->nwid[0]) continue;
+
+        const char *p = jbuf;
+        while ((p = strstr(p, net->nwid)) != NULL) {
+            const char *obj_start = p;
+            while (obj_start > jbuf && *obj_start != '{') obj_start--;
+            const char *obj_end = strchr(p, '}');
+            if (obj_start && obj_end && obj_end > obj_start) {
+                const char *st = strstr(obj_start, "\"status\"");
+                if (st && st < obj_end) {
+                    const char *q1 = strchr(st + 8, '"');
+                    if (q1 && q1 < obj_end) {
+                        const char *q2 = strchr(q1 + 1, '"');
+                        if (q2 && q2 < obj_end) {
+                            size_t slen = q2 - (q1 + 1);
+                            if (slen >= sizeof(net->status)) slen = sizeof(net->status) - 1;
+                            memcpy(net->status, q1 + 1, slen);
+                            net->status[slen] = '\0';
+                        }
+                    }
+                }
+
+                const char *dev = strstr(obj_start, "\"portDeviceName\"");
+                if (dev && dev < obj_end) {
+                    const char *q1 = strchr(dev + 16, '"');
+                    if (q1 && q1 < obj_end) {
+                        const char *q2 = strchr(q1 + 1, '"');
+                        if (q2 && q2 < obj_end) {
+                            size_t dlen = q2 - (q1 + 1);
+                            if (dlen >= sizeof(net->dev_name)) dlen = sizeof(net->dev_name) - 1;
+                            memcpy(net->dev_name, q1 + 1, dlen);
+                            net->dev_name[dlen] = '\0';
+                        }
+                    }
+                }
+
+                const char *mc = strstr(obj_start, "\"mac\"");
+                if (mc && mc < obj_end) {
+                    const char *q1 = strchr(mc + 5, '"');
+                    if (q1 && q1 < obj_end) {
+                        const char *q2 = strchr(q1 + 1, '"');
+                        if (q2 && q2 < obj_end) {
+                            size_t mlen = q2 - (q1 + 1);
+                            if (mlen >= sizeof(net->mac)) mlen = sizeof(net->mac) - 1;
+                            memcpy(net->mac, q1 + 1, mlen);
+                            net->mac[mlen] = '\0';
+                        }
+                    }
+                }
+
+                const char *ips = strstr(obj_start, "\"assignedAddresses\"");
+                if (ips && ips < obj_end) {
+                    const char *lb = strchr(ips, '[');
+                    if (lb && lb < obj_end) {
+                        const char *q1 = strchr(lb, '"');
+                        if (q1 && q1 < obj_end) {
+                            const char *q2 = strchr(q1 + 1, '"');
+                            if (q2 && q2 < obj_end) {
+                                size_t ilen = q2 - (q1 + 1);
+                                if (ilen >= sizeof(net->assigned_ips)) ilen = sizeof(net->assigned_ips) - 1;
+                                memcpy(net->assigned_ips, q1 + 1, ilen);
+                                net->assigned_ips[ilen] = '\0';
+                            }
+                        }
+                    }
+                }
+                break;
+            }
+            p += strlen(net->nwid);
+        }
+    }
+}
+#endif
 
 int vpn_manager_sync_status(vpn_config_t *vpn) {
     if (!vpn) return -1;
@@ -507,40 +653,58 @@ int vpn_manager_sync_status(vpn_config_t *vpn) {
         }
     }
 
-    /* 2. ZeroTier Telemetry Sync via `zerotier-cli listnetworks` */
+    /* 2. ZeroTier Telemetry Sync via `zerotier-cli -j listnetworks` or tabular */
     vpn_manager_zt_refresh_node_id(&vpn->zerotier);
 
     if (vpn->zerotier.enabled) {
-        FILE *fp = popen("zerotier-cli listnetworks 2>/dev/null", "r");
-        if (fp) {
-            char line[512];
-            while (fgets(line, sizeof(line), fp)) {
-                /* Format: 200 listnetworks <nwid> <name> <mac> <status> <type> <dev> <assigned_addresses> */
-                char code[32] = {0}, cmd[32] = {0}, nwid[32] = {0}, name[64] = {0};
-                char mac[32] = {0}, status[32] = {0}, type[32] = {0}, dev[32] = {0}, ips[128] = {0};
+        bool json_parsed = false;
+        FILE *fp_j = popen("zerotier-cli -j listnetworks 2>/dev/null", "r");
+        if (fp_j) {
+            char *jbuf = malloc(16384);
+            if (jbuf) {
+                size_t total = fread(jbuf, 1, 16383, fp_j);
+                jbuf[total] = '\0';
+                if (total > 5 && (jbuf[0] == '[' || strchr(jbuf, '['))) {
+                    parse_zt_json_networks(jbuf, &vpn->zerotier);
+                    json_parsed = true;
+                }
+                free(jbuf);
+            }
+            pclose(fp_j);
+        }
 
-                int n = sscanf(line, "%31s %31s %31s %63s %31s %31s %31s %31s %127s",
-                               code, cmd, nwid, name, mac, status, type, dev, ips);
-                if (n >= 6 && strcmp(code, "200") == 0) {
-                    for (uint32_t i = 0; i < vpn->zerotier.network_count; i++) {
-                        zerotier_network_t *net = &vpn->zerotier.networks[i];
-                        if (strcasecmp(net->nwid, nwid) == 0) {
-                            safe_str_copy(net->status, status, sizeof(net->status));
-                            if (n >= 8 && dev[0] && strcmp(dev, "-") != 0) {
-                                safe_str_copy(net->dev_name, dev, sizeof(net->dev_name));
+        if (!json_parsed) {
+            FILE *fp = popen("zerotier-cli listnetworks 2>/dev/null", "r");
+            if (fp) {
+                char line[512];
+                while (fgets(line, sizeof(line), fp)) {
+                    /* Format: 200 listnetworks <nwid> <name> <mac> <status> <type> <dev> <assigned_addresses> */
+                    char code[32] = {0}, cmd[32] = {0}, nwid[32] = {0}, name[64] = {0};
+                    char mac[32] = {0}, status[32] = {0}, type[32] = {0}, dev[32] = {0}, ips[128] = {0};
+
+                    int n = sscanf(line, "%31s %31s %31s %63s %31s %31s %31s %31s %127s",
+                                   code, cmd, nwid, name, mac, status, type, dev, ips);
+                    if (n >= 6 && strcmp(code, "200") == 0) {
+                        for (uint32_t i = 0; i < vpn->zerotier.network_count; i++) {
+                            zerotier_network_t *net = &vpn->zerotier.networks[i];
+                            if (strcasecmp(net->nwid, nwid) == 0) {
+                                safe_str_copy(net->status, status, sizeof(net->status));
+                                if (n >= 8 && dev[0] && strcmp(dev, "-") != 0) {
+                                    safe_str_copy(net->dev_name, dev, sizeof(net->dev_name));
+                                }
+                                if (n >= 9 && ips[0] && strcmp(ips, "-") != 0) {
+                                    safe_str_copy(net->assigned_ips, ips, sizeof(net->assigned_ips));
+                                }
+                                if (mac[0] && strcmp(mac, "-") != 0) {
+                                    safe_str_copy(net->mac, mac, sizeof(net->mac));
+                                }
+                                break;
                             }
-                            if (n >= 9 && ips[0] && strcmp(ips, "-") != 0) {
-                                safe_str_copy(net->assigned_ips, ips, sizeof(net->assigned_ips));
-                            }
-                            if (mac[0] && strcmp(mac, "-") != 0) {
-                                safe_str_copy(net->mac, mac, sizeof(net->mac));
-                            }
-                            break;
                         }
                     }
                 }
+                pclose(fp);
             }
-            pclose(fp);
         }
     }
 #endif

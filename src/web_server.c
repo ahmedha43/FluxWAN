@@ -5179,16 +5179,42 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
             extract_json_string(body, "nwid", nwid, sizeof(nwid));
             extract_json_string(body, "name", name, sizeof(name));
         }
-        if (nwid[0]) {
-            vpn_manager_zt_join(&ctx->config->vpn.zerotier, nwid, name);
-            config_save(get_config_target_path(ctx), ctx->config);
-            wan_manager_add_log("INFO", "Joined ZeroTier Network: %s (%s)", nwid, name[0] ? name : "Network");
+
+        /* Sanitize 16-hex ZeroTier Network ID */
+        char clean_nwid[32] = {0};
+        size_t c_idx = 0;
+        for (size_t i = 0; nwid[i] != '\0' && c_idx < 16; i++) {
+            char c = nwid[i];
+            if (isxdigit((unsigned char)c)) {
+                clean_nwid[c_idx++] = (char)tolower((unsigned char)c);
+            }
         }
-        const char *rb = "{\"status\":\"ok\",\"message\":\"Network joined successfully\"}";
-        char resp[256]; int len = snprintf(resp, sizeof(resp),
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
-            strlen(rb), rb);
-        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        clean_nwid[c_idx] = '\0';
+
+        if (c_idx != 16) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Invalid 16-hex ZeroTier Network ID\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+
+        int jrc = vpn_manager_zt_join(&ctx->config->vpn.zerotier, clean_nwid, name);
+        if (jrc >= 0) {
+            config_save(get_config_target_path(ctx), ctx->config);
+            wan_manager_add_log("INFO", "Joined ZeroTier Network: %s (%s)", clean_nwid, name[0] ? name : "Network");
+            const char *rb = "{\"status\":\"ok\",\"message\":\"Network joined successfully\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        } else {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Failed to join ZeroTier network\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
     } else if (strstr(req, "POST /api/v1/vpn/zerotier/leave") != NULL) {
         if (!is_request_authorized(ctx->config, req)) {
             const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
@@ -5616,6 +5642,55 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
                             }
                         }
 
+                        /* Preserve VPN subsystem (WireGuard & ZeroTier) */
+                        if (strstr(body, "\"vpn\"") == NULL) {
+                            test_cfg->vpn = ctx->config->vpn;
+                        } else {
+                            if (test_cfg->vpn.wireguard.peer_count == 0 && ctx->config->vpn.wireguard.peer_count > 0 && strstr(body, "\"peers\"") == NULL) {
+                                test_cfg->vpn.wireguard.peer_count = ctx->config->vpn.wireguard.peer_count;
+                                memcpy(test_cfg->vpn.wireguard.peers, ctx->config->vpn.wireguard.peers, sizeof(test_cfg->vpn.wireguard.peers));
+                            }
+                            if (test_cfg->vpn.wireguard.private_key[0] == '\0' && ctx->config->vpn.wireguard.private_key[0] != '\0') {
+                                safe_str_copy(test_cfg->vpn.wireguard.private_key, ctx->config->vpn.wireguard.private_key, sizeof(test_cfg->vpn.wireguard.private_key));
+                            }
+                            if (test_cfg->vpn.wireguard.public_key[0] == '\0' && ctx->config->vpn.wireguard.public_key[0] != '\0') {
+                                safe_str_copy(test_cfg->vpn.wireguard.public_key, ctx->config->vpn.wireguard.public_key, sizeof(test_cfg->vpn.wireguard.public_key));
+                            }
+                            if (test_cfg->vpn.zerotier.network_count == 0 && ctx->config->vpn.zerotier.network_count > 0 && strstr(body, "\"networks\"") == NULL) {
+                                test_cfg->vpn.zerotier.network_count = ctx->config->vpn.zerotier.network_count;
+                                memcpy(test_cfg->vpn.zerotier.networks, ctx->config->vpn.zerotier.networks, sizeof(test_cfg->vpn.zerotier.networks));
+                            }
+                            if (test_cfg->vpn.zerotier.node_id[0] == '\0' && ctx->config->vpn.zerotier.node_id[0] != '\0') {
+                                safe_str_copy(test_cfg->vpn.zerotier.node_id, ctx->config->vpn.zerotier.node_id, sizeof(test_cfg->vpn.zerotier.node_id));
+                            }
+                        }
+
+                        /* Preserve other subsystem configs if omitted from apply payload */
+                        if (strstr(body, "\"stealth\"") == NULL) {
+                            test_cfg->stealth = ctx->config->stealth;
+                        }
+                        if (strstr(body, "\"auth\"") == NULL) {
+                            test_cfg->auth = ctx->config->auth;
+                        }
+                        if (strstr(body, "\"license\"") == NULL) {
+                            test_cfg->license = ctx->config->license;
+                        }
+                        if (strstr(body, "\"dpi\"") == NULL) {
+                            test_cfg->dpi = ctx->config->dpi;
+                        }
+                        if (strstr(body, "\"nat46\"") == NULL) {
+                            test_cfg->nat46 = ctx->config->nat46;
+                        }
+                        if (strstr(body, "\"prober\"") == NULL) {
+                            test_cfg->prober = ctx->config->prober;
+                        }
+                        if (strstr(body, "\"sticky\"") == NULL) {
+                            test_cfg->sticky = ctx->config->sticky;
+                        }
+                        if (strstr(body, "\"web\"") == NULL) {
+                            test_cfg->web = ctx->config->web;
+                        }
+
                         char err_msg[256] = {0};
                         if (!config_validate_wan_attachments(test_cfg, err_msg, sizeof(err_msg))) {
                             LOG_WARN("[Web] Configuration rejected: %s", err_msg);
@@ -5650,6 +5725,7 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
                         if (ctx->pppoe_srv) {
                             pppoe_server_reload(ctx->pppoe_srv);
                         }
+                        vpn_manager_apply(&ctx->config->vpn);
                     }
                     free(test_cfg);
                 }
