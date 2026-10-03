@@ -1145,13 +1145,13 @@
             </div>
         </div>
 
-        <!-- Modal: Add Broadband User -->
+        <!-- Modal: Add / Edit Broadband User -->
         <div x-show="showAddUserModal" x-transition class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
             <div class="glass-card max-w-md w-full p-6 rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl space-y-4">
                 <div class="flex items-center justify-between border-b border-slate-800 pb-3">
                     <h3 class="text-base font-bold text-white flex items-center space-x-2">
-                        <span>👤</span>
-                        <span x-text="currentLang==='ar' ? 'إضافة مشترك برودباند جديد' : 'Add Broadband Subscriber'"></span>
+                        <span x-text="userForm.is_edit ? '✏️' : '👤'"></span>
+                        <span x-text="userForm.is_edit ? (currentLang==='ar' ? 'تعديل بيانات المشترك (' + userForm.old_username + ')' : 'Edit Subscriber (' + userForm.old_username + ')') : (currentLang==='ar' ? 'إضافة مشترك برودباند جديد' : 'Add Broadband Subscriber')"></span>
                     </h3>
                     <button type="button" @click="showAddUserModal = false" class="text-slate-400 hover:text-white">✕</button>
                 </div>
@@ -1181,10 +1181,24 @@
                         <label class="text-3xs text-slate-400 block mb-1 font-semibold uppercase" x-text="currentLang==='ar' ? 'الاسم الكامل أو الملاحظات (Comment)' : 'Customer Name / Notes'"></label>
                         <input type="text" x-model="userForm.comment" placeholder="e.g. برج المنصور - اشتراك منزلي" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-sans">
                     </div>
-                    <div>
+                    <template x-if="userForm.is_edit && userForm.expires_at > 0">
+                        <div class="p-3 bg-slate-950/70 border border-slate-800 rounded-xl space-y-2">
+                            <div class="flex items-center justify-between text-xs">
+                                <div>
+                                    <span class="text-3xs text-slate-400 block font-semibold uppercase" x-text="currentLang==='ar' ? 'تاريخ انتهاء الاشتراك الحالي' : 'Current Expiry'"></span>
+                                    <span class="font-mono text-cyan-300 font-bold" x-text="formatEpoch(userForm.expires_at)"></span>
+                                </div>
+                                <label class="flex items-center space-x-1.5 cursor-pointer text-3xs text-slate-300">
+                                    <input type="checkbox" x-model="userForm.keep_expiry" class="rounded bg-slate-900 border-slate-700 text-cyan-500">
+                                    <span x-text="currentLang==='ar' ? 'إبقاء التاريخ الحالي' : 'Keep current date'"></span>
+                                </label>
+                            </div>
+                        </div>
+                    </template>
+                    <div x-show="!userForm.is_edit || !userForm.keep_expiry">
                         <label class="text-3xs text-slate-400 block mb-1 font-semibold uppercase" x-text="currentLang==='ar' ? 'صلاحية الاشتراك بالأيام (0 = مفتوح دائم بدون انتهاء)' : 'Subscription Validity in Days (0 = Unlimited)'"></label>
                         <input type="number" x-model.number="userForm.validity_days" placeholder="30" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono">
-                        <span class="text-3xs text-slate-500 block mt-0.5" x-text="currentLang==='ar' ? 'حدد عدد الأيام (مثلاً 30 يوماً). إذا وضعت 0 سيكون اشتراك دائم بدون تاريخ انتهاء.' : 'Number of days (e.g. 30). Set to 0 for unlimited with no expiration.'"></span>
+                        <span class="text-3xs text-slate-500 block mt-0.5" x-text="currentLang==='ar' ? 'حدد عدد الأيام من تاريخ اليوم (مثلاً 30 يوماً). إذا وضعت 0 سيكون اشتراك دائم بدون تاريخ انتهاء.' : 'Number of days from now (e.g. 30). Set to 0 for unlimited with no expiration.'"></span>
                     </div>
                     <div class="flex items-center space-x-2 pt-1">
                         <input type="checkbox" id="user-enabled" x-model="userForm.enabled" class="rounded bg-slate-800 border-slate-700 text-cyan-500 focus:ring-0">
@@ -1194,7 +1208,7 @@
 
                 <div class="flex items-center justify-end space-x-3 pt-3 border-t border-slate-800">
                     <button type="button" @click="showAddUserModal = false" class="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white border border-slate-700 bg-slate-800 transition" x-text="currentLang==='ar' ? 'إلغاء' : 'Cancel'"></button>
-                    <button type="button" @click="saveBroadbandUser()" class="px-5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-lg transition" x-text="currentLang==='ar' ? '💾 حفظ المشترك' : 'Save Subscriber'"></button>
+                    <button type="button" @click="saveBroadbandUser()" class="px-5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-lg transition" x-text="userForm.is_edit ? (currentLang==='ar' ? '💾 حفظ التعديلات' : 'Save Changes') : (currentLang==='ar' ? '💾 حفظ المشترك' : 'Save Subscriber')"></button>
                 </div>
             </div>
         </div>
@@ -1250,13 +1264,13 @@
             </div>
         </div>
 
-        <!-- Modal: Add Speed Profile -->
+        <!-- Modal: Add / Edit Speed Profile -->
         <div x-show="showAddProfileModal" x-transition class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
             <div class="glass-card max-w-md w-full p-6 rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl space-y-4">
                 <div class="flex items-center justify-between border-b border-slate-800 pb-3">
                     <h3 class="text-base font-bold text-white flex items-center space-x-2">
-                        <span>🚀</span>
-                        <span x-text="currentLang==='ar' ? 'إنشاء باقة سرعة جديدة' : 'Add Speed Profile'"></span>
+                        <span x-text="profileForm.is_edit ? '✏️' : '🚀'"></span>
+                        <span x-text="profileForm.is_edit ? (currentLang==='ar' ? 'تعديل باقة السرعة (' + profileForm.old_name + ')' : 'Edit Speed Profile (' + profileForm.old_name + ')') : (currentLang==='ar' ? 'إنشاء باقة سرعة جديدة' : 'Add Speed Profile')"></span>
                     </h3>
                     <button type="button" @click="showAddProfileModal = false" class="text-slate-400 hover:text-white">✕</button>
                 </div>
@@ -1291,7 +1305,7 @@
 
                 <div class="flex items-center justify-end space-x-3 pt-3 border-t border-slate-800">
                     <button type="button" @click="showAddProfileModal = false" class="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white border border-slate-700 bg-slate-800 transition" x-text="currentLang==='ar' ? 'إلغاء' : 'Cancel'"></button>
-                    <button type="button" @click="saveBroadbandProfile()" class="px-5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-lg transition" x-text="currentLang==='ar' ? '💾 إضافة الباقة' : 'Save Profile'"></button>
+                    <button type="button" @click="saveBroadbandProfile()" class="px-5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-lg transition" x-text="profileForm.is_edit ? (currentLang==='ar' ? '💾 حفظ التعديلات' : 'Save Changes') : (currentLang==='ar' ? '💾 إضافة الباقة' : 'Save Profile')"></button>
                 </div>
             </div>
         </div>
@@ -2985,6 +2999,14 @@
                                                         :title="u.enabled ? (currentLang==='ar'?'إيقاف مؤقت للخدمة':'Disable Account') : (currentLang==='ar'?'تشغيل الحساب':'Enable Account')">
                                                     <span x-text="u.enabled ? '⏸️' : '▶️'"></span>
                                                 </button>
+                                                <!-- Edit Button -->
+                                                <button type="button"
+                                                        @click="openEditUserModal(u)"
+                                                        class="px-2.5 py-1 rounded bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-bold transition flex items-center space-x-1"
+                                                        :title="currentLang==='ar' ? 'تعديل بيانات المشترك وكلمة المرور' : 'Edit Subscriber & Password'">
+                                                    <span>✏️</span>
+                                                    <span class="text-3xs font-sans" x-text="currentLang==='ar' ? 'تعديل' : 'Edit'"></span>
+                                                </button>
                                                 <!-- Renew Button -->
                                                 <button type="button"
                                                         @click="openRenewUserModal(u)"
@@ -3017,7 +3039,7 @@
                             </h3>
                             <p class="text-xs text-slate-400" x-text="currentLang==='ar' ? 'تحديد السرعات القصوى وصلاحيات الباقة' : 'Down / Up limits and duration.'"></p>
                         </div>
-                        <button type="button" @click="showAddProfileModal = true" class="px-3 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-bold text-xs transition">
+                        <button type="button" @click="openAddProfileModal()" class="px-3 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-bold text-xs transition">
                             <span>+</span>
                         </button>
                     </div>
@@ -3039,7 +3061,10 @@
                                     </div>
                                     <div class="text-3xs text-slate-500 mt-0.5" x-text="p.description"></div>
                                 </div>
-                                <button type="button" @click="deleteBroadbandProfile(p.name)" class="text-slate-500 hover:text-rose-400 text-xs px-2 py-1">🗑️</button>
+                                <div class="flex items-center space-x-1 flex-shrink-0">
+                                    <button type="button" @click="openEditProfileModal(p)" class="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-amber-300 transition text-xs" :title="currentLang==='ar' ? 'تعديل الباقة والسرعات' : 'Edit Profile & Speeds'">✏️</button>
+                                    <button type="button" @click="deleteBroadbandProfile(p.name)" class="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-rose-400 transition text-xs" :title="currentLang==='ar' ? 'حذف الباقة' : 'Delete Profile'">🗑️</button>
+                                </div>
                             </div>
                         </template>
                     </div>
@@ -4604,12 +4629,35 @@
                     const defValidity = (defProf && defProf.validity_days !== undefined) ? defProf.validity_days : 30;
                     this.userForm = {
                         username: '',
+                        old_username: '',
                         password: '',
                         profile: defProf ? defProf.name : 'Standard_25M',
                         static_ip: '',
                         comment: '',
                         validity_days: defValidity,
-                        enabled: true
+                        expires_at: 0,
+                        keep_expiry: false,
+                        enabled: true,
+                        is_edit: false
+                    };
+                    this.showAddUserModal = true;
+                },
+                openEditUserModal(u) {
+                    const profs = this.broadbandStatus.profiles || [];
+                    const prof = profs.find(p => p.name === u.profile);
+                    const defValidity = (prof && prof.validity_days !== undefined) ? prof.validity_days : 30;
+                    this.userForm = {
+                        username: u.username,
+                        old_username: u.username,
+                        password: u.password,
+                        profile: u.profile,
+                        static_ip: u.static_ip || '',
+                        comment: u.comment || '',
+                        validity_days: defValidity,
+                        expires_at: u.expires_at || 0,
+                        keep_expiry: true,
+                        enabled: u.enabled,
+                        is_edit: true
                     };
                     this.showAddUserModal = true;
                 },
@@ -4628,6 +4676,7 @@
                         const prof = (this.broadbandStatus.profiles || []).find(p => p.name === this.userForm.profile);
                         this.userForm.validity_days = (prof && prof.validity_days !== undefined) ? prof.validity_days : 30;
                     }
+                    const isEdit = this.userForm.is_edit;
                     fetch('/api/v1/broadband/users', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'X-Auth-Token': this.authToken },
@@ -4638,7 +4687,7 @@
                         this.showAddUserModal = false;
                         this.isEditing = false;
                         this.fetchBroadbandStatus();
-                        this.showToast(this.currentLang === 'ar' ? 'تم حفظ حساب المشترك بنجاح' : 'User account saved');
+                        this.showToast(this.currentLang === 'ar' ? (isEdit ? 'تم تحديث بيانات المشترك بنجاح' : 'تم حفظ حساب المشترك بنجاح') : (isEdit ? 'Subscriber updated successfully' : 'User account saved'));
                     })
                     .catch(e => this.showToast('Failed to save user'));
                 },
@@ -4778,8 +4827,33 @@
                         this.showToast(this.currentLang === 'ar' ? 'تم فصل الجلسة بنجاح' : 'Session disconnected');
                     });
                 },
+                openAddProfileModal() {
+                    this.profileForm = {
+                        name: '',
+                        old_name: '',
+                        rate_down_kbps: 10240,
+                        rate_up_kbps: 5120,
+                        validity_days: 30,
+                        description: '',
+                        is_edit: false
+                    };
+                    this.showAddProfileModal = true;
+                },
+                openEditProfileModal(p) {
+                    this.profileForm = {
+                        name: p.name,
+                        old_name: p.name,
+                        rate_down_kbps: p.rate_down_kbps,
+                        rate_up_kbps: p.rate_up_kbps,
+                        validity_days: p.validity_days,
+                        description: p.description || '',
+                        is_edit: true
+                    };
+                    this.showAddProfileModal = true;
+                },
                 saveBroadbandProfile() {
                     if (!this.authToken || !this.profileForm.name.trim()) return;
+                    const isEdit = this.profileForm.is_edit;
                     fetch('/api/v1/broadband/profiles', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'X-Auth-Token': this.authToken },
@@ -4789,9 +4863,9 @@
                     .then(d => {
                         this.showAddProfileModal = false;
                         this.isEditing = false;
-                        this.profileForm = { name: '', rate_down_kbps: 10240, rate_up_kbps: 5120, validity_days: 30, description: '' };
+                        this.profileForm = { name: '', old_name: '', rate_down_kbps: 10240, rate_up_kbps: 5120, validity_days: 30, description: '', is_edit: false };
                         this.fetchBroadbandStatus();
-                        this.showToast(this.currentLang === 'ar' ? 'تمت إضافة باقة السرعة بنجاح' : 'Speed profile saved');
+                        this.showToast(this.currentLang === 'ar' ? (isEdit ? 'تم تحديث باقة السرعة بنجاح' : 'تمت إضافة باقة السرعة بنجاح') : (isEdit ? 'Speed profile updated' : 'Speed profile saved'));
                     });
                 },
                 deleteBroadbandProfile(pname) {

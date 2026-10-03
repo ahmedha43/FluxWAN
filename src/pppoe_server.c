@@ -703,8 +703,12 @@ int pppoe_server_set_user(pppoe_server_ctx_t *ctx, const pppoe_user_t *user) {
         }
     }
 
+    bool creds_or_profile_changed = false;
     if (found_idx >= 0) {
         /* Update existing */
+        creds_or_profile_changed = (strcmp(cfg->users[found_idx].password, u.password) != 0 ||
+                                   strcmp(cfg->users[found_idx].profile, u.profile) != 0 ||
+                                   cfg->users[found_idx].enabled != u.enabled);
         cfg->users[found_idx] = u;
     } else if (cfg->user_count < MAX_PPPOE_USERS) {
         /* Append new */
@@ -715,6 +719,20 @@ int pppoe_server_set_user(pppoe_server_ctx_t *ctx, const pppoe_user_t *user) {
     }
 
     write_pppoe_secrets(cfg);
+    if (creds_or_profile_changed) {
+        pppoe_active_session_t sessions[MAX_PPPOE_SESSIONS];
+        uint32_t count = 0;
+        pthread_mutex_unlock(&ctx->lock);
+        pppoe_server_get_sessions(ctx, sessions, MAX_PPPOE_SESSIONS, &count);
+        for (uint32_t i = 0; i < count; i++) {
+            if (strcmp(sessions[i].username, u.username) == 0) {
+                pppoe_server_disconnect_session(ctx, sessions[i].ifname);
+                LOG_INFO("[Broadband] Reconnecting session %s for modified subscriber '%s'", sessions[i].ifname, u.username);
+            }
+        }
+        return 0;
+    }
+
     pthread_mutex_unlock(&ctx->lock);
     return 0;
 }
@@ -948,6 +966,26 @@ int pppoe_server_delete_profile(pppoe_server_ctx_t *ctx, const char *name) {
         cfg->profile_count--;
     }
 
+    pthread_mutex_unlock(&ctx->lock);
+    return 0;
+}
+
+int pppoe_server_rename_profile(pppoe_server_ctx_t *ctx, const char *old_name, const char *new_name) {
+    if (!ctx || !old_name || !old_name[0] || !new_name || !new_name[0]) return -1;
+    pthread_mutex_lock(&ctx->lock);
+    pppoe_server_config_t *cfg = &ctx->config->pppoe_server;
+
+    for (uint32_t i = 0; i < cfg->profile_count; i++) {
+        if (strcmp(cfg->profiles[i].name, old_name) == 0) {
+            safe_str_copy(cfg->profiles[i].name, new_name, sizeof(cfg->profiles[i].name));
+            break;
+        }
+    }
+    for (uint32_t u = 0; u < cfg->user_count; u++) {
+        if (strcmp(cfg->users[u].profile, old_name) == 0) {
+            safe_str_copy(cfg->users[u].profile, new_name, sizeof(cfg->users[u].profile));
+        }
+    }
     pthread_mutex_unlock(&ctx->lock);
     return 0;
 }

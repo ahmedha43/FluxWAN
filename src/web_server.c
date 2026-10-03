@@ -4723,6 +4723,9 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
         const char *body = strstr(req, "\r\n\r\n");
         if (body && ctx->pppoe_srv) {
             body += 4;
+            char old_uname[64] = {0};
+            extract_json_string(body, "old_username", old_uname, sizeof(old_uname));
+
             pppoe_user_t u;
             memset(&u, 0, sizeof(u));
             extract_json_string(body, "username", u.username, sizeof(u.username));
@@ -4733,8 +4736,10 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
             u.enabled = extract_json_bool(body, "enabled", true);
             u.created_at = extract_json_uint64(body, "created_at", 0);
             u.expires_at = extract_json_uint64(body, "expires_at", 0);
+
+            bool keep_expiry = extract_json_bool(body, "keep_expiry", false);
             int vdays = extract_json_int(body, "validity_days", -1);
-            if (vdays >= 0) {
+            if (!keep_expiry && vdays >= 0) {
                 if (vdays == 0) {
                     u.expires_at = 0;
                 } else {
@@ -4742,11 +4747,15 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
                 }
             }
 
+            if (old_uname[0] && strcmp(old_uname, u.username) != 0) {
+                pppoe_server_delete_user(ctx->pppoe_srv, old_uname);
+            }
+
             if (u.username[0]) {
                 if (!u.profile[0]) safe_str_copy(u.profile, "Standard_25M", sizeof(u.profile));
                 pppoe_server_set_user(ctx->pppoe_srv, &u);
                 config_save(get_config_target_path(ctx), ctx->config);
-                wan_manager_add_log("INFO", "Broadband user '%s' added/updated (Profile: %s)", u.username, u.profile);
+                wan_manager_add_log("INFO", "Broadband subscriber '%s' saved (Profile: %s)", u.username, u.profile);
             }
         }
         const char *rb = "{\"status\":\"ok\",\"message\":\"User account saved successfully\"}";
@@ -4789,6 +4798,9 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
         const char *body = strstr(req, "\r\n\r\n");
         if (body && ctx->pppoe_srv) {
             body += 4;
+            char old_pname[64] = {0};
+            extract_json_string(body, "old_name", old_pname, sizeof(old_pname));
+
             pppoe_profile_t p;
             memset(&p, 0, sizeof(p));
             extract_json_string(body, "name", p.name, sizeof(p.name));
@@ -4796,6 +4808,10 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
             p.rate_up_kbps = (uint32_t)extract_json_int(body, "rate_up_kbps", 0);
             p.validity_days = (uint32_t)extract_json_int(body, "validity_days", 30);
             extract_json_string(body, "description", p.description, sizeof(p.description));
+
+            if (old_pname[0] && strcmp(old_pname, p.name) != 0) {
+                pppoe_server_rename_profile(ctx->pppoe_srv, old_pname, p.name);
+            }
 
             if (p.name[0]) {
                 pppoe_server_set_profile(ctx->pppoe_srv, &p);

@@ -93,6 +93,7 @@ int pppoe_server_set_profile(pppoe_server_ctx_t *ctx, const pppoe_profile_t *pro
  * Delete a speed profile from config
  */
 int pppoe_server_delete_profile(pppoe_server_ctx_t *ctx, const char *name);
+int pppoe_server_rename_profile(pppoe_server_ctx_t *ctx, const char *old_name, const char *new_name);
 
 /**
  * Renew subscriber subscription (extends expires_at by additional_days or by profile's validity_days; optionally switches profile)

@@ -1,9 +1,14 @@
 {
-  "latest_version": "1.3.5",
+  "latest_version": "1.3.6",
   "channel": "stable",
   "release_date": "2026-10-03",
   "min_compatible_version": "1.2.0",
   "changelog": [
+    "Interactive Subscriber Edit (✏️): Full modal to modify subscriber username, password, profile, static IP, notes, enabled state, and expiry",
+    "Interactive Speed Profile Edit (✏️): Full modal to modify profile name, download/upload bandwidth limits, validity duration, and description",
+    "Dynamic Profile Cascading: Renaming a speed profile automatically cascades to all associated active subscribers",
+    "Live Active Session Hot-Reload: Editing subscriber credentials or assigned speed profile dynamically reconnects active ppp sessions with new limits",
+    "Expiry Preservation Mode: Flexible toggle to preserve existing expiration date or calculate new validity upon editing subscriber",
     "Fix broadband status 16KB JSON truncation (expanded to 4MB streaming buffer) resolving empty subscriber table",
     "Fix broadband sessions 32KB JSON truncation (expanded to 2MB streaming buffer)",
     "Protect subscriber and profile database against accidental wipe during generic /api/v1/apply calls",
@@ -35,8 +40,8 @@
   "packages": {
     "core": {
       "url": "https://raw.githubusercontent.com/ahmedha43/FluxWAN/main/dist/fluxwan",
-      "sha256": "d78e0a397777ad0aa17065d91562833186d30b7b60d9d95121c6aad3963b4963",
-      "size_bytes": 421248
+      "sha256": "85e3e937c9cef69b67e52ee5f96f7e15c2a37b066a389d3a32c3c14a0a522eb4",
+      "size_bytes": 425344
     },
     "full_iso": {
       "url": "https://github.com/ahmedha43/FluxWAN/releases/download/v1.2.5/fluxwan-os-x86_64.iso",
