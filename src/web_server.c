@@ -5036,6 +5036,7 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
             memset(&peer, 0, sizeof(peer));
             extract_json_string(body, "name", peer.name, sizeof(peer.name));
             extract_json_string(body, "public_key", peer.public_key, sizeof(peer.public_key));
+            extract_json_string(body, "client_private_key", peer.client_private_key, sizeof(peer.client_private_key));
             extract_json_string(body, "preshared_key", peer.preshared_key, sizeof(peer.preshared_key));
             extract_json_string(body, "allowed_ips", peer.allowed_ips, sizeof(peer.allowed_ips));
             extract_json_string(body, "endpoint", peer.endpoint, sizeof(peer.endpoint));

@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 # ==============================================================================
 # FluxWAN Automated VM & Bare-Metal Deployment Script
 # Supports: Proxmox VE, VMware ESXi, VirtualBox, KVM, Ubuntu, Debian, Alpine
@@ -21,12 +21,12 @@ echo "[+] Target Installation Directory: $INSTALL_DIR"
 echo "[+] Step 1: Installing System Dependencies..."
 if command -v apt-get >/dev/null 2>&1; then
     apt-get update -qq
-    apt-get install -y -qq build-essential clang llvm libbpf-dev iproute2 iptables conntrack ethtool python3 python3-pip curl
+    apt-get install -y -qq build-essential clang llvm libbpf-dev iproute2 iptables conntrack ethtool python3 python3-pip curl wireguard-tools
 elif command -v apk >/dev/null 2>&1; then
     apk update
-    apk add build-base clang llvm libbpf-dev iproute2 iptables conntrack ethtool python3 curl
+    apk add build-base clang llvm libbpf-dev iproute2 iptables conntrack ethtool python3 curl wireguard-tools zerotier-one
 elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y gcc clang llvm libbpf-devel iproute iptables conntrack-tools ethtool python3 curl
+    dnf install -y gcc clang llvm libbpf-devel iproute iptables conntrack-tools ethtool python3 curl wireguard-tools
 fi
 
 # 2. Kernel Tuning for High-Performance Multi-WAN Routing

@@ -5150,6 +5150,7 @@
                         const payload = {
                             name: this.wgPeerForm.name,
                             public_key: clientPub,
+                            client_private_key: clientPriv || '',
                             preshared_key: this.wgPeerForm.preshared_key || '',
                             allowed_ips: this.wgPeerForm.allowed_ips,
                             endpoint: this.wgPeerForm.endpoint || '',
@@ -5219,7 +5220,7 @@
                         headers: { 'Content-Type': 'application/json', 'X-Auth-Token': this.authToken },
                         body: JSON.stringify({
                             public_key: peer.public_key,
-                            client_private_key: clientPriv || ''
+                            client_private_key: clientPriv || peer.client_private_key || ''
                         })
                     })
                     .then(r => r.json())
@@ -5235,14 +5236,17 @@
                     .catch(e => this.showToast('Failed to generate client config', 'error'));
                 },
                 showWgPeerQr(peer) {
-                    this.generateAndShowQrModal(peer, '');
+                    this.generateAndShowQrModal(peer, peer.client_private_key || '');
                 },
                 downloadWgClientConf(peer) {
                     if (!this.authToken) return;
                     fetch('/api/v1/vpn/wireguard/client-conf', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'X-Auth-Token': this.authToken },
-                        body: JSON.stringify({ public_key: peer.public_key })
+                        body: JSON.stringify({
+                            public_key: peer.public_key,
+                            client_private_key: peer.client_private_key || ''
+                        })
                     })
                     .then(r => r.json())
                     .then(res => {

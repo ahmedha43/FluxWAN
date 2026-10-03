@@ -44,7 +44,7 @@ int vpn_manager_gen_wg_keypair(char *out_priv, size_t priv_sz, char *out_pub, si
             if (nl) *nl = '\0';
             nl = strchr(priv, '\r');
             if (nl) *nl = '\0';
-            if (strlen(priv) >= 40) {
+            if (strlen(priv) == 44 && priv[43] == '=') {
                 safe_str_copy(out_priv, priv, priv_sz);
                 pclose(fp);
                 fp = NULL;
@@ -60,7 +60,7 @@ int vpn_manager_gen_wg_keypair(char *out_priv, size_t priv_sz, char *out_pub, si
                         if (pnl) *pnl = '\0';
                         pnl = strchr(pub, '\r');
                         if (pnl) *pnl = '\0';
-                        if (strlen(pub) >= 40) {
+                        if (strlen(pub) == 44 && pub[43] == '=') {
                             safe_str_copy(out_pub, pub, pub_sz);
                             generated = true;
                         }
@@ -74,7 +74,7 @@ int vpn_manager_gen_wg_keypair(char *out_priv, size_t priv_sz, char *out_pub, si
 #endif
 
     if (!generated) {
-        /* Fallback: Generate cryptographic 32-byte Curve25519 clamped private key */
+        /* Fallback: Generate RFC 7748 Curve25519 keypair */
         uint8_t priv_bytes[32];
         FILE *rf = fopen("/dev/urandom", "rb");
         if (rf) {
@@ -88,18 +88,16 @@ int vpn_manager_gen_wg_keypair(char *out_priv, size_t priv_sz, char *out_pub, si
             }
         }
 
-        /* WireGuard Curve25519 private key clamping */
+        /* WireGuard Curve25519 private key clamping (RFC 7748) */
         priv_bytes[0] &= 248;
         priv_bytes[31] &= 127;
         priv_bytes[31] |= 64;
 
         crypto_base64_encode(priv_bytes, 32, out_priv, priv_sz);
 
-        /* Derive or generate public key */
+        /* Derive Curve25519 public key */
         uint8_t pub_bytes[32];
-        for (int i = 0; i < 32; i++) {
-            pub_bytes[i] = (uint8_t)(priv_bytes[i] ^ (i * 7 + 0x3c));
-        }
+        crypto_scalarmult_base(pub_bytes, priv_bytes);
         crypto_base64_encode(pub_bytes, 32, out_pub, pub_sz);
     }
 
@@ -114,8 +112,14 @@ int vpn_manager_init(vpn_config_t *vpn) {
     safe_system("mkdir -p /var/lib/zerotier-one");
 #endif
 
-    /* Check if WireGuard keys need initialization */
-    if (vpn->wireguard.private_key[0] == '\0' || vpn->wireguard.public_key[0] == '\0') {
+    /* Check if WireGuard keys need initialization or repair invalid keys */
+    bool keys_invalid = (vpn->wireguard.private_key[0] == '\0' ||
+                         vpn->wireguard.public_key[0] == '\0' ||
+                         strlen(vpn->wireguard.public_key) != 44 ||
+                         vpn->wireguard.public_key[43] != '=' ||
+                         strlen(vpn->wireguard.private_key) != 44 ||
+                         vpn->wireguard.private_key[43] != '=');
+    if (keys_invalid) {
         char priv[64] = {0}, pub[64] = {0};
         vpn_manager_gen_wg_keypair(priv, sizeof(priv), pub, sizeof(pub));
         safe_str_copy(vpn->wireguard.private_key, priv, sizeof(vpn->wireguard.private_key));
@@ -320,6 +324,16 @@ int vpn_manager_generate_client_conf(const wireguard_config_t *wg, const wiregua
     const char *ep = (server_endpoint && server_endpoint[0]) ? server_endpoint : "YOUR_ROUTER_PUBLIC_IP";
     uint16_t port = wg->listen_port > 0 ? wg->listen_port : 51820;
 
+    char priv_buf[64] = {0};
+    if (client_priv && client_priv[0]) {
+        safe_str_copy(priv_buf, client_priv, sizeof(priv_buf));
+    } else if (peer->client_private_key[0]) {
+        safe_str_copy(priv_buf, peer->client_private_key, sizeof(priv_buf));
+    } else {
+        char dummy_pub[64] = {0};
+        vpn_manager_gen_wg_keypair(priv_buf, sizeof(priv_buf), dummy_pub, sizeof(dummy_pub));
+    }
+
     int len = snprintf(out_conf, max_len,
         "# FluxWAN WireGuard Client Profile\n"
         "# Generated for: %s\n"
@@ -333,7 +347,7 @@ int vpn_manager_generate_client_conf(const wireguard_config_t *wg, const wiregua
         "AllowedIPs = 0.0.0.0/0, ::/0\n"
         "PersistentKeepalive = %u\n",
         peer->name[0] ? peer->name : "WireGuard Client",
-        (client_priv && client_priv[0]) ? client_priv : "<INSERT_CLIENT_PRIVATE_KEY>",
+        priv_buf[0] ? priv_buf : "<INSERT_CLIENT_PRIVATE_KEY>",
         peer->allowed_ips[0] ? peer->allowed_ips : "10.250.0.2/32",
         wg->public_key[0] ? wg->public_key : "<SERVER_PUBLIC_KEY>",
         ep, port,

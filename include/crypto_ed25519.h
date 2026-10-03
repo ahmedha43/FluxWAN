@@ -21,6 +21,10 @@ int crypto_ed25519_verify(const uint8_t signature[64],
                           const uint8_t *message, size_t message_len,
                           const uint8_t public_key[32]);
 
+/* Curve25519 Scalarmult (RFC 7748 / WireGuard) */
+int crypto_scalarmult(uint8_t *q, const uint8_t *n, const uint8_t *p);
+int crypto_scalarmult_base(uint8_t *q, const uint8_t *n);
+
 /* URL-safe Base64 Encoding and Decoding */
 int crypto_base64_encode(const uint8_t *src, size_t len, char *dst, size_t dst_max);
 int crypto_base64_decode(const char *src, uint8_t *dst, size_t dst_max, size_t *out_len);

@@ -571,6 +571,61 @@ int crypto_ed25519_verify(const uint8_t signature[64],
     return (crypto_verify_32(signature, t) == 0) ? 1 : 0;
 }
 
+/* ── Curve25519 Montgomery Ladder (RFC 7748 / WireGuard) ────────────────── */
+
+static const gf _121665 = {0xDB41, 1};
+
+int crypto_scalarmult(uint8_t *q, const uint8_t *n, const uint8_t *p) {
+    uint8_t z[32];
+    int64_t x[80];
+    int i;
+    gf a, b, c, d, e, f;
+    for (i = 0; i < 31; ++i) z[i] = n[i];
+    z[31] = (n[31] & 127) | 64;
+    z[0] &= 248;
+    unpack25519(x, p);
+    for (i = 0; i < 16; ++i) {
+        b[i] = x[i];
+        d[i] = a[i] = c[i] = 0;
+    }
+    a[0] = d[0] = 1;
+    for (i = 254; i >= 0; --i) {
+        int r = (z[i >> 3] >> (i & 7)) & 1;
+        sel25519(a, b, r);
+        sel25519(c, d, r);
+        A(e, a, c);
+        Z(a, a, c);
+        A(c, b, d);
+        Z(b, b, d);
+        S(d, e);
+        S(f, a);
+        M(a, c, a);
+        M(c, b, e);
+        A(e, a, c);
+        Z(a, a, c);
+        S(b, a);
+        Z(c, d, f);
+        M(a, c, _121665);
+        A(a, a, d);
+        M(c, c, a);
+        M(a, d, f);
+        M(d, b, x);
+        S(b, e);
+        sel25519(a, b, r);
+        sel25519(c, d, r);
+    }
+    inv25519(c, c);
+    M(a, a, c);
+    pack25519(q, a);
+    return 0;
+}
+
+static const uint8_t _curve25519_basepoint[32] = {9};
+
+int crypto_scalarmult_base(uint8_t *q, const uint8_t *n) {
+    return crypto_scalarmult(q, n, _curve25519_basepoint);
+}
+
 /* ── Base64 Implementation ──────────────────────────────────────────────── */
 
 static const char b64_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -581,15 +636,16 @@ int crypto_base64_encode(const uint8_t *src, size_t len, char *dst, size_t dst_m
 
     size_t i = 0, j = 0;
     while (i < len) {
+        size_t rem = len - i;
         uint32_t a = src[i++];
-        uint32_t b = (i < len) ? src[i++] : 0;
-        uint32_t c = (i < len) ? src[i++] : 0;
+        uint32_t b = (rem > 1) ? src[i++] : 0;
+        uint32_t c = (rem > 2) ? src[i++] : 0;
         uint32_t triple = (a << 16) | (b << 8) | c;
 
         dst[j++] = b64_table[(triple >> 18) & 0x3F];
         dst[j++] = b64_table[(triple >> 12) & 0x3F];
-        dst[j++] = (i > len + 1) ? '=' : b64_table[(triple >> 6) & 0x3F];
-        dst[j++] = (i > len) ? '=' : b64_table[triple & 0x3F];
+        dst[j++] = (rem > 1) ? b64_table[(triple >> 6) & 0x3F] : '=';
+        dst[j++] = (rem > 2) ? b64_table[triple & 0x3F] : '=';
     }
     dst[j] = '\0';
     return (int)j;

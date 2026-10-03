@@ -1004,6 +1004,7 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
 
                                             extract_json_string(obj_str, "name", peer->name, sizeof(peer->name));
                                             extract_json_string(obj_str, "public_key", peer->public_key, sizeof(peer->public_key));
+                                            extract_json_string(obj_str, "client_private_key", peer->client_private_key, sizeof(peer->client_private_key));
                                             extract_json_string(obj_str, "preshared_key", peer->preshared_key, sizeof(peer->preshared_key));
                                             extract_json_string(obj_str, "allowed_ips", peer->allowed_ips, sizeof(peer->allowed_ips));
                                             extract_json_string(obj_str, "endpoint", peer->endpoint, sizeof(peer->endpoint));
@@ -1629,6 +1630,9 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
         fprintf(f, "        {\n");
         fprintf(f, "          \"name\": \"%s\",\n", peer->name);
         fprintf(f, "          \"public_key\": \"%s\",\n", peer->public_key);
+        if (peer->client_private_key[0]) {
+            fprintf(f, "          \"client_private_key\": \"%s\",\n", peer->client_private_key);
+        }
         fprintf(f, "          \"preshared_key\": \"%s\",\n", peer->preshared_key);
         fprintf(f, "          \"allowed_ips\": \"%s\",\n", peer->allowed_ips);
         fprintf(f, "          \"endpoint\": \"%s\",\n", peer->endpoint);

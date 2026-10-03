@@ -499,6 +499,7 @@ typedef struct {
 typedef struct {
     char name[64];                  /* Friendly label, e.g. "Ahmed Mobile" */
     char public_key[64];            /* Base64 32-byte public key */
+    char client_private_key[64];     /* Optional Base64 32-byte client private key */
     char preshared_key[64];         /* Optional Base64 32-byte preshared key */
     char allowed_ips[128];          /* e.g. "10.250.0.2/32" */
     char endpoint[128];             /* Optional endpoint IP:Port */
