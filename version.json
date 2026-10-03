@@ -51,8 +51,8 @@
   "packages": {
     "core": {
       "url": "https://raw.githubusercontent.com/ahmedha43/FluxWAN/main/dist/fluxwan",
-      "sha256": "5d4dd317745b036af5c186c49a9c6f76746fc18cfb2c99f92640c05511b675d4",
-      "size_bytes": 466304
+      "sha256": "66c5a6ad1d6ca488b63dd87a84ea4938f5cf450f5f65a5b76f72c2cf2a705cc4",
+      "size_bytes": 470400
     },
     "full_iso": {
       "url": "https://github.com/ahmedha43/FluxWAN/releases/download/v1.2.5/fluxwan-os-x86_64.iso",

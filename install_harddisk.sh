@@ -444,7 +444,13 @@ elif [ -x /usr/sbin/dropbear ]; then
     /usr/sbin/dropbear -R -B -p 22 2>/dev/null || true
 fi
 
-# 9. Start FluxWAN Core Reactor Daemon from /opt/fluxwan with persistent config symlinks
+# 9. Start ZeroTier Daemon if installed
+if [ -x /usr/sbin/zerotier-one ] || command -v zerotier-one >/dev/null 2>&1; then
+    mkdir -p /var/lib/zerotier-one
+    (nohup /usr/sbin/zerotier-one -d </dev/null >/dev/null 2>&1 &)
+fi
+
+# 10. Start FluxWAN Core Reactor Daemon from /opt/fluxwan with persistent config symlinks
 mkdir -p /root/config /config
 ln -sf /opt/fluxwan/config/fluxwan.json /root/config/fluxwan.json 2>/dev/null || true
 ln -sf /opt/fluxwan/config/fluxwan.json /config/fluxwan.json 2>/dev/null || true

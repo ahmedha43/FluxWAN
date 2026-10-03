@@ -253,6 +253,16 @@ fetch_and_unpack_apk "grub-bios-2.06-r17.apk" "$BUILD_DIR/iso_extract"
 fetch_and_unpack_apk "grub-efi-2.06-r17.apk" "$BUILD_DIR/iso_extract"
 fetch_and_unpack_apk "syslinux-6.04_pre1-r15.apk" "$BUILD_DIR/iso_extract"
 
+# Fetch and embed ZeroTier One into rootfs and offline ISO repo
+if [ ! -s "$CACHE_X86/zerotier-one-1.10.2-r0.apk" ]; then
+    echo "    * Downloading ZeroTier package: zerotier-one-1.10.2-r0.apk..."
+    curl -fL --retry 3 -sS "http://dl-cdn.alpinelinux.org/alpine/v3.17/community/x86_64/zerotier-one-1.10.2-r0.apk" -o "$CACHE_X86/zerotier-one-1.10.2-r0.apk" || true
+fi
+if [ -s "$CACHE_X86/zerotier-one-1.10.2-r0.apk" ]; then
+    tar -xzf "$CACHE_X86/zerotier-one-1.10.2-r0.apk" -C "$APKOVL_DIR" 2>/dev/null || true
+    cp -f "$CACHE_X86/zerotier-one-1.10.2-r0.apk" "$BUILD_DIR/iso_extract/apks/x86_64/" 2>/dev/null || true
+fi
+
 chmod +x "$APKOVL_DIR/usr/sbin/"* "$APKOVL_DIR/sbin/"* "$APKOVL_DIR/usr/bin/"* "$APKOVL_DIR/bin/"* 2>/dev/null || true
 
 # Copy appliance configuration files
