@@ -37,6 +37,7 @@ set(CORE_LIB_SOURCES
     src/wifi_manager.c
     src/crypto_ed25519.c
     src/license_manager.c
+    src/vpn_manager.c
 )
 
 add_executable(fluxwan src/main.c ${CORE_LIB_SOURCES})
