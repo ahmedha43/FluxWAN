@@ -4514,15 +4514,23 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
                 strlen(rb), rb);
             send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
         }
-        char *json_buf = malloc(16384);
-        char *resp = malloc(17000);
-        if (json_buf && resp) {
-            build_json_broadband_status(ctx, json_buf, 16384);
-            int len = snprintf(resp, 17000,
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
-                strlen(json_buf), json_buf);
-            send(client_fd, resp, len, 0);
-            free(json_buf); free(resp);
+        size_t json_cap = 4194304; /* 4 MB buffer for large subscriber bases */
+        char *json_buf = malloc(json_cap);
+        if (json_buf) {
+            build_json_broadband_status(ctx, json_buf, json_cap);
+            size_t body_len = strlen(json_buf);
+            char header[512];
+            int hlen = snprintf(header, sizeof(header),
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n",
+                body_len);
+            send(client_fd, header, hlen, 0);
+            size_t total_sent = 0;
+            while (total_sent < body_len) {
+                ssize_t sent = send(client_fd, json_buf + total_sent, (int)(body_len - total_sent), 0);
+                if (sent <= 0) break;
+                total_sent += sent;
+            }
+            free(json_buf);
         }
         close_client_socket(client_fd); return 0;
     } else if (strstr(req, "GET /api/v1/broadband/sessions") != NULL) {
@@ -4533,15 +4541,23 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
                 strlen(rb), rb);
             send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
         }
-        char *json_buf = malloc(32768);
-        char *resp = malloc(34000);
-        if (json_buf && resp) {
-            build_json_broadband_sessions(ctx, json_buf, 32768);
-            int len = snprintf(resp, 34000,
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
-                strlen(json_buf), json_buf);
-            send(client_fd, resp, len, 0);
-            free(json_buf); free(resp);
+        size_t json_cap = 2097152; /* 2 MB buffer for active sessions */
+        char *json_buf = malloc(json_cap);
+        if (json_buf) {
+            build_json_broadband_sessions(ctx, json_buf, json_cap);
+            size_t body_len = strlen(json_buf);
+            char header[512];
+            int hlen = snprintf(header, sizeof(header),
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n",
+                body_len);
+            send(client_fd, header, hlen, 0);
+            size_t total_sent = 0;
+            while (total_sent < body_len) {
+                ssize_t sent = send(client_fd, json_buf + total_sent, (int)(body_len - total_sent), 0);
+                if (sent <= 0) break;
+                total_sent += sent;
+            }
+            free(json_buf);
         }
         close_client_socket(client_fd); return 0;
     } else if (strstr(req, "POST /api/v1/broadband/toggle") != NULL) {
@@ -5260,11 +5276,11 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
                         if (strstr(body, "\"pppoe_server\"") == NULL) {
                             test_cfg->pppoe_server = ctx->config->pppoe_server;
                         } else {
-                            if (test_cfg->pppoe_server.user_count == 0 && ctx->config->pppoe_server.user_count > 0 && strstr(body, "\"users\"") == NULL) {
+                            if (test_cfg->pppoe_server.user_count == 0 && ctx->config->pppoe_server.user_count > 0) {
                                 test_cfg->pppoe_server.user_count = ctx->config->pppoe_server.user_count;
                                 memcpy(test_cfg->pppoe_server.users, ctx->config->pppoe_server.users, sizeof(test_cfg->pppoe_server.users));
                             }
-                            if (test_cfg->pppoe_server.profile_count == 0 && ctx->config->pppoe_server.profile_count > 0 && strstr(body, "\"profiles\"") == NULL) {
+                            if (test_cfg->pppoe_server.profile_count == 0 && ctx->config->pppoe_server.profile_count > 0) {
                                 test_cfg->pppoe_server.profile_count = ctx->config->pppoe_server.profile_count;
                                 memcpy(test_cfg->pppoe_server.profiles, ctx->config->pppoe_server.profiles, sizeof(test_cfg->pppoe_server.profiles));
                             }

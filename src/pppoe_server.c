@@ -958,10 +958,14 @@ int pppoe_server_bulk_import(pppoe_server_ctx_t *ctx, const pppoe_user_t *new_us
     pthread_mutex_lock(&ctx->lock);
     pppoe_server_config_t *cfg = &ctx->config->pppoe_server;
 
-    /* 1. If replace_mode, reset current users */
+    /* 1. If replace_mode, reset current users (and profiles if imported profiles exist) */
     if (replace_mode) {
         cfg->user_count = 0;
         memset(cfg->users, 0, sizeof(cfg->users));
+        if (prof_cnt > 0) {
+            cfg->profile_count = 0;
+            memset(cfg->profiles, 0, sizeof(cfg->profiles));
+        }
     }
 
     /* 2. Process profiles first */

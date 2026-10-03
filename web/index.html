@@ -1974,7 +1974,7 @@
                                 <div x-show="wan.scannedNetworks && wan.scannedNetworks.length > 0" class="p-2.5 bg-slate-950 border border-purple-500/40 rounded-xl space-y-1.5">
                                     <div class="text-3xs text-slate-400 font-semibold flex items-center justify-between pb-1 border-b border-slate-800">
                                         <span x-text="currentLang==='ar' ? 'الشبكات الملتقطة حول الجهاز:' : 'Discovered Networks:'"></span>
-                                        <span class="text-purple-400 font-mono" x-text="wan.scannedNetworks.length + ' networks'"></span>
+                                        <span class="text-purple-400 font-mono" x-text="((wan.scannedNetworks ? wan.scannedNetworks.length : 0) + ' networks')"></span>
                                     </div>
                                     <div class="max-h-36 overflow-y-auto space-y-1 custom-scrollbar">
                                         <template x-for="net in (wan.scannedNetworks || [])" :key="net.bssid || net.ssid">
@@ -4848,6 +4848,22 @@
                     };
                     reader.readAsArrayBuffer(file);
                 },
+                extractProfileName(row) {
+                    if (!row) return 'Standard_25M';
+                    let p = row.profile_name || row.profile || row.srvname || row.package_name || row.group_name || row['باقة السرعة'] || row['اسم الباقة'] || row['الباقة'];
+                    if (!p && row.srvid) p = 'Profile_' + row.srvid;
+                    if (!p && typeof row.profile === 'object' && row.profile && row.profile.name) p = row.profile.name;
+                    if (!p && typeof row.package === 'object' && row.package && row.package.name) p = row.package.name;
+                    p = String(p || '').trim();
+                    return p || 'Standard_25M';
+                },
+                extractPassword(row) {
+                    if (!row) return '123456';
+                    let p = row.password || row.ct_password || row.pass || row['كلمة المرور'];
+                    if (!p && typeof row.password === 'object' && row.password && row.password.value) p = row.password.value;
+                    p = String(p || '').trim();
+                    return p || '123456';
+                },
                 processParsedRows(jsonRows) {
                     const users = [];
                     const profileSet = new Set();
@@ -4857,9 +4873,8 @@
                         u.username = String(row.username || row.user || row['User Name'] || row['اسم المستخدم'] || '').trim();
                         if (!u.username) continue;
 
-                        u.password = String(row.password || row.ct_password || row.pass || row['كلمة المرور'] || '123456').trim();
-                        u.profile = String(row.profile_name || row.profile || row.group_name || row['باقة السرعة'] || 'Standard_25M').trim();
-                        if (!u.profile) u.profile = 'Standard_25M';
+                        u.password = this.extractPassword(row);
+                        u.profile = this.extractProfileName(row);
                         profileSet.add(u.profile);
 
                         u.static_ip = String(row.static_ip || row.ip || '').trim();
@@ -4894,7 +4909,7 @@
                             rate_down_kbps: 10240,
                             rate_up_kbps: 5120,
                             validity_days: 30,
-                            description: 'Auto-created from import'
+                            description: 'Imported Profile'
                         };
                     });
 
@@ -5014,7 +5029,36 @@
                             page++;
                         }
 
-                        form.progressPct = 90;
+                        // Check if any users need deep overview lookup for credentials or profiles
+                        const needEnrich = allUsers.filter(u => (!u.profile_name && !u.profile) || (!u.password && !u.ct_password));
+                        if (needEnrich.length > 0 && needEnrich.length <= 150) {
+                            form.progressText = this.currentLang === 'ar' ? 'جاري جلب تفاصيل الباقات وكلمات المرور المتقدمة من SAS4...' : 'Fetching user profiles & credentials from SAS4...';
+                            const batchSize = 5;
+                            for (let i = 0; i < needEnrich.length; i += batchSize) {
+                                const slice = needEnrich.slice(i, i + batchSize);
+                                await Promise.all(slice.map(async u => {
+                                    try {
+                                        const ovResp = await fetch(activeEp + '/user/overview/' + u.id, {
+                                            headers: { 'Authorization': 'Bearer ' + token }
+                                        });
+                                        if (ovResp.ok) {
+                                            const ovJson = await ovResp.json();
+                                            const d = ovJson.data || ovJson;
+                                            if (d) {
+                                                if (d.password) u.password = d.password;
+                                                if (d.ct_password) u.ct_password = d.ct_password;
+                                                if (d.profile_name) u.profile_name = d.profile_name;
+                                                else if (d.srvname) u.profile_name = d.srvname;
+                                                else if (d.profile && d.profile.name) u.profile_name = d.profile.name;
+                                            }
+                                        }
+                                    } catch (e) {}
+                                }));
+                                form.progressPct = Math.min(95, 80 + Math.floor((i / needEnrich.length) * 15));
+                            }
+                        }
+
+                        form.progressPct = 95;
                         form.progressText = this.currentLang === 'ar' ? 'جاري معالجة البيانات وتجهيز جدول المعاينة...' : 'Processing subscriber records...';
 
                         this.processParsedRows(allUsers);
@@ -6156,8 +6200,13 @@
                         });
                     }
 
+                    let applyPayload = JSON.parse(JSON.stringify(this.config));
                     if (this.broadbandStatus && this.broadbandStatus.interface) {
-                        this.config.pppoe_server = this.broadbandStatus;
+                        applyPayload.pppoe_server = JSON.parse(JSON.stringify(this.broadbandStatus));
+                    }
+                    if (applyPayload.pppoe_server) {
+                        delete applyPayload.pppoe_server.users;
+                        delete applyPayload.pppoe_server.profiles;
                     }
 
                     fetch('/api/v1/apply', {
@@ -6166,7 +6215,7 @@
                             'Content-Type': 'application/json',
                             'X-Auth-Token': this.authToken
                         },
-                        body: JSON.stringify(this.config)
+                        body: JSON.stringify(applyPayload)
                     })
                     .then(r => {
                         if (r.status === 401) {

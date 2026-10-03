@@ -1,9 +1,16 @@
 {
-  "latest_version": "1.3.4",
+  "latest_version": "1.3.5",
   "channel": "stable",
   "release_date": "2026-10-03",
   "min_compatible_version": "1.2.0",
   "changelog": [
+    "Fix broadband status 16KB JSON truncation (expanded to 4MB streaming buffer) resolving empty subscriber table",
+    "Fix broadband sessions 32KB JSON truncation (expanded to 2MB streaming buffer)",
+    "Protect subscriber and profile database against accidental wipe during generic /api/v1/apply calls",
+    "Fix speed profile reset on replace mode so old preset profiles are cleanly replaced by imported profiles",
+    "Enhanced SAS4 API deep sync to fetch cleartext passwords and real profile names via /user/overview/{id}",
+    "Enhanced spreadsheet parsing supporting ct_password, profile_name, and expiration dates from SASMAN/SAS4 Excel exports",
+    "Fix Alpine expression error for wan.scannedNetworks during initial dashboard rendering",
     "SASMAN Migration Engine: Full Excel (.xlsx, .xls) and CSV subscriber import & export with interactive preview table",
     "Direct SAS4 Billing System API Sync with official OpenSSL AES-256-CBC decryptor and multi-page user extraction",
     "Automatic speed profile recognition, auto-creation with bandwidth limits, and expiration date conversion (Excel serial / ISO)",
@@ -28,7 +35,7 @@
   "packages": {
     "core": {
       "url": "https://raw.githubusercontent.com/ahmedha43/FluxWAN/main/dist/fluxwan",
-      "sha256": "34a7fe8a25bc560d0f7084286c63477b82f4b8861cb4366d2f704ada5f36eed9",
+      "sha256": "d78e0a397777ad0aa17065d91562833186d30b7b60d9d95121c6aad3963b4963",
       "size_bytes": 421248
     },
     "full_iso": {
