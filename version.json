@@ -1,9 +1,14 @@
 {
-  "latest_version": "1.3.7",
+  "latest_version": "1.3.8",
   "channel": "stable",
   "release_date": "2026-10-03",
   "min_compatible_version": "1.2.0",
   "changelog": [
+    "Fix ZeroTier network join not sending join request (auto-enable daemon, await control socket readiness)",
+    "Fix config wipe on general Save: VPN networks, WireGuard peers/keys, stealth, auth, and license settings now preserved",
+    "ZeroTier Network ID input sanitization (strips non-hex, enforces 16 chars) in both UI and server",
+    "Auto-install ZeroTier daemon if missing on host system",
+    "JSON-based ZeroTier network status sync via zerotier-cli -j listnetworks for richer telemetry",
     "WireGuard VPN Engine (🔐): Full embedded kernel WireGuard server & peer manager with port 51820 UDP and configurable subnets",
     "WireGuard Auto-Keypair & QR Generator (📱): 1-click automatic cryptographic keypair generation with instant scannable QR Code and .conf download for iOS & Android",
     "WireGuard Peer Real-Time Telemetry: Live handshake tracking (last seen), real-time RX/TX bandwidth, endpoint IP, and allowed IPs",
