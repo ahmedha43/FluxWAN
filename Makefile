@@ -25,7 +25,8 @@ SRCS = src/main.c \
        src/diagnostics.c \
        src/wifi_manager.c \
        src/crypto_ed25519.c \
-       src/license_manager.c
+       src/license_manager.c \
+       src/vpn_manager.c
 
 OBJS = $(SRCS:.c=.o)
 BPF_OBJS = bpf/xdp_router.bpf.o bpf/xdp_nat46.bpf.o
@@ -46,7 +47,8 @@ LAB_SRCS = tests/lab_runner.c \
            src/dns64_daemon.c \
            src/wifi_manager.c \
            src/crypto_ed25519.c \
-           src/license_manager.c
+           src/license_manager.c \
+           src/vpn_manager.c
 
 LAB_OBJS = $(LAB_SRCS:.c=.o)
 LAB_TARGET = fluxwan_lab

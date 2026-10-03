@@ -1,9 +1,15 @@
 {
-  "latest_version": "1.3.6",
+  "latest_version": "1.3.7",
   "channel": "stable",
   "release_date": "2026-10-03",
   "min_compatible_version": "1.2.0",
   "changelog": [
+    "WireGuard VPN Engine (🔐): Full embedded kernel WireGuard server & peer manager with port 51820 UDP and configurable subnets",
+    "WireGuard Auto-Keypair & QR Generator (📱): 1-click automatic cryptographic keypair generation with instant scannable QR Code and .conf download for iOS & Android",
+    "WireGuard Peer Real-Time Telemetry: Live handshake tracking (last seen), real-time RX/TX bandwidth, endpoint IP, and allowed IPs",
+    "ZeroTier SDN Cloud Mesh (🌐): Full embedded ZeroTier service integration with 10-hex Node ID, network joiner, and multi-network controller",
+    "ZeroTier Dynamic Status & IP Tracking: Real-time network status monitoring (OK, ACCESS_DENIED, REQUESTING) and virtual IP address discovery",
+    "Remote Web Dashboard & SSH Access: Automated iptables firewall bypass rules allowing full remote management through WireGuard (10.250.0.1:8080) and ZeroTier virtual IPs from anywhere worldwide",
     "Interactive Subscriber Edit (✏️): Full modal to modify subscriber username, password, profile, static IP, notes, enabled state, and expiry",
     "Interactive Speed Profile Edit (✏️): Full modal to modify profile name, download/upload bandwidth limits, validity duration, and description",
     "Dynamic Profile Cascading: Renaming a speed profile automatically cascades to all associated active subscribers",
@@ -40,8 +46,8 @@
   "packages": {
     "core": {
       "url": "https://raw.githubusercontent.com/ahmedha43/FluxWAN/main/dist/fluxwan",
-      "sha256": "85e3e937c9cef69b67e52ee5f96f7e15c2a37b066a389d3a32c3c14a0a522eb4",
-      "size_bytes": 425344
+      "sha256": "5d4dd317745b036af5c186c49a9c6f76746fc18cfb2c99f92640c05511b675d4",
+      "size_bytes": 466304
     },
     "full_iso": {
       "url": "https://github.com/ahmedha43/FluxWAN/releases/download/v1.2.5/fluxwan-os-x86_64.iso",

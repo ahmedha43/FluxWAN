@@ -25,6 +25,7 @@
 #include "dhcp_server.h"
 #include "dns64_daemon.h"
 #include "pppoe_server.h"
+#include "vpn_manager.h"
 #include "license_manager.h"
 
 #include <signal.h>
@@ -124,7 +125,11 @@ int main(int argc, char *argv[]) {
         pppoe_server_start(pppoe_srv);
     }
 
-    /* 12. Initialize Embedded Web Server & REST Engine */
+    /* 12. Initialize VPN Subsystem (WireGuard & ZeroTier) */
+    vpn_manager_init(&config.vpn);
+    vpn_manager_apply(&config.vpn);
+
+    /* 13. Initialize Embedded Web Server & REST Engine */
     web_server_ctx_t *web = web_server_init(&config, nl, dhcp);
     web_server_set_wan_manager(web, wan_mgr);
     web_server_set_pppoe_server(web, pppoe_srv);

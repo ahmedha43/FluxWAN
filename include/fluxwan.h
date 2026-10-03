@@ -62,7 +62,7 @@ typedef int socket_t;
 #define INVALID_SOCKET (-1)
 #endif
 
-#define FLUXWAN_VERSION "1.3.6"
+#define FLUXWAN_VERSION "1.3.7"
 #define FLUXWAN_AUTHOR "Ahmed Al-Dulaimi (أحمد الدليمي)"
 #define FLUXWAN_LICENSE "GNU GPLv3"
 #define FLUXWAN_COPYRIGHT "Copyright (C) 2026 Ahmed Al-Dulaimi. All rights reserved."
@@ -491,6 +491,65 @@ typedef struct {
     uint32_t user_count;
 } pppoe_server_config_t;
 
+/* WireGuard & ZeroTier VPN Configuration */
+#define MAX_WG_PEERS 64
+#define MAX_ZT_NETWORKS 16
+
+/* WireGuard Peer Definition */
+typedef struct {
+    char name[64];                  /* Friendly label, e.g. "Ahmed Mobile" */
+    char public_key[64];            /* Base64 32-byte public key */
+    char preshared_key[64];         /* Optional Base64 32-byte preshared key */
+    char allowed_ips[128];          /* e.g. "10.250.0.2/32" */
+    char endpoint[128];             /* Optional endpoint IP:Port */
+    uint16_t persistent_keepalive;  /* Keepalive seconds (default 25) */
+    bool enabled;                   /* Peer active */
+    uint64_t latest_handshake;      /* Epoch timestamp of last handshake */
+    uint64_t rx_bytes;              /* Received bytes */
+    uint64_t tx_bytes;              /* Transmitted bytes */
+    char last_endpoint[128];        /* Observed real endpoint */
+} wireguard_peer_t;
+
+/* WireGuard Server / Device Configuration */
+typedef struct {
+    bool enabled;                   /* Master WireGuard toggle */
+    char interface[MAX_IFNAME_LEN]; /* Interface name, e.g. "wg0" */
+    uint16_t listen_port;           /* Default 51820 */
+    char address[64];               /* Subnet / IP, e.g. "10.250.0.1/24" */
+    char private_key[64];           /* Server Base64 private key */
+    char public_key[64];            /* Server Base64 public key */
+    bool allow_remote_mgmt;         /* Permit Web Dashboard (8080/80) & SSH (22) from wg0 */
+    wireguard_peer_t peers[MAX_WG_PEERS];
+    uint32_t peer_count;
+} wireguard_config_t;
+
+/* ZeroTier Network Definition */
+typedef struct {
+    char nwid[32];                  /* 16-hex character Network ID */
+    char name[64];                  /* Friendly name / label */
+    bool enabled;                   /* Join enabled */
+    char status[32];                /* "OK", "ACCESS_DENIED", "NOT_FOUND", etc. */
+    char assigned_ips[128];         /* Assigned virtual IPs, e.g. "192.168.192.45/24" */
+    char dev_name[32];              /* Virtual dev name, e.g. "zt0" */
+    char mac[32];                   /* Virtual MAC */
+    uint32_t mtu;                   /* Interface MTU */
+} zerotier_network_t;
+
+/* ZeroTier Node Configuration */
+typedef struct {
+    bool enabled;                   /* Master ZeroTier toggle */
+    char node_id[32];               /* 10-hex ZeroTier Node ID */
+    bool allow_remote_mgmt;         /* Permit Web Dashboard & SSH from ZeroTier interfaces */
+    zerotier_network_t networks[MAX_ZT_NETWORKS];
+    uint32_t network_count;
+} zerotier_config_t;
+
+/* Combined VPN & Remote Management Configuration */
+typedef struct {
+    wireguard_config_t wireguard;
+    zerotier_config_t zerotier;
+} vpn_config_t;
+
 /* Global App Configuration Structure */
 typedef struct {
     lan_config_t lan;
@@ -510,6 +569,7 @@ typedef struct {
     dpi_config_t dpi;
     pppoe_server_config_t pppoe_server;
     stealth_config_t stealth;
+    vpn_config_t vpn;
     license_info_t license;
     char config_file_path[MAX_PATH_LEN];
 } fluxwan_config_t;

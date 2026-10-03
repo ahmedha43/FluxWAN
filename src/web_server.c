@@ -22,6 +22,7 @@
 #include "pppoe_server.h"
 #include "wifi_manager.h"
 #include "license_manager.h"
+#include "vpn_manager.h"
 #include <pthread.h>
 #include <fcntl.h>
 #include <ctype.h>
@@ -4895,6 +4896,319 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
                                 rad->server);
         }
         const char *rb = "{\"status\":\"ok\",\"message\":\"RADIUS / RadSec AAA configuration saved\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "GET /api/v1/vpn/status") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        vpn_manager_sync_status(&ctx->config->vpn);
+        size_t json_cap = 65536;
+        char *json_buf = malloc(json_cap);
+        if (json_buf) {
+            vpn_manager_build_json_status(&ctx->config->vpn, json_buf, json_cap);
+            char resp_hdr[256];
+            int hlen = snprintf(resp_hdr, sizeof(resp_hdr),
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n",
+                strlen(json_buf));
+            send(client_fd, resp_hdr, hlen, 0);
+            send(client_fd, json_buf, (int)strlen(json_buf), 0);
+            free(json_buf);
+        }
+        close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "POST /api/v1/vpn/wireguard/toggle") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        bool enable = true;
+        if (body) {
+            body += 4;
+            enable = extract_json_bool(body, "enabled", true);
+        }
+        ctx->config->vpn.wireguard.enabled = enable;
+        vpn_manager_apply_wireguard(&ctx->config->vpn.wireguard);
+        config_save(get_config_target_path(ctx), ctx->config);
+        wan_manager_add_log("INFO", "WireGuard VPN %s via Web UI", enable ? "ENABLED" : "DISABLED");
+
+        char resp_body[256];
+        snprintf(resp_body, sizeof(resp_body), "{\"status\":\"ok\",\"enabled\":%s,\"message\":\"WireGuard state updated\"}", enable ? "true" : "false");
+        char resp[512];
+        int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(resp_body), resp_body);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "POST /api/v1/vpn/wireguard/config") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        if (body) {
+            body += 4;
+            wireguard_config_t *wg = &ctx->config->vpn.wireguard;
+            char sval[128];
+            if (extract_json_string(body, "interface", sval, sizeof(sval))) safe_str_copy(wg->interface, sval, sizeof(wg->interface));
+            int port = extract_json_int(body, "listen_port", 0);
+            if (port > 0) wg->listen_port = (uint16_t)port;
+            if (extract_json_string(body, "address", sval, sizeof(sval))) safe_str_copy(wg->address, sval, sizeof(wg->address));
+            if (extract_json_string(body, "private_key", sval, sizeof(sval))) safe_str_copy(wg->private_key, sval, sizeof(wg->private_key));
+            if (extract_json_string(body, "public_key", sval, sizeof(sval))) safe_str_copy(wg->public_key, sval, sizeof(wg->public_key));
+            wg->allow_remote_mgmt = extract_json_bool(body, "allow_remote_mgmt", wg->allow_remote_mgmt);
+
+            vpn_manager_apply_wireguard(wg);
+            config_save(get_config_target_path(ctx), ctx->config);
+            wan_manager_add_log("INFO", "WireGuard settings updated (Port: %u, Subnet: %s, Remote Mgmt: %s)",
+                                wg->listen_port, wg->address, wg->allow_remote_mgmt ? "YES" : "NO");
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"WireGuard settings saved successfully\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "POST /api/v1/vpn/wireguard/genkeys") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        char priv[64] = {0}, pub[64] = {0};
+        vpn_manager_gen_wg_keypair(priv, sizeof(priv), pub, sizeof(pub));
+        char resp_body[256];
+        snprintf(resp_body, sizeof(resp_body),
+                 "{\"status\":\"ok\",\"private_key\":\"%s\",\"public_key\":\"%s\"}", priv, pub);
+        char resp[512];
+        int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(resp_body), resp_body);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "POST /api/v1/vpn/wireguard/peers/delete") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        char pubkey[64] = {0};
+        if (body) {
+            body += 4;
+            extract_json_string(body, "public_key", pubkey, sizeof(pubkey));
+        }
+        if (pubkey[0]) {
+            vpn_manager_delete_wg_peer(&ctx->config->vpn.wireguard, pubkey);
+            config_save(get_config_target_path(ctx), ctx->config);
+            wan_manager_add_log("INFO", "WireGuard peer removed (%s)", pubkey);
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"Peer removed successfully\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "POST /api/v1/vpn/wireguard/peers") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        if (body) {
+            body += 4;
+            wireguard_peer_t peer;
+            memset(&peer, 0, sizeof(peer));
+            extract_json_string(body, "name", peer.name, sizeof(peer.name));
+            extract_json_string(body, "public_key", peer.public_key, sizeof(peer.public_key));
+            extract_json_string(body, "preshared_key", peer.preshared_key, sizeof(peer.preshared_key));
+            extract_json_string(body, "allowed_ips", peer.allowed_ips, sizeof(peer.allowed_ips));
+            extract_json_string(body, "endpoint", peer.endpoint, sizeof(peer.endpoint));
+            peer.persistent_keepalive = (uint16_t)extract_json_int(body, "persistent_keepalive", 25);
+            peer.enabled = extract_json_bool(body, "enabled", true);
+
+            if (peer.public_key[0]) {
+                vpn_manager_add_wg_peer(&ctx->config->vpn.wireguard, &peer);
+                config_save(get_config_target_path(ctx), ctx->config);
+                wan_manager_add_log("INFO", "WireGuard peer '%s' saved (IP: %s)", peer.name, peer.allowed_ips);
+            }
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"Peer saved successfully\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "POST /api/v1/vpn/wireguard/client-conf") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        char pubkey[64] = {0}, client_priv[64] = {0}, endpoint[128] = {0};
+        if (body) {
+            body += 4;
+            extract_json_string(body, "public_key", pubkey, sizeof(pubkey));
+            extract_json_string(body, "client_private_key", client_priv, sizeof(client_priv));
+            extract_json_string(body, "endpoint", endpoint, sizeof(endpoint));
+        }
+
+        if (endpoint[0] == '\0' && ctx->config->wan_count > 0) {
+            for (uint32_t i = 0; i < ctx->config->wan_count; i++) {
+                if (ctx->config->wans[i].enabled && ctx->config->wans[i].ip_addr != 0) {
+                    ip_to_str(ctx->config->wans[i].ip_addr, endpoint, sizeof(endpoint));
+                    break;
+                }
+            }
+        }
+
+        const wireguard_peer_t *matched_peer = NULL;
+        for (uint32_t i = 0; i < ctx->config->vpn.wireguard.peer_count; i++) {
+            if (strcmp(ctx->config->vpn.wireguard.peers[i].public_key, pubkey) == 0) {
+                matched_peer = &ctx->config->vpn.wireguard.peers[i];
+                break;
+            }
+        }
+
+        if (matched_peer) {
+            char conf_text[2048] = {0};
+            vpn_manager_generate_client_conf(&ctx->config->vpn.wireguard, matched_peer,
+                                             client_priv, endpoint, conf_text, sizeof(conf_text));
+            char esc_conf[4096] = {0};
+            size_t cidx = 0;
+            for (size_t s = 0; conf_text[s] && cidx < sizeof(esc_conf) - 4; s++) {
+                if (conf_text[s] == '\n') { esc_conf[cidx++] = '\\'; esc_conf[cidx++] = 'n'; }
+                else if (conf_text[s] == '\r') { /* skip */ }
+                else if (conf_text[s] == '"') { esc_conf[cidx++] = '\\'; esc_conf[cidx++] = '"'; }
+                else { esc_conf[cidx++] = conf_text[s]; }
+            }
+            esc_conf[cidx] = '\0';
+
+            char resp_body[4500];
+            snprintf(resp_body, sizeof(resp_body),
+                     "{\"status\":\"ok\",\"config\":\"%s\"}", esc_conf);
+            char resp[4800];
+            int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(resp_body), resp_body);
+            send(client_fd, resp, len, 0);
+        } else {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Peer not found\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0);
+        }
+        close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "POST /api/v1/vpn/zerotier/toggle") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        bool enable = true;
+        if (body) {
+            body += 4;
+            enable = extract_json_bool(body, "enabled", true);
+        }
+        ctx->config->vpn.zerotier.enabled = enable;
+        vpn_manager_apply_zerotier(&ctx->config->vpn.zerotier);
+        config_save(get_config_target_path(ctx), ctx->config);
+        wan_manager_add_log("INFO", "ZeroTier VPN %s via Web UI", enable ? "ENABLED" : "DISABLED");
+
+        char resp_body[256];
+        snprintf(resp_body, sizeof(resp_body), "{\"status\":\"ok\",\"enabled\":%s,\"message\":\"ZeroTier state updated\"}", enable ? "true" : "false");
+        char resp[512];
+        int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(resp_body), resp_body);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "POST /api/v1/vpn/zerotier/config") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        if (body) {
+            body += 4;
+            ctx->config->vpn.zerotier.allow_remote_mgmt = extract_json_bool(body, "allow_remote_mgmt", ctx->config->vpn.zerotier.allow_remote_mgmt);
+            vpn_manager_apply_zerotier(&ctx->config->vpn.zerotier);
+            config_save(get_config_target_path(ctx), ctx->config);
+            wan_manager_add_log("INFO", "ZeroTier settings updated (Remote Mgmt: %s)", ctx->config->vpn.zerotier.allow_remote_mgmt ? "YES" : "NO");
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"ZeroTier settings saved successfully\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "POST /api/v1/vpn/zerotier/join") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        char nwid[32] = {0}, name[64] = {0};
+        if (body) {
+            body += 4;
+            extract_json_string(body, "nwid", nwid, sizeof(nwid));
+            extract_json_string(body, "name", name, sizeof(name));
+        }
+        if (nwid[0]) {
+            vpn_manager_zt_join(&ctx->config->vpn.zerotier, nwid, name);
+            config_save(get_config_target_path(ctx), ctx->config);
+            wan_manager_add_log("INFO", "Joined ZeroTier Network: %s (%s)", nwid, name[0] ? name : "Network");
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"Network joined successfully\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "POST /api/v1/vpn/zerotier/leave") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        char nwid[32] = {0};
+        if (body) {
+            body += 4;
+            extract_json_string(body, "nwid", nwid, sizeof(nwid));
+        }
+        if (nwid[0]) {
+            vpn_manager_zt_leave(&ctx->config->vpn.zerotier, nwid);
+            config_save(get_config_target_path(ctx), ctx->config);
+            wan_manager_add_log("INFO", "Left ZeroTier Network: %s", nwid);
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"Left network successfully\"}";
         char resp[256]; int len = snprintf(resp, sizeof(resp),
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
             strlen(rb), rb);

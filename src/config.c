@@ -935,6 +935,161 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
         pppoe->user_count = 1;
     }
 
+    /* Parse VPN Configuration (WireGuard & ZeroTier) */
+    vpn_config_t *vpn = &out_config->vpn;
+    vpn->wireguard.enabled = false;
+    safe_str_copy(vpn->wireguard.interface, "wg0", sizeof(vpn->wireguard.interface));
+    vpn->wireguard.listen_port = 51820;
+    safe_str_copy(vpn->wireguard.address, "10.250.0.1/24", sizeof(vpn->wireguard.address));
+    vpn->wireguard.allow_remote_mgmt = true;
+    vpn->wireguard.peer_count = 0;
+    vpn->zerotier.enabled = false;
+    vpn->zerotier.allow_remote_mgmt = true;
+    vpn->zerotier.network_count = 0;
+
+    const char *vpn_pos = strstr(json, "\"vpn\"");
+    if (vpn_pos) {
+        const char *vpn_start = strchr(vpn_pos, '{');
+        const char *vpn_end = find_matching_brace(vpn_start);
+        if (vpn_start && vpn_end) {
+            size_t vpn_len = vpn_end - vpn_start + 1;
+            char *vpn_str = malloc(vpn_len + 1);
+            if (vpn_str) {
+                strncpy(vpn_str, vpn_start, vpn_len);
+                vpn_str[vpn_len] = '\0';
+
+                /* Parse WireGuard */
+                const char *wg_pos = strstr(vpn_str, "\"wireguard\"");
+                if (wg_pos) {
+                    const char *wg_start = strchr(wg_pos, '{');
+                    const char *wg_end = find_matching_brace(wg_start);
+                    if (wg_start && wg_end) {
+                        size_t wg_len = wg_end - wg_start + 1;
+                        char *wg_str = malloc(wg_len + 1);
+                        if (wg_str) {
+                            strncpy(wg_str, wg_start, wg_len);
+                            wg_str[wg_len] = '\0';
+
+                            vpn->wireguard.enabled = extract_json_bool(wg_str, "enabled", false);
+                            vpn->wireguard.allow_remote_mgmt = extract_json_bool(wg_str, "allow_remote_mgmt", true);
+                            vpn->wireguard.listen_port = (uint16_t)extract_json_int(wg_str, "listen_port", 51820);
+
+                            char sval[128];
+                            if (extract_json_string(wg_str, "interface", sval, sizeof(sval))) safe_str_copy(vpn->wireguard.interface, sval, sizeof(vpn->wireguard.interface));
+                            if (extract_json_string(wg_str, "address", sval, sizeof(sval))) safe_str_copy(vpn->wireguard.address, sval, sizeof(vpn->wireguard.address));
+                            if (extract_json_string(wg_str, "private_key", sval, sizeof(sval))) safe_str_copy(vpn->wireguard.private_key, sval, sizeof(vpn->wireguard.private_key));
+                            if (extract_json_string(wg_str, "public_key", sval, sizeof(sval))) safe_str_copy(vpn->wireguard.public_key, sval, sizeof(vpn->wireguard.public_key));
+
+                            /* Parse WG Peers */
+                            const char *peers_pos = strstr(wg_str, "\"peers\"");
+                            if (peers_pos) {
+                                const char *p_arr_start = strchr(peers_pos, '[');
+                                const char *p_arr_end = find_matching_bracket(p_arr_start);
+                                if (p_arr_start && p_arr_end) {
+                                    const char *p = p_arr_start;
+                                    uint32_t p_idx = 0;
+                                    while (p < p_arr_end && p_idx < MAX_WG_PEERS) {
+                                        const char *obj_start = strchr(p, '{');
+                                        if (!obj_start || obj_start > p_arr_end) break;
+                                        const char *obj_end = find_matching_brace(obj_start);
+                                        if (!obj_end || obj_end > p_arr_end) break;
+
+                                        size_t obj_len = obj_end - obj_start + 1;
+                                        char *obj_str = malloc(obj_len + 1);
+                                        if (obj_str) {
+                                            strncpy(obj_str, obj_start, obj_len);
+                                            obj_str[obj_len] = '\0';
+                                            wireguard_peer_t *peer = &vpn->wireguard.peers[p_idx];
+                                            memset(peer, 0, sizeof(wireguard_peer_t));
+
+                                            extract_json_string(obj_str, "name", peer->name, sizeof(peer->name));
+                                            extract_json_string(obj_str, "public_key", peer->public_key, sizeof(peer->public_key));
+                                            extract_json_string(obj_str, "preshared_key", peer->preshared_key, sizeof(peer->preshared_key));
+                                            extract_json_string(obj_str, "allowed_ips", peer->allowed_ips, sizeof(peer->allowed_ips));
+                                            extract_json_string(obj_str, "endpoint", peer->endpoint, sizeof(peer->endpoint));
+                                            peer->persistent_keepalive = (uint16_t)extract_json_int(obj_str, "persistent_keepalive", 25);
+                                            peer->enabled = extract_json_bool(obj_str, "enabled", true);
+
+                                            if (peer->public_key[0]) {
+                                                p_idx++;
+                                            }
+                                            free(obj_str);
+                                        }
+                                        p = obj_end + 1;
+                                    }
+                                    vpn->wireguard.peer_count = p_idx;
+                                }
+                            }
+
+                            free(wg_str);
+                        }
+                    }
+                }
+
+                /* Parse ZeroTier */
+                const char *zt_pos = strstr(vpn_str, "\"zerotier\"");
+                if (zt_pos) {
+                    const char *zt_start = strchr(zt_pos, '{');
+                    const char *zt_end = find_matching_brace(zt_start);
+                    if (zt_start && zt_end) {
+                        size_t zt_len = zt_end - zt_start + 1;
+                        char *zt_str = malloc(zt_len + 1);
+                        if (zt_str) {
+                            strncpy(zt_str, zt_start, zt_len);
+                            zt_str[zt_len] = '\0';
+
+                            vpn->zerotier.enabled = extract_json_bool(zt_str, "enabled", false);
+                            vpn->zerotier.allow_remote_mgmt = extract_json_bool(zt_str, "allow_remote_mgmt", true);
+
+                            char sval[64];
+                            if (extract_json_string(zt_str, "node_id", sval, sizeof(sval))) safe_str_copy(vpn->zerotier.node_id, sval, sizeof(vpn->zerotier.node_id));
+
+                            /* Parse ZT Networks */
+                            const char *nets_pos = strstr(zt_str, "\"networks\"");
+                            if (nets_pos) {
+                                const char *n_arr_start = strchr(nets_pos, '[');
+                                const char *n_arr_end = find_matching_bracket(n_arr_start);
+                                if (n_arr_start && n_arr_end) {
+                                    const char *np = n_arr_start;
+                                    uint32_t n_idx = 0;
+                                    while (np < n_arr_end && n_idx < MAX_ZT_NETWORKS) {
+                                        const char *obj_start = strchr(np, '{');
+                                        if (!obj_start || obj_start > n_arr_end) break;
+                                        const char *obj_end = find_matching_brace(obj_start);
+                                        if (!obj_end || obj_end > n_arr_end) break;
+
+                                        size_t obj_len = obj_end - obj_start + 1;
+                                        char *obj_str = malloc(obj_len + 1);
+                                        if (obj_str) {
+                                            strncpy(obj_str, obj_start, obj_len);
+                                            obj_str[obj_len] = '\0';
+                                            zerotier_network_t *net = &vpn->zerotier.networks[n_idx];
+                                            memset(net, 0, sizeof(zerotier_network_t));
+
+                                            extract_json_string(obj_str, "nwid", net->nwid, sizeof(net->nwid));
+                                            extract_json_string(obj_str, "name", net->name, sizeof(net->name));
+                                            net->enabled = extract_json_bool(obj_str, "enabled", true);
+
+                                            if (net->nwid[0]) {
+                                                n_idx++;
+                                            }
+                                            free(obj_str);
+                                        }
+                                        np = obj_end + 1;
+                                    }
+                                    vpn->zerotier.network_count = n_idx;
+                                }
+                            }
+
+                            free(zt_str);
+                        }
+                    }
+                }
+
+                free(vpn_str);
+            }
+        }
+    }
 
     /* Parse Groups array */
     const char *groups_pos = strstr(json, "\"groups\"");
@@ -1456,6 +1611,48 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
         fprintf(f, "      }%s\n", (u == config->pppoe_server.user_count - 1) ? "" : ",");
     }
     fprintf(f, "    ]\n");
+    fprintf(f, "  },\n");
+
+    /* Serialize VPN (WireGuard & ZeroTier) */
+    fprintf(f, "  \"vpn\": {\n");
+    fprintf(f, "    \"wireguard\": {\n");
+    fprintf(f, "      \"enabled\": %s,\n", config->vpn.wireguard.enabled ? "true" : "false");
+    fprintf(f, "      \"interface\": \"%s\",\n", config->vpn.wireguard.interface[0] ? config->vpn.wireguard.interface : "wg0");
+    fprintf(f, "      \"listen_port\": %u,\n", config->vpn.wireguard.listen_port > 0 ? config->vpn.wireguard.listen_port : 51820);
+    fprintf(f, "      \"address\": \"%s\",\n", config->vpn.wireguard.address[0] ? config->vpn.wireguard.address : "10.250.0.1/24");
+    fprintf(f, "      \"private_key\": \"%s\",\n", config->vpn.wireguard.private_key);
+    fprintf(f, "      \"public_key\": \"%s\",\n", config->vpn.wireguard.public_key);
+    fprintf(f, "      \"allow_remote_mgmt\": %s,\n", config->vpn.wireguard.allow_remote_mgmt ? "true" : "false");
+    fprintf(f, "      \"peers\": [\n");
+    for (uint32_t p = 0; p < config->vpn.wireguard.peer_count; p++) {
+        const wireguard_peer_t *peer = &config->vpn.wireguard.peers[p];
+        fprintf(f, "        {\n");
+        fprintf(f, "          \"name\": \"%s\",\n", peer->name);
+        fprintf(f, "          \"public_key\": \"%s\",\n", peer->public_key);
+        fprintf(f, "          \"preshared_key\": \"%s\",\n", peer->preshared_key);
+        fprintf(f, "          \"allowed_ips\": \"%s\",\n", peer->allowed_ips);
+        fprintf(f, "          \"endpoint\": \"%s\",\n", peer->endpoint);
+        fprintf(f, "          \"persistent_keepalive\": %u,\n", peer->persistent_keepalive);
+        fprintf(f, "          \"enabled\": %s\n", peer->enabled ? "true" : "false");
+        fprintf(f, "        }%s\n", (p == config->vpn.wireguard.peer_count - 1) ? "" : ",");
+    }
+    fprintf(f, "      ]\n");
+    fprintf(f, "    },\n");
+    fprintf(f, "    \"zerotier\": {\n");
+    fprintf(f, "      \"enabled\": %s,\n", config->vpn.zerotier.enabled ? "true" : "false");
+    fprintf(f, "      \"node_id\": \"%s\",\n", config->vpn.zerotier.node_id);
+    fprintf(f, "      \"allow_remote_mgmt\": %s,\n", config->vpn.zerotier.allow_remote_mgmt ? "true" : "false");
+    fprintf(f, "      \"networks\": [\n");
+    for (uint32_t n = 0; n < config->vpn.zerotier.network_count; n++) {
+        const zerotier_network_t *net = &config->vpn.zerotier.networks[n];
+        fprintf(f, "        {\n");
+        fprintf(f, "          \"nwid\": \"%s\",\n", net->nwid);
+        fprintf(f, "          \"name\": \"%s\",\n", net->name);
+        fprintf(f, "          \"enabled\": %s\n", net->enabled ? "true" : "false");
+        fprintf(f, "        }%s\n", (n == config->vpn.zerotier.network_count - 1) ? "" : ",");
+    }
+    fprintf(f, "      ]\n");
+    fprintf(f, "    }\n");
     fprintf(f, "  }");
 
     if (config->address_list_count > 0) {
@@ -1916,6 +2113,19 @@ int config_reset_to_defaults(fluxwan_config_t *out_config) {
     p_def->users[0].enabled = true;
     safe_str_copy(p_def->users[0].comment, "Default Broadband User", sizeof(p_def->users[0].comment));
     p_def->user_count = 1;
+
+    /* VPN Defaults (WireGuard & ZeroTier) */
+    vpn_config_t *v_def = &out_config->vpn;
+    v_def->wireguard.enabled = false;
+    safe_str_copy(v_def->wireguard.interface, "wg0", sizeof(v_def->wireguard.interface));
+    v_def->wireguard.listen_port = 51820;
+    safe_str_copy(v_def->wireguard.address, "10.250.0.1/24", sizeof(v_def->wireguard.address));
+    v_def->wireguard.allow_remote_mgmt = true;
+    v_def->wireguard.peer_count = 0;
+
+    v_def->zerotier.enabled = false;
+    v_def->zerotier.allow_remote_mgmt = true;
+    v_def->zerotier.network_count = 0;
 
     return 0;
 }

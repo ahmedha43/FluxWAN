@@ -9,6 +9,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
     <style>
         body { background-color: #0b0f19; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; }
         .glass-card { background: rgba(23, 32, 51, 0.75); backdrop-filter: blur(14px); border: 1px solid rgba(255, 255, 255, 0.08); }
@@ -337,6 +338,12 @@
                 <span class="nav-icon">🌐</span>
                 <span x-text="t('tab_broadband')">Broadband (PPPoE)</span>
                 <span class="nav-badge" style="background:#06b6d4" x-show="broadbandStatus.enabled" x-text="broadbandSessions.length"></span>
+            </div>
+            <div class="sidebar-section-label" x-text="currentLang==='ar'?'الوصول عن بعد':'REMOTE ACCESS'"></div>
+            <div class="sidebar-item" :class="currentTab==='vpn'?'active':''" @click="currentTab='vpn';fetchVpnStatus();">
+                <span class="nav-icon">🔐</span>
+                <span x-text="t('tab_vpn')">VPN &amp; Remote Access</span>
+                <span class="nav-badge" style="background:#8b5cf6" x-show="vpnStatus && (vpnStatus.wireguard.enabled || vpnStatus.zerotier.enabled)" x-text="((vpnStatus.wireguard && vpnStatus.wireguard.enabled) ? (vpnStatus.wireguard.peers ? vpnStatus.wireguard.peers.length : 0) : 0) + ((vpnStatus.zerotier && vpnStatus.zerotier.enabled) ? (vpnStatus.zerotier.networks ? vpnStatus.zerotier.networks.length : 0) : 0)"></span>
             </div>
             <div class="sidebar-section-label" x-text="currentLang==='ar'?'جودة الخدمة':'TRAFFIC'"></div>
             <div class="sidebar-item" :class="currentTab==='qos'?'active':''" @click="currentTab='qos'">
@@ -4228,6 +4235,502 @@
             </div>
         </section>
 
+        <!-- ================= VPN & REMOTE MANAGEMENT SECTION (WireGuard & ZeroTier) ================= -->
+        <section x-show="currentTab === 'vpn'" class="space-y-6" x-cloak>
+            <!-- Header Banner -->
+            <div class="glass-card p-6 rounded-2xl border border-slate-800 bg-gradient-to-r from-slate-900 via-indigo-950/20 to-slate-900 shadow-xl">
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div class="flex items-center space-x-3 rtl:space-x-reverse">
+                        <div class="p-3 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 text-2xl">
+                            🔐
+                        </div>
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <h2 class="text-lg font-bold text-white" x-text="currentLang==='ar' ? 'شبكات VPN والوصول عن بعد' : 'VPN & Remote Access Hub'">VPN & Remote Access Hub</h2>
+                                <span class="px-2 py-0.5 rounded-full text-3xs font-extrabold uppercase bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">WireGuard &amp; ZeroTier</span>
+                            </div>
+                            <p class="text-2xs text-slate-400 mt-0.5" x-text="currentLang==='ar' ? 'إدارة الوصول الآمن للراوتر والشبكة المحلية عن بعد من أي مكان بالعالم عبر WireGuard فائق السرعة وشبكة ZeroTier السحابية المشفرة.' : 'Secure remote router management and LAN access from anywhere via high-speed WireGuard and ZeroTier cloud mesh.'"></p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button type="button" @click="fetchVpnStatus()" class="px-3 py-1.5 rounded-xl text-2xs bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 flex items-center gap-1.5 transition">
+                            <span>🔄</span>
+                            <span x-text="currentLang==='ar' ? 'تحديث الحالة' : 'Refresh'">Refresh</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Top 3 Quick Status Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <!-- 1. WireGuard Server Card -->
+                <div class="glass-card p-5 rounded-2xl border border-slate-800 space-y-4 relative overflow-hidden">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-2 rtl:space-x-reverse">
+                            <span class="text-xl">⚡</span>
+                            <h3 class="text-xs font-bold text-white">WireGuard Server</h3>
+                        </div>
+                        <div class="flex items-center space-x-2 rtl:space-x-reverse">
+                            <span class="w-2 h-2 rounded-full" :class="vpnStatus.wireguard && vpnStatus.wireguard.enabled ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'"></span>
+                            <span class="text-3xs font-bold uppercase" :class="vpnStatus.wireguard && vpnStatus.wireguard.enabled ? 'text-emerald-400' : 'text-slate-400'"
+                                  x-text="vpnStatus.wireguard && vpnStatus.wireguard.enabled ? (currentLang==='ar'?'يعمل':'ONLINE') : (currentLang==='ar'?'معطل':'DISABLED')"></span>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2 text-3xs font-mono">
+                        <div class="p-2 rounded-lg bg-slate-900/60 border border-slate-800/80">
+                            <div class="text-slate-500 text-4xs uppercase" x-text="currentLang==='ar'?'منفذ الاستماع':'Listen Port'">Listen Port</div>
+                            <div class="text-white font-bold" x-text="(vpnStatus.wireguard ? vpnStatus.wireguard.listen_port : 51820) + ' UDP'">51820 UDP</div>
+                        </div>
+                        <div class="p-2 rounded-lg bg-slate-900/60 border border-slate-800/80">
+                            <div class="text-slate-500 text-4xs uppercase" x-text="currentLang==='ar'?'نطاق الشبكة':'VPN Subnet'">VPN Subnet</div>
+                            <div class="text-white font-bold" x-text="vpnStatus.wireguard ? vpnStatus.wireguard.address : '10.250.0.1/24'">10.250.0.1/24</div>
+                        </div>
+                    </div>
+
+                    <div class="space-y-1">
+                        <div class="flex items-center justify-between text-4xs text-slate-400">
+                            <span x-text="currentLang==='ar'?'المفتاح العام للسيرفر':'Server Public Key'">Server Public Key</span>
+                            <button type="button" @click="copyToClipboard(vpnStatus.wireguard ? vpnStatus.wireguard.public_key : '')" class="text-blue-400 hover:text-blue-300 text-4xs">📋 <span x-text="currentLang==='ar'?'نسخ':'Copy'">Copy</span></button>
+                        </div>
+                        <div class="p-1.5 rounded-lg bg-slate-950 border border-slate-800 font-mono text-3xs text-slate-300 truncate" x-text="vpnStatus.wireguard && vpnStatus.wireguard.public_key ? vpnStatus.wireguard.public_key : 'None generated'"></div>
+                    </div>
+
+                    <div class="pt-2 border-t border-slate-800/60 flex items-center justify-between">
+                        <label class="flex items-center gap-2 cursor-pointer text-3xs text-slate-300">
+                            <input type="checkbox" :checked="vpnStatus.wireguard && vpnStatus.wireguard.enabled" @change="toggleWireGuard($event.target.checked)" class="rounded bg-slate-900 border-slate-700 text-blue-600 focus:ring-0">
+                            <span x-text="currentLang==='ar'?'تفعيل خادم WireGuard':'Enable WireGuard'">Enable WireGuard</span>
+                        </label>
+                        <button type="button" @click="openWgServerModal()" class="text-3xs text-slate-400 hover:text-white px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 transition">
+                            ⚙️ <span x-text="currentLang==='ar'?'الإعدادات':'Settings'">Settings</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 2. ZeroTier Node Card -->
+                <div class="glass-card p-5 rounded-2xl border border-slate-800 space-y-4 relative overflow-hidden">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-2 rtl:space-x-reverse">
+                            <span class="text-xl">🌐</span>
+                            <h3 class="text-xs font-bold text-white">ZeroTier SDN Mesh</h3>
+                        </div>
+                        <div class="flex items-center space-x-2 rtl:space-x-reverse">
+                            <span class="w-2 h-2 rounded-full" :class="vpnStatus.zerotier && vpnStatus.zerotier.enabled ? 'bg-amber-400 animate-pulse' : 'bg-slate-500'"></span>
+                            <span class="text-3xs font-bold uppercase" :class="vpnStatus.zerotier && vpnStatus.zerotier.enabled ? 'text-amber-400' : 'text-slate-400'"
+                                  x-text="vpnStatus.zerotier && vpnStatus.zerotier.enabled ? (currentLang==='ar'?'نشط':'ACTIVE') : (currentLang==='ar'?'معطل':'DISABLED')"></span>
+                        </div>
+                    </div>
+
+                    <div class="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800/80 space-y-1">
+                        <div class="flex items-center justify-between text-4xs text-slate-400">
+                            <span x-text="currentLang==='ar'?'معرّف الجهاز الخاص بالراوتر (Node ID)':'Router ZeroTier Node ID'">Router Node ID</span>
+                            <button type="button" @click="copyToClipboard(vpnStatus.zerotier ? vpnStatus.zerotier.node_id : '')" class="text-amber-400 hover:text-amber-300 text-4xs font-bold">📋 <span x-text="currentLang==='ar'?'نسخ المعرّف':'Copy ID'">Copy ID</span></button>
+                        </div>
+                        <div class="font-mono text-sm font-extrabold text-amber-300 tracking-wider" x-text="vpnStatus.zerotier && vpnStatus.zerotier.node_id ? vpnStatus.zerotier.node_id : 'Initializing...'"></div>
+                    </div>
+
+                    <div class="text-3xs text-slate-400 flex items-center justify-between">
+                        <span><span x-text="currentLang==='ar'?'الشبكات المنضم إليها:':'Joined Networks:'">Joined Networks:</span> <strong class="text-white" x-text="vpnStatus.zerotier && vpnStatus.zerotier.networks ? vpnStatus.zerotier.networks.length : 0">0</strong></span>
+                        <a href="https://my.zerotier.com" target="_blank" class="text-blue-400 hover:text-blue-300 text-3xs inline-flex items-center gap-1">
+                            <span>my.zerotier.com</span>
+                            <span>↗</span>
+                        </a>
+                    </div>
+
+                    <div class="pt-2 border-t border-slate-800/60 flex items-center justify-between">
+                        <label class="flex items-center gap-2 cursor-pointer text-3xs text-slate-300">
+                            <input type="checkbox" :checked="vpnStatus.zerotier && vpnStatus.zerotier.enabled" @change="toggleZeroTier($event.target.checked)" class="rounded bg-slate-900 border-slate-700 text-amber-500 focus:ring-0">
+                            <span x-text="currentLang==='ar'?'تفعيل ZeroTier':'Enable ZeroTier'">Enable ZeroTier</span>
+                        </label>
+                        <button type="button" @click="openJoinZtModal()" class="text-3xs text-slate-300 hover:text-white px-2 py-1 rounded bg-amber-600/30 hover:bg-amber-600/50 border border-amber-500/40 transition">
+                            ➕ <span x-text="currentLang==='ar'?'انضمام لشبكة':'Join Network'">Join Network</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 3. Remote Management Guide Card -->
+                <div class="glass-card p-5 rounded-2xl border border-slate-800 space-y-3 relative overflow-hidden bg-slate-900/30">
+                    <div class="flex items-center space-x-2 rtl:space-x-reverse">
+                        <span class="text-xl">🚀</span>
+                        <h3 class="text-xs font-bold text-white" x-text="currentLang==='ar'?'عناوين الوصول المباشر للراوتر':'Direct Access URLs'">Direct Access URLs</h3>
+                    </div>
+
+                    <p class="text-3xs text-slate-400" x-text="currentLang==='ar'?'بمجرد اتصالك عبر VPN، يمكنك فتح لوحة تحكم الراوتر بالكامل من أي متصفح في العالم عبر العناوين التالية:':'Once connected to VPN, access FluxWAN admin dashboard from any device worldwide:'"></p>
+
+                    <div class="space-y-1.5 font-mono text-3xs">
+                        <div class="p-2 rounded-lg bg-indigo-950/40 border border-indigo-900/60 flex items-center justify-between">
+                            <div class="truncate">
+                                <span class="text-indigo-400 font-bold block text-4xs uppercase">WireGuard URL</span>
+                                <span class="text-white font-semibold">http://10.250.0.1:8080</span>
+                            </div>
+                            <button type="button" @click="copyToClipboard('http://10.250.0.1:8080')" class="text-slate-400 hover:text-white text-4xs">📋</button>
+                        </div>
+                        <template x-if="vpnStatus.zerotier && vpnStatus.zerotier.networks && vpnStatus.zerotier.networks.length > 0 && vpnStatus.zerotier.networks[0].assigned_ips">
+                            <div class="p-2 rounded-lg bg-amber-950/40 border border-amber-900/60 flex items-center justify-between">
+                                <div class="truncate">
+                                    <span class="text-amber-400 font-bold block text-4xs uppercase">ZeroTier URL</span>
+                                    <span class="text-white font-semibold" x-text="'http://' + vpnStatus.zerotier.networks[0].assigned_ips.split('/')[0] + ':8080'"></span>
+                                </div>
+                                <button type="button" @click="copyToClipboard('http://' + vpnStatus.zerotier.networks[0].assigned_ips.split('/')[0] + ':8080')" class="text-slate-400 hover:text-white text-4xs">📋</button>
+                            </div>
+                        </template>
+                    </div>
+
+                    <div class="p-2 rounded-lg bg-emerald-950/20 border border-emerald-900/40 text-4xs text-emerald-400 flex items-center gap-1.5">
+                        <span>🛡️</span>
+                        <span x-text="currentLang==='ar'?'جدار الحماية يسمح بمرور حركة لوحة التحكم ومنفذ SSH تلقائياً عبر الواجهات الافتراضية.':'Firewall automatically permits Web Dashboard and SSH on virtual tunnels.'"></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- WireGuard Peers Management Section -->
+            <div class="glass-card p-6 rounded-2xl border border-slate-800 space-y-4">
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                    <div class="flex items-center space-x-2 rtl:space-x-reverse">
+                        <span class="text-lg">📱</span>
+                        <div>
+                            <h3 class="text-xs font-bold text-white" x-text="currentLang==='ar'?'أجهزة ومشتركو WireGuard (Peers)':'WireGuard Peers &amp; Devices'">WireGuard Peers &amp; Devices</h3>
+                            <p class="text-3xs text-slate-400" x-text="currentLang==='ar'?'أضف هواتفك وحواسيبك الشخصية للتوصيل المشفر والوصول الآمن للشبكة':'Add your mobile devices and computers for encrypted remote access'"></p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button type="button" @click="openAddWgPeerModal()" class="px-3 py-1.5 rounded-xl text-2xs bg-blue-600 hover:bg-blue-500 text-white font-bold flex items-center gap-1.5 shadow-lg shadow-blue-600/25 transition">
+                            <span>➕</span>
+                            <span x-text="currentLang==='ar'?'إضافة جهاز جديد':'Add Peer'">Add Peer</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Peers Table -->
+                <div class="overflow-x-auto rounded-xl border border-slate-800/80 bg-slate-900/40">
+                    <table class="w-full text-left rtl:text-right text-xs">
+                        <thead class="bg-slate-900/90 text-3xs uppercase font-mono text-slate-400 border-b border-slate-800">
+                            <tr>
+                                <th class="p-3" x-text="currentLang==='ar'?'الجهاز':'Device / Peer'">Device / Peer</th>
+                                <th class="p-3" x-text="currentLang==='ar'?'عنوان IP الافتراضي':'Allowed IP'">Allowed IP</th>
+                                <th class="p-3" x-text="currentLang==='ar'?'الحالة والاتصال':'Status & Endpoint'">Status & Endpoint</th>
+                                <th class="p-3" x-text="currentLang==='ar'?'البيانات (تحميل / رفع)':'Transfer (RX / TX)'">Transfer</th>
+                                <th class="p-3 text-center" x-text="currentLang==='ar'?'الإجراءات':'Actions'">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800/60 font-mono text-2xs">
+                            <template x-for="peer in (vpnStatus.wireguard ? vpnStatus.wireguard.peers : [])" :key="peer.public_key">
+                                <tr class="hover:bg-slate-800/30 transition">
+                                    <td class="p-3 font-sans">
+                                        <div class="flex items-center gap-2">
+                                            <span class="p-1.5 rounded-lg bg-blue-600/10 text-blue-400 border border-blue-500/20 text-xs">💻</span>
+                                            <div>
+                                                <div class="font-bold text-white text-xs" x-text="peer.name || 'WireGuard Peer'"></div>
+                                                <div class="text-4xs text-slate-500 font-mono" x-text="peer.public_key.substring(0, 16) + '...'"></div>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td class="p-3">
+                                        <span class="font-bold text-indigo-300" x-text="peer.allowed_ips"></span>
+                                    </td>
+                                    <td class="p-3">
+                                        <div class="space-y-0.5">
+                                            <div class="flex items-center gap-1.5">
+                                                <span class="w-2 h-2 rounded-full" :class="(peer.latest_handshake && (Date.now()/1000 - peer.latest_handshake) < 180) ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'"></span>
+                                                <span class="text-3xs font-bold"
+                                                      :class="(peer.latest_handshake && (Date.now()/1000 - peer.latest_handshake) < 180) ? 'text-emerald-400' : 'text-slate-500'"
+                                                      x-text="(peer.latest_handshake && (Date.now()/1000 - peer.latest_handshake) < 180) ? (currentLang==='ar'?'متصل الآن':'ONLINE') : formatLastSeen(peer.latest_handshake)"></span>
+                                            </div>
+                                            <div x-show="peer.last_endpoint" class="text-4xs text-slate-400" x-text="peer.last_endpoint"></div>
+                                        </div>
+                                    </td>
+                                    <td class="p-3 text-3xs text-slate-300">
+                                        <div>⬇️ <span x-text="formatBytes(peer.rx_bytes || 0)">0 B</span></div>
+                                        <div>⬆️ <span x-text="formatBytes(peer.tx_bytes || 0)">0 B</span></div>
+                                    </td>
+                                    <td class="p-3">
+                                        <div class="flex items-center justify-center gap-1.5 font-sans">
+                                            <button type="button" @click="showWgPeerQr(peer)" class="p-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 border border-indigo-500/30 text-3xs flex items-center gap-1" :title="currentLang==='ar'?'عرض رمز QR':'Show QR Code'">
+                                                <span>📱</span>
+                                                <span class="hidden md:inline" x-text="currentLang==='ar'?'QR':'QR'">QR</span>
+                                            </button>
+                                            <button type="button" @click="downloadWgClientConf(peer)" class="p-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/40 text-blue-300 border border-blue-500/30 text-3xs flex items-center gap-1" :title="currentLang==='ar'?'تحميل ملف التكوين':'Download .conf'">
+                                                <span>📥</span>
+                                                <span class="hidden md:inline" x-text="currentLang==='ar'?'تحميل .conf':'.conf'">.conf</span>
+                                            </button>
+                                            <button type="button" @click="deleteWgPeer(peer.public_key)" class="p-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600/40 text-rose-300 border border-rose-500/30 text-3xs" :title="currentLang==='ar'?'حذف':'Delete'">
+                                                🗑️
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </template>
+                            <tr x-show="!vpnStatus.wireguard || !vpnStatus.wireguard.peers || vpnStatus.wireguard.peers.length === 0">
+                                <td colspan="5" class="p-6 text-center text-slate-500 text-xs font-sans">
+                                    <div class="space-y-1">
+                                        <div class="text-xl">📭</div>
+                                        <div x-text="currentLang==='ar'?'لا يوجد أجهزة مضافة حتى الآن. انقر على &quot;إضافة جهاز جديد&quot; لتوليد إعدادات الاتصال تلقائياً.':'No WireGuard peers added yet. Click &quot;Add Peer&quot; to auto-generate client configuration.'">No WireGuard peers added yet.</div>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- ZeroTier Joined Networks Section -->
+            <div class="glass-card p-6 rounded-2xl border border-slate-800 space-y-4">
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                    <div class="flex items-center space-x-2 rtl:space-x-reverse">
+                        <span class="text-lg">🕸️</span>
+                        <div>
+                            <h3 class="text-xs font-bold text-white" x-text="currentLang==='ar'?'شبكات ZeroTier المنضم إليها':'ZeroTier Joined Networks'">ZeroTier Joined Networks</h3>
+                            <p class="text-3xs text-slate-400" x-text="currentLang==='ar'?'الشبكات السحابية المشتركة (SDN Mesh) لتخطي مشاكل الـ NAT والآي بي الحقيقي بالكامل':'ZeroTier SDN Virtual Networks allowing seamless direct connection through carrier-grade NAT'"></p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button type="button" @click="openJoinZtModal()" class="px-3 py-1.5 rounded-xl text-2xs bg-amber-600 hover:bg-amber-500 text-white font-bold flex items-center gap-1.5 shadow-lg shadow-amber-600/25 transition">
+                            <span>➕</span>
+                            <span x-text="currentLang==='ar'?'انضمام لشبكة جديدة':'Join Network'">Join Network</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- ZeroTier Networks Table -->
+                <div class="overflow-x-auto rounded-xl border border-slate-800/80 bg-slate-900/40">
+                    <table class="w-full text-left rtl:text-right text-xs">
+                        <thead class="bg-slate-900/90 text-3xs uppercase font-mono text-slate-400 border-b border-slate-800">
+                            <tr>
+                                <th class="p-3" x-text="currentLang==='ar'?'معرّف الشبكة (Network ID)':'Network ID'">Network ID</th>
+                                <th class="p-3" x-text="currentLang==='ar'?'الاسم / الوصف':'Name / Description'">Name</th>
+                                <th class="p-3" x-text="currentLang==='ar'?'حالة الاتصال':'Status'">Status</th>
+                                <th class="p-3" x-text="currentLang==='ar'?'عنوان IP الافتراضي':'Assigned IP'">Assigned IP</th>
+                                <th class="p-3" x-text="currentLang==='ar'?'الواجهة':'Device'">Device</th>
+                                <th class="p-3 text-center" x-text="currentLang==='ar'?'الإجراءات':'Actions'">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800/60 font-mono text-2xs">
+                            <template x-for="net in (vpnStatus.zerotier ? vpnStatus.zerotier.networks : [])" :key="net.nwid">
+                                <tr class="hover:bg-slate-800/30 transition">
+                                    <td class="p-3">
+                                        <div class="flex items-center gap-1.5">
+                                            <span class="font-extrabold text-amber-300" x-text="net.nwid"></span>
+                                            <button type="button" @click="copyToClipboard(net.nwid)" class="text-slate-500 hover:text-white text-4xs">📋</button>
+                                        </div>
+                                    </td>
+                                    <td class="p-3 font-sans text-white font-semibold" x-text="net.name || 'ZeroTier Network'"></td>
+                                    <td class="p-3">
+                                        <span class="px-2 py-0.5 rounded-full text-3xs font-bold"
+                                              :class="net.status === 'OK' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : net.status === 'ACCESS_DENIED' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'"
+                                              x-text="net.status === 'OK' ? (currentLang==='ar'?'معتمد ومتصل (OK)':'OK') : net.status === 'ACCESS_DENIED' ? (currentLang==='ar'?'بانتظار التفويض (Authorize)':'ACCESS_DENIED') : (net.status || 'REQUESTING')"></span>
+                                    </td>
+                                    <td class="p-3">
+                                        <span class="font-bold text-white" x-text="net.assigned_ips || (currentLang==='ar'?'قيد الطلب...':'Waiting for IP...')"></span>
+                                    </td>
+                                    <td class="p-3 text-slate-400" x-text="net.dev_name || '-'"></td>
+                                    <td class="p-3">
+                                        <div class="flex items-center justify-center gap-1.5 font-sans">
+                                            <template x-if="net.assigned_ips">
+                                                <a :href="'http://' + net.assigned_ips.split('/')[0] + ':8080'" target="_blank" class="px-2 py-1 rounded bg-blue-600/20 hover:bg-blue-600/40 text-blue-300 border border-blue-500/30 text-3xs flex items-center gap-1">
+                                                    <span>🔗</span>
+                                                    <span x-text="currentLang==='ar'?'فتح اللوحة':'Dashboard'">Dashboard</span>
+                                                </a>
+                                            </template>
+                                            <button type="button" @click="leaveZtNetwork(net.nwid)" class="px-2 py-1 rounded bg-rose-600/20 hover:bg-rose-600/40 text-rose-300 border border-rose-500/30 text-3xs flex items-center gap-1">
+                                                <span>🚪</span>
+                                                <span x-text="currentLang==='ar'?'مغادرة':'Leave'">Leave</span>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </template>
+                            <tr x-show="!vpnStatus.zerotier || !vpnStatus.zerotier.networks || vpnStatus.zerotier.networks.length === 0">
+                                <td colspan="6" class="p-6 text-center text-slate-500 text-xs font-sans">
+                                    <div class="space-y-1">
+                                        <div class="text-xl">🌐</div>
+                                        <div x-text="currentLang==='ar'?'لم يتم الانضمام لأي شبكة ZeroTier بعد. انقر على &quot;انضمام لشبكة جديدة&quot; وأدخل معرّف الشبكة.':'No ZeroTier networks joined yet. Click &quot;Join Network&quot; to connect.'">No ZeroTier networks joined yet.</div>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= MODALS FOR VPN & REMOTE MANAGEMENT ================= -->
+
+        <!-- 1. Add WireGuard Peer Modal -->
+        <div x-show="showAddWgPeerModal" x-transition class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4" x-cloak>
+            <div class="glass-card max-w-lg w-full p-6 rounded-2xl border border-slate-700 space-y-4 shadow-2xl">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <div class="flex items-center space-x-2 rtl:space-x-reverse">
+                        <span class="text-xl">📱</span>
+                        <h3 class="text-sm font-bold text-white" x-text="currentLang==='ar' ? 'إضافة جهاز / مشترك WireGuard' : 'Add WireGuard Peer'">Add WireGuard Peer</h3>
+                    </div>
+                    <button type="button" @click="showAddWgPeerModal = false" class="text-slate-400 hover:text-white text-xs px-2 py-1">✕</button>
+                </div>
+
+                <div class="space-y-3 text-xs">
+                    <div>
+                        <label class="text-3xs text-slate-400 block mb-1" x-text="currentLang==='ar' ? 'اسم الجهاز أو الشخص (Device Name)' : 'Peer / Device Label'">Peer Label</label>
+                        <input type="text" x-model="wgPeerForm.name" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white" placeholder="e.g. Ahmed iPhone / Home PC">
+                    </div>
+
+                    <div>
+                        <label class="text-3xs text-slate-400 block mb-1" x-text="currentLang==='ar' ? 'عنوان IP المخصص للجهاز (Allowed IPs)' : 'Client Assigned IP (AllowedIPs)'">Client Assigned IP</label>
+                        <input type="text" x-model="wgPeerForm.allowed_ips" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono" placeholder="10.250.0.2/32">
+                        <span class="text-4xs text-slate-500" x-text="currentLang==='ar' ? 'العنوان الذي سيأخذه الهاتف أو الحاسوب داخل نفق الـ VPN' : 'Virtual IP assigned to this client inside VPN tunnel'"></span>
+                    </div>
+
+                    <!-- Key Generation Mode Selector -->
+                    <div class="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
+                        <label class="flex items-center gap-2 cursor-pointer text-xs text-white font-bold">
+                            <input type="checkbox" x-model="wgPeerForm.auto_generate" class="rounded bg-slate-900 border-slate-700 text-blue-600 focus:ring-0">
+                            <span x-text="currentLang==='ar' ? 'توليد المفاتيح والباركود تلقائياً (موصى به)' : 'Auto-Generate Keys &amp; QR Code (Recommended)'">Auto-Generate Keys &amp; QR Code</span>
+                        </label>
+                        <p class="text-4xs text-slate-400" x-text="currentLang==='ar' ? 'يقوم الراوتر بإنشاء المفتاح الخاص والعام للعميل تلقائياً، وإظهار رمز QR فوري لمسحه بكاميرا الهاتف أو تحميل ملف التكوين.' : 'FluxWAN generates client private/public keypair and immediately presents a scannable QR Code &amp; download link.'"></p>
+                    </div>
+
+                    <div x-show="!wgPeerForm.auto_generate" class="space-y-2">
+                        <div>
+                            <label class="text-3xs text-slate-400 block mb-1" x-text="currentLang==='ar' ? 'المفتاح العام للعميل (Client Public Key)' : 'Client Public Key'">Client Public Key</label>
+                            <input type="text" x-model="wgPeerForm.public_key" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono text-3xs" placeholder="Base64 32-byte WireGuard public key">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="text-3xs text-slate-400 block mb-1" x-text="currentLang==='ar' ? 'مهلة الحفاظ على الاتصال (Keepalive بالثواني)' : 'Persistent Keepalive (Seconds)'">Persistent Keepalive</label>
+                        <input type="number" x-model.number="wgPeerForm.persistent_keepalive" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono" placeholder="25">
+                        <span class="text-4xs text-slate-500" x-text="currentLang==='ar' ? '25 ثانية لضمان بقاء النفق نشطاً وتخطي جدران الحماية للشركات.' : '25s ensures tunnel stays alive through NAT routers.'"></span>
+                    </div>
+                </div>
+
+                <div class="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+                    <button type="button" @click="showAddWgPeerModal = false" class="px-4 py-2 rounded-xl text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 transition" x-text="currentLang==='ar'?'إلغاء':'Cancel'">Cancel</button>
+                    <button type="button" @click="saveWgPeer()" class="px-5 py-2 rounded-xl text-xs bg-blue-600 hover:bg-blue-500 text-white font-bold transition shadow-lg shadow-blue-600/30" x-text="currentLang==='ar'?'حفظ وتوليد QR':'Save &amp; Generate QR'">Save &amp; Generate QR</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. WireGuard Server Settings Modal -->
+        <div x-show="showWgServerModal" x-transition class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4" x-cloak>
+            <div class="glass-card max-w-lg w-full p-6 rounded-2xl border border-slate-700 space-y-4 shadow-2xl">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <div class="flex items-center space-x-2 rtl:space-x-reverse">
+                        <span class="text-xl">⚙️</span>
+                        <h3 class="text-sm font-bold text-white" x-text="currentLang==='ar' ? 'إعدادات خادم WireGuard' : 'WireGuard Server Configuration'">WireGuard Server Configuration</h3>
+                    </div>
+                    <button type="button" @click="showWgServerModal = false" class="text-slate-400 hover:text-white text-xs px-2 py-1">✕</button>
+                </div>
+
+                <div class="space-y-3 text-xs">
+                    <div>
+                        <label class="text-3xs text-slate-400 block mb-1" x-text="currentLang==='ar' ? 'منفذ الاستماع (Listen Port UDP)' : 'Listen Port (UDP)'">Listen Port</label>
+                        <input type="number" x-model.number="wgServerForm.listen_port" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono" placeholder="51820">
+                    </div>
+
+                    <div>
+                        <label class="text-3xs text-slate-400 block mb-1" x-text="currentLang==='ar' ? 'عنوان وشبكة الخادم (Server Subnet/CIDR)' : 'Server Subnet (CIDR)'">Server Subnet</label>
+                        <input type="text" x-model="wgServerForm.address" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono" placeholder="10.250.0.1/24">
+                    </div>
+
+                    <div class="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
+                        <div class="flex items-center justify-between">
+                            <span class="text-3xs text-slate-400" x-text="currentLang==='ar'?'المفتاح العام الحالي:':'Current Public Key:'">Current Public Key:</span>
+                            <button type="button" @click="regenerateWgServerKeys()" class="text-4xs text-amber-400 hover:text-amber-300 font-bold">🔄 <span x-text="currentLang==='ar'?'توليد مفاتيح جديدة للسيرفر':'Regenerate Server Keypair'">Regenerate</span></button>
+                        </div>
+                        <div class="p-2 rounded bg-slate-950 font-mono text-3xs text-slate-300 truncate" x-text="wgServerForm.public_key"></div>
+                    </div>
+
+                    <div class="p-3 rounded-xl bg-emerald-950/20 border border-emerald-900/40">
+                        <label class="flex items-center gap-2 cursor-pointer text-xs text-emerald-300 font-bold">
+                            <input type="checkbox" x-model="wgServerForm.allow_remote_mgmt" class="rounded bg-slate-900 border-slate-700 text-emerald-500 focus:ring-0">
+                            <span x-text="currentLang==='ar' ? 'السماح بإدارة الراوتر وفتح لوحة التحكم عبر WireGuard' : 'Allow Remote Web &amp; SSH Management via WireGuard'">Allow Remote Web &amp; SSH Management via WireGuard</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+                    <button type="button" @click="showWgServerModal = false" class="px-4 py-2 rounded-xl text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 transition" x-text="currentLang==='ar'?'إلغاء':'Cancel'">Cancel</button>
+                    <button type="button" @click="saveWgServerConfig()" class="px-5 py-2 rounded-xl text-xs bg-indigo-600 hover:bg-indigo-500 text-white font-bold transition shadow-lg shadow-indigo-600/30" x-text="currentLang==='ar'?'حفظ وتطبيق':'Save &amp; Apply'">Save &amp; Apply</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. Join ZeroTier Network Modal -->
+        <div x-show="showJoinZtModal" x-transition class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4" x-cloak>
+            <div class="glass-card max-w-md w-full p-6 rounded-2xl border border-slate-700 space-y-4 shadow-2xl">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <div class="flex items-center space-x-2 rtl:space-x-reverse">
+                        <span class="text-xl">🌐</span>
+                        <h3 class="text-sm font-bold text-white" x-text="currentLang==='ar' ? 'الانضمام إلى شبكة ZeroTier' : 'Join ZeroTier Network'">Join ZeroTier Network</h3>
+                    </div>
+                    <button type="button" @click="showJoinZtModal = false" class="text-slate-400 hover:text-white text-xs px-2 py-1">✕</button>
+                </div>
+
+                <div class="space-y-3 text-xs">
+                    <div>
+                        <label class="text-3xs text-slate-400 block mb-1" x-text="currentLang==='ar' ? 'معرّف الشبكة المكون من 16 خانة (Network ID)' : '16-Hex ZeroTier Network ID'">Network ID</label>
+                        <input type="text" x-model="ztJoinForm.nwid" maxlength="16" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-amber-300 font-mono text-sm uppercase tracking-wider" placeholder="8056bf8b9113054c">
+                    </div>
+
+                    <div>
+                        <label class="text-3xs text-slate-400 block mb-1" x-text="currentLang==='ar' ? 'اسم أو وصف توضيحي للشبكة' : 'Friendly Network Label'">Network Label</label>
+                        <input type="text" x-model="ztJoinForm.name" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white" placeholder="e.g. HQ Office Mesh / Data Center">
+                    </div>
+
+                    <div class="p-3 rounded-xl bg-amber-950/20 border border-amber-900/40 text-3xs text-amber-300 space-y-1">
+                        <div class="font-bold flex items-center gap-1.5">
+                            <span>⚠️</span>
+                            <span x-text="currentLang==='ar'?'تذكير هام بتفويض الجهاز:':'Important Authorization Reminder:'">Important Authorization Reminder:</span>
+                        </div>
+                        <p x-text="currentLang==='ar' ? 'بعد الانضمام، افتح لوحة my.zerotier.com وابحث عن معرّف الراوتر ' + (vpnStatus.zerotier ? vpnStatus.zerotier.node_id : '') + ' ثم ضع علامة الصح (Auth) ليتم تزويده بالـ IP الافتراضي.' : 'After joining, open my.zerotier.com and check the (Auth) box for Router Node ID ' + (vpnStatus.zerotier ? vpnStatus.zerotier.node_id : '') + ' to allocate IP.'"></p>
+                    </div>
+                </div>
+
+                <div class="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+                    <button type="button" @click="showJoinZtModal = false" class="px-4 py-2 rounded-xl text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 transition" x-text="currentLang==='ar'?'إلغاء':'Cancel'">Cancel</button>
+                    <button type="button" @click="joinZtNetwork()" :disabled="!ztJoinForm.nwid || ztJoinForm.nwid.length < 16" class="px-5 py-2 rounded-xl text-xs bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-white font-bold transition shadow-lg shadow-amber-600/30" x-text="currentLang==='ar'?'انضمام الآن':'Join Now'">Join Now</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 4. Client QR Code & Configuration Export Modal -->
+        <div x-show="showClientQrModal" x-transition class="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4" x-cloak>
+            <div class="glass-card max-w-md w-full p-6 rounded-2xl border border-slate-700 space-y-4 shadow-2xl text-center">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-3 text-left rtl:text-right">
+                    <div class="flex items-center space-x-2 rtl:space-x-reverse">
+                        <span class="text-xl">📱</span>
+                        <div>
+                            <h3 class="text-sm font-bold text-white" x-text="qrModalTitle || 'WireGuard Connection'">WireGuard Connection</h3>
+                            <p class="text-3xs text-slate-400" x-text="currentLang==='ar' ? 'امسح الباركود بتطبيق WireGuard على الهاتف أو حمّل ملف التكوين' : 'Scan with official WireGuard app or download .conf file'"></p>
+                        </div>
+                    </div>
+                    <button type="button" @click="showClientQrModal = false" class="text-slate-400 hover:text-white text-xs px-2 py-1">✕</button>
+                </div>
+
+                <!-- QR Code Box -->
+                <div class="flex flex-col items-center justify-center py-2">
+                    <div class="p-4 rounded-2xl bg-white shadow-2xl inline-block" id="wg-qrcode-container">
+                        <!-- Canvas / SVG generated by qrcode.js or inline renderer -->
+                    </div>
+                    <p class="text-4xs text-slate-400 mt-2" x-text="currentLang==='ar' ? 'متوافق تماماً مع تطبيق WireGuard الرسمي على iPhone و Android' : 'Fully compatible with official WireGuard app on iPhone &amp; Android'"></p>
+                </div>
+
+                <!-- Config Snippet -->
+                <div class="text-left rtl:text-right space-y-1">
+                    <div class="flex items-center justify-between text-3xs text-slate-400">
+                        <span x-text="currentLang==='ar' ? 'نص ملف التكوين (.conf)' : 'Client Configuration (.conf)'">Client Configuration (.conf)</span>
+                        <button type="button" @click="copyToClipboard(qrModalConfig)" class="text-blue-400 hover:text-blue-300 font-bold text-3xs">📋 <span x-text="currentLang==='ar'?'نسخ النص':'Copy Text'">Copy</span></button>
+                    </div>
+                    <textarea readonly x-model="qrModalConfig" class="w-full h-24 p-2.5 rounded-xl bg-slate-950 border border-slate-800 font-mono text-3xs text-slate-300 resize-none select-all"></textarea>
+                </div>
+
+                <div class="flex items-center justify-center gap-2 pt-2">
+                    <button type="button" @click="downloadRawConfig(qrModalConfig, (qrModalTitle || 'wireguard') + '.conf')" class="w-full py-2.5 rounded-xl text-xs bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold shadow-lg shadow-blue-500/25 flex items-center justify-center gap-1.5 transition">
+                        <span>📥</span>
+                        <span x-text="currentLang==='ar' ? 'تحميل ملف التكوين (.conf)' : 'Download .conf File'">Download .conf File</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
         </main><!-- #main-content -->
     </div><!-- #app-shell -->
 
@@ -4241,6 +4744,7 @@
                 tab_groups: "WAN Groups & PBR",
                 tab_lan: "LAN & DHCP",
                 tab_broadband: "Broadband (PPPoE)",
+                tab_vpn: "VPN & Remote Access",
                 tab_qos: "QoS & Limits",
                 tab_dpi: "L7 DPI & Apps",
                 tab_services: "Services & Alerts",
@@ -4300,6 +4804,7 @@
                 tab_groups: "مجموعات التوجيه PBR",
                 tab_lan: "الشبكة المحلية و DHCP",
                 tab_broadband: "سيرفر البرودباند",
+                tab_vpn: "شبكات VPN والوصول عن بعد",
                 tab_qos: "جودة الخدمة وتحديد السرعة",
                 tab_dpi: "فحص الحزم L7 والتطبيقات",
                 tab_services: "الخدمات والتنبيهات",
@@ -4510,6 +5015,367 @@
                     rate_up_kbps: 5120,
                     validity_days: 30,
                     description: ''
+                },
+                vpnStatus: {
+                    wireguard: {
+                        enabled: false,
+                        interface: 'wg0',
+                        listen_port: 51820,
+                        address: '10.250.0.1/24',
+                        public_key: '',
+                        allow_remote_mgmt: true,
+                        peer_count: 0,
+                        peers: []
+                    },
+                    zerotier: {
+                        enabled: false,
+                        node_id: '',
+                        allow_remote_mgmt: true,
+                        network_count: 0,
+                        networks: []
+                    }
+                },
+                showAddWgPeerModal: false,
+                showWgServerModal: false,
+                showJoinZtModal: false,
+                showClientQrModal: false,
+                qrModalTitle: '',
+                qrModalConfig: '',
+                wgPeerForm: {
+                    name: '',
+                    allowed_ips: '10.250.0.2/32',
+                    auto_generate: true,
+                    client_private_key: '',
+                    public_key: '',
+                    preshared_key: '',
+                    endpoint: '',
+                    persistent_keepalive: 25,
+                    enabled: true
+                },
+                wgServerForm: {
+                    listen_port: 51820,
+                    address: '10.250.0.1/24',
+                    public_key: '',
+                    allow_remote_mgmt: true
+                },
+                ztJoinForm: {
+                    nwid: '',
+                    name: ''
+                },
+                fetchVpnStatus() {
+                    if (!this.authToken) return;
+                    fetch('/api/v1/vpn/status', {
+                        headers: { 'X-Auth-Token': this.authToken }
+                    })
+                    .then(r => r.json())
+                    .then(d => {
+                        if (d && d.status === 'ok') {
+                            this.vpnStatus = d;
+                            if (this.config && this.config.vpn) {
+                                this.config.vpn = d;
+                            }
+                        }
+                    })
+                    .catch(e => console.error('Error fetching VPN status:', e));
+                },
+                toggleWireGuard(enable) {
+                    if (!this.authToken) return;
+                    fetch('/api/v1/vpn/wireguard/toggle', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': this.authToken },
+                        body: JSON.stringify({ enabled: !!enable })
+                    })
+                    .then(r => r.json())
+                    .then(res => {
+                        this.showToast(enable ? (this.currentLang === 'ar' ? 'تم تشغيل WireGuard' : 'WireGuard Enabled') : (this.currentLang === 'ar' ? 'تم تعطيل WireGuard' : 'WireGuard Disabled'));
+                        this.fetchVpnStatus();
+                    })
+                    .catch(err => this.showToast('Failed to toggle WireGuard', 'error'));
+                },
+                toggleZeroTier(enable) {
+                    if (!this.authToken) return;
+                    fetch('/api/v1/vpn/zerotier/toggle', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': this.authToken },
+                        body: JSON.stringify({ enabled: !!enable })
+                    })
+                    .then(r => r.json())
+                    .then(res => {
+                        this.showToast(enable ? (this.currentLang === 'ar' ? 'تم تشغيل ZeroTier' : 'ZeroTier Enabled') : (this.currentLang === 'ar' ? 'تم تعطيل ZeroTier' : 'ZeroTier Disabled'));
+                        this.fetchVpnStatus();
+                    })
+                    .catch(err => this.showToast('Failed to toggle ZeroTier', 'error'));
+                },
+                openAddWgPeerModal() {
+                    let nextOctet = 2;
+                    if (this.vpnStatus && this.vpnStatus.wireguard && this.vpnStatus.wireguard.peers) {
+                        const peers = this.vpnStatus.wireguard.peers;
+                        let maxNum = 1;
+                        peers.forEach(p => {
+                            if (p.allowed_ips) {
+                                const m = p.allowed_ips.match(/10\.250\.0\.(\d+)/);
+                                if (m && m[1]) {
+                                    const n = parseInt(m[1]);
+                                    if (n > maxNum) maxNum = n;
+                                }
+                            }
+                        });
+                        nextOctet = maxNum + 1;
+                    }
+                    this.wgPeerForm = {
+                        name: '',
+                        allowed_ips: '10.250.0.' + nextOctet + '/32',
+                        auto_generate: true,
+                        client_private_key: '',
+                        public_key: '',
+                        preshared_key: '',
+                        endpoint: '',
+                        persistent_keepalive: 25,
+                        enabled: true
+                    };
+                    this.showAddWgPeerModal = true;
+                },
+                saveWgPeer() {
+                    if (!this.authToken) return;
+                    if (!this.wgPeerForm.name) {
+                        this.showToast(this.currentLang === 'ar' ? 'يرجى كتابة اسم للجهاز' : 'Please specify a peer name', 'error');
+                        return;
+                    }
+                    if (!this.wgPeerForm.allowed_ips) {
+                        this.showToast(this.currentLang === 'ar' ? 'يرجى تحديد عنوان IP المسموح' : 'Please specify AllowedIPs', 'error');
+                        return;
+                    }
+
+                    const doSave = (clientPriv, clientPub) => {
+                        const payload = {
+                            name: this.wgPeerForm.name,
+                            public_key: clientPub,
+                            preshared_key: this.wgPeerForm.preshared_key || '',
+                            allowed_ips: this.wgPeerForm.allowed_ips,
+                            endpoint: this.wgPeerForm.endpoint || '',
+                            persistent_keepalive: parseInt(this.wgPeerForm.persistent_keepalive) || 25,
+                            enabled: true
+                        };
+
+                        fetch('/api/v1/vpn/wireguard/peers', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'X-Auth-Token': this.authToken },
+                            body: JSON.stringify(payload)
+                        })
+                        .then(r => r.json())
+                        .then(res => {
+                            this.showAddWgPeerModal = false;
+                            this.showToast(this.currentLang === 'ar' ? 'تمت إضافة الجهاز بنجاح' : 'Peer added successfully');
+                            this.fetchVpnStatus();
+
+                            if (clientPriv) {
+                                this.generateAndShowQrModal(payload, clientPriv);
+                            }
+                        })
+                        .catch(e => this.showToast('Failed to save peer', 'error'));
+                    };
+
+                    if (this.wgPeerForm.auto_generate) {
+                        fetch('/api/v1/vpn/wireguard/genkeys', {
+                            method: 'POST',
+                            headers: { 'X-Auth-Token': this.authToken }
+                        })
+                        .then(r => r.json())
+                        .then(keys => {
+                            if (keys && keys.private_key && keys.public_key) {
+                                doSave(keys.private_key, keys.public_key);
+                            } else {
+                                this.showToast('Failed to generate keypair', 'error');
+                            }
+                        })
+                        .catch(e => this.showToast('Key generation error', 'error'));
+                    } else {
+                        if (!this.wgPeerForm.public_key) {
+                            this.showToast(this.currentLang === 'ar' ? 'يرجى إدخال المفتاح العام' : 'Public key required', 'error');
+                            return;
+                        }
+                        doSave('', this.wgPeerForm.public_key);
+                    }
+                },
+                deleteWgPeer(pubkey) {
+                    if (!confirm(this.currentLang === 'ar' ? 'هل أنت متأكد من حذف هذا الجهاز من شبكة WireGuard؟' : 'Are you sure you want to remove this WireGuard peer?')) return;
+                    if (!this.authToken) return;
+                    fetch('/api/v1/vpn/wireguard/peers/delete', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': this.authToken },
+                        body: JSON.stringify({ public_key: pubkey })
+                    })
+                    .then(r => r.json())
+                    .then(res => {
+                        this.showToast(this.currentLang === 'ar' ? 'تم حذف الجهاز' : 'Peer removed');
+                        this.fetchVpnStatus();
+                    })
+                    .catch(e => this.showToast('Failed to delete peer', 'error'));
+                },
+                generateAndShowQrModal(peer, clientPriv) {
+                    this.qrModalTitle = peer.name || 'WireGuard Client';
+                    fetch('/api/v1/vpn/wireguard/client-conf', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': this.authToken },
+                        body: JSON.stringify({
+                            public_key: peer.public_key,
+                            client_private_key: clientPriv || ''
+                        })
+                    })
+                    .then(r => r.json())
+                    .then(res => {
+                        if (res && res.config) {
+                            this.qrModalConfig = res.config;
+                            this.showClientQrModal = true;
+                            this.$nextTick(() => {
+                                this.renderQrCode(this.qrModalConfig);
+                            });
+                        }
+                    })
+                    .catch(e => this.showToast('Failed to generate client config', 'error'));
+                },
+                showWgPeerQr(peer) {
+                    this.generateAndShowQrModal(peer, '');
+                },
+                downloadWgClientConf(peer) {
+                    if (!this.authToken) return;
+                    fetch('/api/v1/vpn/wireguard/client-conf', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': this.authToken },
+                        body: JSON.stringify({ public_key: peer.public_key })
+                    })
+                    .then(r => r.json())
+                    .then(res => {
+                        if (res && res.config) {
+                            this.downloadRawConfig(res.config, (peer.name || 'wireguard_client').replace(/[^a-zA-Z0-9_-]/g, '_') + '.conf');
+                        }
+                    })
+                    .catch(e => this.showToast('Failed to download configuration', 'error'));
+                },
+                downloadRawConfig(content, filename) {
+                    const blob = new Blob([content], { type: 'text/plain' });
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                },
+                renderQrCode(text) {
+                    const container = document.getElementById('wg-qrcode-container');
+                    if (!container) return;
+                    container.innerHTML = '';
+                    if (window.QRCode) {
+                        try {
+                            new QRCode(container, {
+                                text: text,
+                                width: 220,
+                                height: 220,
+                                colorDark: '#000000',
+                                colorLight: '#ffffff',
+                                correctLevel: QRCode.CorrectLevel.M
+                            });
+                            return;
+                        } catch (err) {
+                            console.warn('QRCode JS render error:', err);
+                        }
+                    }
+                    container.innerHTML = '<img src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=' + encodeURIComponent(text) + '" alt="QR Code" width="220" height="220" class="rounded">';
+                },
+                openWgServerModal() {
+                    const wg = this.vpnStatus.wireguard || {};
+                    this.wgServerForm = {
+                        listen_port: wg.listen_port || 51820,
+                        address: wg.address || '10.250.0.1/24',
+                        public_key: wg.public_key || '',
+                        allow_remote_mgmt: wg.allow_remote_mgmt !== false
+                    };
+                    this.showWgServerModal = true;
+                },
+                regenerateWgServerKeys() {
+                    if (!confirm(this.currentLang === 'ar' ? 'توليد مفاتيح جديدة للسيرفر سيتطلب إعادة تكوين العملاء المتصلين. هل أنت متأكد؟' : 'Regenerating server keys will require all peers to update the server public key. Continue?')) return;
+                    fetch('/api/v1/vpn/wireguard/genkeys', {
+                        method: 'POST',
+                        headers: { 'X-Auth-Token': this.authToken }
+                    })
+                    .then(r => r.json())
+                    .then(keys => {
+                        if (keys && keys.private_key && keys.public_key) {
+                            this.saveWgServerConfigWithKeys(keys.private_key, keys.public_key);
+                        }
+                    })
+                    .catch(e => this.showToast('Key generation failed', 'error'));
+                },
+                saveWgServerConfigWithKeys(priv, pub) {
+                    const payload = {
+                        listen_port: parseInt(this.wgServerForm.listen_port) || 51820,
+                        address: this.wgServerForm.address,
+                        allow_remote_mgmt: !!this.wgServerForm.allow_remote_mgmt
+                    };
+                    if (priv && pub) {
+                        payload.private_key = priv;
+                        payload.public_key = pub;
+                    }
+                    fetch('/api/v1/vpn/wireguard/config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': this.authToken },
+                        body: JSON.stringify(payload)
+                    })
+                    .then(r => r.json())
+                    .then(res => {
+                        this.showWgServerModal = false;
+                        this.showToast(this.currentLang === 'ar' ? 'تم حفظ إعدادات خادم WireGuard' : 'WireGuard Server configuration saved');
+                        this.fetchVpnStatus();
+                    })
+                    .catch(e => this.showToast('Failed to save settings', 'error'));
+                },
+                saveWgServerConfig() {
+                    this.saveWgServerConfigWithKeys(null, null);
+                },
+                openJoinZtModal() {
+                    this.ztJoinForm = { nwid: '', name: '' };
+                    this.showJoinZtModal = true;
+                },
+                joinZtNetwork() {
+                    if (!this.authToken || !this.ztJoinForm.nwid) return;
+                    fetch('/api/v1/vpn/zerotier/join', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': this.authToken },
+                        body: JSON.stringify(this.ztJoinForm)
+                    })
+                    .then(r => r.json())
+                    .then(res => {
+                        this.showJoinZtModal = false;
+                        this.showToast(this.currentLang === 'ar' ? 'تم الانضمام لشبكة ZeroTier بنجاح' : 'Joined ZeroTier Network');
+                        this.fetchVpnStatus();
+                    })
+                    .catch(e => this.showToast('Failed to join network', 'error'));
+                },
+                leaveZtNetwork(nwid) {
+                    if (!confirm(this.currentLang === 'ar' ? 'هل أنت متأكد من مغادرة شبكة ZeroTier هذه؟' : 'Are you sure you want to leave this ZeroTier network?')) return;
+                    if (!this.authToken) return;
+                    fetch('/api/v1/vpn/zerotier/leave', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': this.authToken },
+                        body: JSON.stringify({ nwid: nwid })
+                    })
+                    .then(r => r.json())
+                    .then(res => {
+                        this.showToast(this.currentLang === 'ar' ? 'تمت مغادرة الشبكة' : 'Left network successfully');
+                        this.fetchVpnStatus();
+                    })
+                    .catch(e => this.showToast('Failed to leave network', 'error'));
+                },
+                formatLastSeen(epoch) {
+                    if (!epoch || epoch === 0) return this.currentLang === 'ar' ? 'لم يتصل بعد' : 'Never connected';
+                    const diff = Math.floor(Date.now() / 1000 - epoch);
+                    if (diff < 60) return this.currentLang === 'ar' ? 'منذ ثوانٍ' : 'Seconds ago';
+                    if (diff < 3600) return Math.floor(diff / 60) + (this.currentLang === 'ar' ? ' دقيقة مضت' : 'm ago');
+                    if (diff < 86400) return Math.floor(diff / 3600) + (this.currentLang === 'ar' ? ' ساعة مضت' : 'h ago');
+                    return Math.floor(diff / 86400) + (this.currentLang === 'ar' ? ' يوم مضى' : 'd ago');
                 },
                 fetchBroadbandStatus() {
                     if (!this.authToken) return;
@@ -5392,6 +6258,9 @@
                         if (this.currentTab === 'broadband') {
                             this.fetchBroadbandSessions();
                         }
+                        if (this.currentTab === 'vpn') {
+                            this.fetchVpnStatus();
+                        }
                         this.fetchStatus();
                     }, 3000);
                 },
@@ -5422,6 +6291,7 @@
                             this.fetchLanClients();
                             this.fetchLogs();
                             this.fetchBroadbandStatus();
+                            this.fetchVpnStatus();
                             this.initChart();
                             this.checkForUpdates(false);
                         }
@@ -5464,6 +6334,7 @@
                             this.fetchLanClients();
                             this.fetchLogs();
                             this.fetchBroadbandStatus();
+                            this.fetchVpnStatus();
                             this.initChart();
                             this.checkForUpdates(false);
                         }
