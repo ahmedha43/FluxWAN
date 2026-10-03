@@ -679,6 +679,20 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
         out_config->telegram.notify_on_recovery = true;
     }
 
+    /* Parse Carrier Stealth Shield block */
+    const char *stealth_pos = strstr(json, "\"stealth\"");
+    if (stealth_pos) {
+        out_config->stealth.enabled = extract_json_bool(stealth_pos, "enabled", true);
+        out_config->stealth.ttl_value = (uint8_t)extract_json_int(stealth_pos, "ttl_value", 64);
+        out_config->stealth.cloak_traceroute = extract_json_bool(stealth_pos, "cloak_traceroute", true);
+        out_config->stealth.block_wan_probes = extract_json_bool(stealth_pos, "block_wan_probes", true);
+    } else {
+        out_config->stealth.enabled = true;
+        out_config->stealth.ttl_value = 64;
+        out_config->stealth.cloak_traceroute = true;
+        out_config->stealth.block_wan_probes = true;
+    }
+
     /* Parse Broadband PPPoE Server block */
     pppoe_server_config_t *pppoe = &out_config->pppoe_server;
     const char *pppoe_pos = strstr(json, "\"pppoe_server\"");
@@ -733,6 +747,48 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
         }
         pppoe->mru = (uint16_t)extract_json_int(pppoe_pos, "mru", 1492);
         pppoe->mss = (uint16_t)extract_json_int(pppoe_pos, "mss", 1452);
+
+        /* Parse RADIUS / RadSec AAA block */
+        const char *rad_pos = strstr(pppoe_pos, "\"radius\"");
+        if (rad_pos) {
+            pppoe->radius.enabled = extract_json_bool(rad_pos, "enabled", false);
+            char pval[32] = {0};
+            if (extract_json_string(rad_pos, "proto", pval, sizeof(pval))) {
+                if (strcasecmp(pval, "radsec") == 0 || strcasecmp(pval, "tls") == 0) {
+                    pppoe->radius.proto = RADIUS_PROTO_RADSEC;
+                } else {
+                    pppoe->radius.proto = RADIUS_PROTO_UDP;
+                }
+            } else {
+                pppoe->radius.proto = RADIUS_PROTO_RADSEC;
+            }
+            extract_json_string(rad_pos, "server", pppoe->radius.server, sizeof(pppoe->radius.server));
+            extract_json_string(rad_pos, "secret", pppoe->radius.secret, sizeof(pppoe->radius.secret));
+            if (!pppoe->radius.secret[0] && pppoe->radius.proto == RADIUS_PROTO_RADSEC) {
+                safe_str_copy(pppoe->radius.secret, "radsec", sizeof(pppoe->radius.secret));
+            }
+            pppoe->radius.auth_port = (uint16_t)extract_json_int(rad_pos, "auth_port", pppoe->radius.proto == RADIUS_PROTO_RADSEC ? 2083 : 1812);
+            pppoe->radius.acct_port = (uint16_t)extract_json_int(rad_pos, "acct_port", pppoe->radius.proto == RADIUS_PROTO_RADSEC ? 2083 : 1813);
+            pppoe->radius.coa_port = (uint16_t)extract_json_int(rad_pos, "coa_port", 3799);
+            pppoe->radius.interim_interval = (uint32_t)extract_json_int(rad_pos, "interim_interval", 300);
+            if (!extract_json_string(rad_pos, "nas_identifier", pppoe->radius.nas_identifier, sizeof(pppoe->radius.nas_identifier))) {
+                safe_str_copy(pppoe->radius.nas_identifier, "FluxWAN-BRAS-01", sizeof(pppoe->radius.nas_identifier));
+            }
+            pppoe->radius.tls_verify_cert = extract_json_bool(rad_pos, "tls_verify_cert", false);
+            extract_json_string(rad_pos, "ca_cert_path", pppoe->radius.ca_cert_path, sizeof(pppoe->radius.ca_cert_path));
+            extract_json_string(rad_pos, "client_cert_path", pppoe->radius.client_cert_path, sizeof(pppoe->radius.client_cert_path));
+            extract_json_string(rad_pos, "client_key_path", pppoe->radius.client_key_path, sizeof(pppoe->radius.client_key_path));
+            extract_json_string(rad_pos, "sni_hostname", pppoe->radius.sni_hostname, sizeof(pppoe->radius.sni_hostname));
+        } else {
+            pppoe->radius.enabled = false;
+            pppoe->radius.proto = RADIUS_PROTO_RADSEC;
+            safe_str_copy(pppoe->radius.secret, "radsec", sizeof(pppoe->radius.secret));
+            pppoe->radius.auth_port = 2083;
+            pppoe->radius.acct_port = 2083;
+            pppoe->radius.coa_port = 3799;
+            pppoe->radius.interim_interval = 300;
+            safe_str_copy(pppoe->radius.nas_identifier, "FluxWAN-BRAS-01", sizeof(pppoe->radius.nas_identifier));
+        }
 
         /* Parse Profiles */
         const char *prof_pos = strstr(pppoe_pos, "\"profiles\"");
@@ -1328,6 +1384,14 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
     fprintf(f, "    \"streaming_balance_enabled\": %s\n", config->dpi.streaming_balance_enabled ? "true" : "false");
     fprintf(f, "  },\n");
 
+    /* Serialize Carrier Stealth Shield */
+    fprintf(f, "  \"stealth\": {\n");
+    fprintf(f, "    \"enabled\": %s,\n", config->stealth.enabled ? "true" : "false");
+    fprintf(f, "    \"ttl_value\": %u,\n", config->stealth.ttl_value > 0 ? config->stealth.ttl_value : 64);
+    fprintf(f, "    \"cloak_traceroute\": %s,\n", config->stealth.cloak_traceroute ? "true" : "false");
+    fprintf(f, "    \"block_wan_probes\": %s\n", config->stealth.block_wan_probes ? "true" : "false");
+    fprintf(f, "  },\n");
+
     /* Serialize Broadband PPPoE Server */
     fprintf(f, "  \"pppoe_server\": {\n");
     fprintf(f, "    \"enabled\": %s,\n", config->pppoe_server.enabled ? "true" : "false");
@@ -1342,7 +1406,25 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
     fprintf(f, "    \"dns1\": \"%s\",\n", config->pppoe_server.dns1[0] ? config->pppoe_server.dns1 : "1.1.1.1");
     fprintf(f, "    \"dns2\": \"%s\",\n", config->pppoe_server.dns2[0] ? config->pppoe_server.dns2 : "8.8.8.8");
     fprintf(f, "    \"mru\": %u,\n", config->pppoe_server.mru > 0 ? config->pppoe_server.mru : 1492);
-    fprintf(f, "    \"mss\": %u", config->pppoe_server.mss > 0 ? config->pppoe_server.mss : 1452);
+    fprintf(f, "    \"mss\": %u,\n", config->pppoe_server.mss > 0 ? config->pppoe_server.mss : 1452);
+
+    /* RADIUS / RadSec AAA Client */
+    fprintf(f, "    \"radius\": {\n");
+    fprintf(f, "      \"enabled\": %s,\n", config->pppoe_server.radius.enabled ? "true" : "false");
+    fprintf(f, "      \"proto\": \"%s\",\n", config->pppoe_server.radius.proto == RADIUS_PROTO_RADSEC ? "radsec" : "udp");
+    fprintf(f, "      \"server\": \"%s\",\n", config->pppoe_server.radius.server);
+    fprintf(f, "      \"secret\": \"%s\",\n", config->pppoe_server.radius.secret);
+    fprintf(f, "      \"auth_port\": %u,\n", config->pppoe_server.radius.auth_port > 0 ? config->pppoe_server.radius.auth_port : (config->pppoe_server.radius.proto == RADIUS_PROTO_RADSEC ? 2083 : 1812));
+    fprintf(f, "      \"acct_port\": %u,\n", config->pppoe_server.radius.acct_port > 0 ? config->pppoe_server.radius.acct_port : (config->pppoe_server.radius.proto == RADIUS_PROTO_RADSEC ? 2083 : 1813));
+    fprintf(f, "      \"coa_port\": %u,\n", config->pppoe_server.radius.coa_port > 0 ? config->pppoe_server.radius.coa_port : 3799);
+    fprintf(f, "      \"interim_interval\": %u,\n", config->pppoe_server.radius.interim_interval > 0 ? config->pppoe_server.radius.interim_interval : 300);
+    fprintf(f, "      \"nas_identifier\": \"%s\",\n", config->pppoe_server.radius.nas_identifier[0] ? config->pppoe_server.radius.nas_identifier : "FluxWAN-BRAS-01");
+    fprintf(f, "      \"tls_verify_cert\": %s,\n", config->pppoe_server.radius.tls_verify_cert ? "true" : "false");
+    fprintf(f, "      \"ca_cert_path\": \"%s\",\n", config->pppoe_server.radius.ca_cert_path);
+    fprintf(f, "      \"client_cert_path\": \"%s\",\n", config->pppoe_server.radius.client_cert_path);
+    fprintf(f, "      \"client_key_path\": \"%s\",\n", config->pppoe_server.radius.client_key_path);
+    fprintf(f, "      \"sni_hostname\": \"%s\"\n", config->pppoe_server.radius.sni_hostname);
+    fprintf(f, "    }");
 
     /* Profiles */
     fprintf(f, ",\n    \"profiles\": [\n");
@@ -1770,6 +1852,12 @@ int config_reset_to_defaults(fluxwan_config_t *out_config) {
     out_config->dpi.gaming_priority_enabled = true;
     out_config->dpi.streaming_balance_enabled = true;
 
+    /* Stealth Defaults */
+    out_config->stealth.enabled = true;
+    out_config->stealth.ttl_value = 64;
+    out_config->stealth.cloak_traceroute = true;
+    out_config->stealth.block_wan_probes = true;
+
     /* Address Lists Default */
     out_config->address_list_count = 0;
 
@@ -1788,6 +1876,18 @@ int config_reset_to_defaults(fluxwan_config_t *out_config) {
     safe_str_copy(p_def->dns2, "8.8.8.8", sizeof(p_def->dns2));
     p_def->mru = 1492;
     p_def->mss = 1452;
+
+    /* RADIUS / RadSec AAA Defaults */
+    p_def->radius.enabled = false;
+    p_def->radius.proto = RADIUS_PROTO_RADSEC;
+    safe_str_copy(p_def->radius.server, "radius.example.com", sizeof(p_def->radius.server));
+    safe_str_copy(p_def->radius.secret, "radsec", sizeof(p_def->radius.secret));
+    p_def->radius.auth_port = 2083;
+    p_def->radius.acct_port = 2083;
+    p_def->radius.coa_port = 3799;
+    p_def->radius.interim_interval = 300;
+    safe_str_copy(p_def->radius.nas_identifier, "FluxWAN-BRAS-01", sizeof(p_def->radius.nas_identifier));
+    p_def->radius.tls_verify_cert = false;
 
     safe_str_copy(p_def->profiles[0].name, "Economy_10M", sizeof(p_def->profiles[0].name));
     p_def->profiles[0].rate_down_kbps = 10240;

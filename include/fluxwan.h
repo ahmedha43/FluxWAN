@@ -62,7 +62,7 @@ typedef int socket_t;
 #define INVALID_SOCKET (-1)
 #endif
 
-#define FLUXWAN_VERSION "1.3.2"
+#define FLUXWAN_VERSION "1.3.3"
 #define FLUXWAN_AUTHOR "Ahmed Al-Dulaimi (أحمد الدليمي)"
 #define FLUXWAN_LICENSE "GNU GPLv3"
 #define FLUXWAN_COPYRIGHT "Copyright (C) 2026 Ahmed Al-Dulaimi. All rights reserved."
@@ -435,6 +435,40 @@ typedef struct {
     bool enabled;
 } pppoe_user_t;
 
+/* RADIUS / RadSec Protocol Mode */
+typedef enum {
+    RADIUS_PROTO_UDP = 0,    /* Standard UDP (RFC 2865 / 2866) on port 1812/1813 */
+    RADIUS_PROTO_RADSEC = 1  /* RadSec TLS over TCP (RFC 6614) on port 2083 */
+} radius_proto_t;
+
+/* RADIUS & RadSec AAA Client Configuration */
+typedef struct {
+    bool enabled;                /* Master switch: true = authenticate via RADIUS/RadSec */
+    radius_proto_t proto;        /* RADIUS_PROTO_UDP or RADIUS_PROTO_RADSEC */
+    char server[128];            /* Server Hostname or IP address (e.g. radius.myisp.com) */
+    char secret[64];             /* Shared secret (or "radsec" for RFC 6614) */
+    uint16_t auth_port;          /* Default 1812 (UDP) or 2083 (RadSec) */
+    uint16_t acct_port;          /* Default 1813 (UDP) or 2083 (RadSec) */
+    uint16_t coa_port;           /* Default 3799 (Disconnect-Message / CoA RFC 3576) */
+    uint32_t interim_interval;   /* Accounting interim update interval (seconds, default 300) */
+    char nas_identifier[64];     /* NAS-Identifier string (default "FluxWAN-BRAS-01") */
+
+    /* RadSec TLS Security Settings (RFC 6614) */
+    bool tls_verify_cert;        /* Verify server certificate */
+    char ca_cert_path[MAX_PATH_LEN];     /* CA Certificate file path */
+    char client_cert_path[MAX_PATH_LEN]; /* Client certificate (mTLS) */
+    char client_key_path[MAX_PATH_LEN];  /* Client private key (mTLS) */
+    char sni_hostname[64];               /* TLS Server Name Indication */
+} radius_config_t;
+
+/* Carrier Stealth Shield Configuration */
+typedef struct {
+    bool enabled;             /* Master Carrier Stealth Shield switch */
+    uint8_t ttl_value;        /* Default 64 (Normalize TTL to prevent tethering/hop detection) */
+    bool cloak_traceroute;    /* Suppress ICMP Time Exceeded (Type 11) leakage */
+    bool block_wan_probes;    /* Drop incoming port scans and unsolicited probes from ISP */
+} stealth_config_t;
+
 /* PPPoE Server Configuration */
 typedef struct {
     bool enabled;
@@ -450,6 +484,7 @@ typedef struct {
     char dns2[32];            /* Secondary DNS e.g. "8.8.8.8" */
     uint16_t mru;             /* MRU e.g. 1492 */
     uint16_t mss;             /* MSS clamping e.g. 1452 */
+    radius_config_t radius;   /* RADIUS / RadSec AAA Client */
     pppoe_profile_t profiles[MAX_PPPOE_PROFILES];
     uint32_t profile_count;
     pppoe_user_t users[MAX_PPPOE_USERS];
@@ -474,6 +509,7 @@ typedef struct {
     nat46_config_t nat46;
     dpi_config_t dpi;
     pppoe_server_config_t pppoe_server;
+    stealth_config_t stealth;
     license_info_t license;
     char config_file_path[MAX_PATH_LEN];
 } fluxwan_config_t;

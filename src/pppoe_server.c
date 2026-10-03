@@ -171,7 +171,164 @@ static int write_pppoe_server_options(const pppoe_server_config_t *cfg) {
     fprintf(f, "ktune\n");
     fprintf(f, "mru %u\n", cfg->mru > 0 ? cfg->mru : 1492);
     fprintf(f, "mtu %u\n", cfg->mru > 0 ? cfg->mru : 1492);
+
+    /* RADIUS / RadSec AAA Integration (RFC 2865 / RFC 6614) */
+    if (cfg->radius.enabled) {
+        fprintf(f, "\n# RADIUS / RadSec AAA Integration\n");
+        fprintf(f, "plugin radius.so\n");
+        fprintf(f, "plugin radattr.so\n");
+        fprintf(f, "radius-config-file /etc/ppp/radius/radius.conf\n");
+    }
     fclose(f);
+#else
+    (void)cfg;
+#endif
+    return 0;
+}
+
+static int setup_radius_config(const pppoe_server_config_t *cfg) {
+#if defined(__linux__)
+    if (!cfg->radius.enabled || !cfg->radius.server[0]) {
+        return 0;
+    }
+
+    safe_system("mkdir -p /etc/ppp/radius /run/fluxwan/radius 2>/dev/null || true");
+
+    /* 1. Write standard & MikroTik dictionary */
+    FILE *f_dict = fopen("/etc/ppp/radius/dictionary", "w");
+    if (f_dict) {
+        fprintf(f_dict,
+            "# FluxWAN Carrier RADIUS / RadSec Dictionary\n"
+            "ATTRIBUTE\tUser-Name\t1\tstring\n"
+            "ATTRIBUTE\tUser-Password\t2\tstring\n"
+            "ATTRIBUTE\tCHAP-Password\t3\tstring\n"
+            "ATTRIBUTE\tNAS-IP-Address\t4\tipaddr\n"
+            "ATTRIBUTE\tNAS-Port\t5\tinteger\n"
+            "ATTRIBUTE\tService-Type\t6\tinteger\n"
+            "ATTRIBUTE\tFramed-Protocol\t7\tinteger\n"
+            "ATTRIBUTE\tFramed-IP-Address\t8\tipaddr\n"
+            "ATTRIBUTE\tFramed-IP-Netmask\t9\tipaddr\n"
+            "ATTRIBUTE\tFilter-Id\t11\tstring\n"
+            "ATTRIBUTE\tFramed-MTU\t12\tinteger\n"
+            "ATTRIBUTE\tReply-Message\t18\tstring\n"
+            "ATTRIBUTE\tSession-Timeout\t27\tinteger\n"
+            "ATTRIBUTE\tIdle-Timeout\t28\tinteger\n"
+            "ATTRIBUTE\tCalled-Station-Id\t30\tstring\n"
+            "ATTRIBUTE\tCalling-Station-Id\t31\tstring\n"
+            "ATTRIBUTE\tNAS-Identifier\t32\tstring\n"
+            "ATTRIBUTE\tAcct-Status-Type\t40\tinteger\n"
+            "ATTRIBUTE\tAcct-Delay-Time\t41\tinteger\n"
+            "ATTRIBUTE\tAcct-Input-Octets\t42\tinteger\n"
+            "ATTRIBUTE\tAcct-Output-Octets\t43\tinteger\n"
+            "ATTRIBUTE\tAcct-Session-Id\t44\tstring\n"
+            "ATTRIBUTE\tAcct-Authentic\t45\tinteger\n"
+            "ATTRIBUTE\tAcct-Session-Time\t46\tinteger\n"
+            "ATTRIBUTE\tAcct-Input-Packets\t47\tinteger\n"
+            "ATTRIBUTE\tAcct-Output-Packets\t48\tinteger\n"
+            "ATTRIBUTE\tAcct-Terminate-Cause\t49\tinteger\n"
+            "ATTRIBUTE\tAcct-Interim-Interval\t85\tinteger\n"
+            "ATTRIBUTE\tNAS-Port-Type\t61\tinteger\n\n"
+            "VALUE\tService-Type\tFramed-User\t2\n"
+            "VALUE\tFramed-Protocol\tPPP\t1\n\n"
+            "# MikroTik Vendor Dictionary (VSA 14988)\n"
+            "VENDOR\tMikroTik\t14988\n"
+            "ATTRIBUTE\tMikrotik-Recv-Limit\t1\tinteger\tMikroTik\n"
+            "ATTRIBUTE\tMikrotik-Xmit-Limit\t2\tinteger\tMikroTik\n"
+            "ATTRIBUTE\tMikrotik-Group\t3\tstring\tMikroTik\n"
+            "ATTRIBUTE\tMikrotik-Wireless-Forward\t4\tinteger\tMikroTik\n"
+            "ATTRIBUTE\tMikrotik-Rate-Limit\t8\tstring\tMikroTik\n"
+            "ATTRIBUTE\tMikrotik-Realm\t9\tstring\tMikroTik\n"
+            "ATTRIBUTE\tMikrotik-Host-IP\t10\tipaddr\tMikroTik\n");
+        fclose(f_dict);
+    }
+
+    /* 2. Write servers shared secrets */
+    FILE *f_srv = fopen("/etc/ppp/radius/servers", "w");
+    if (f_srv) {
+        const char *sec = cfg->radius.secret[0] ? cfg->radius.secret : (cfg->radius.proto == RADIUS_PROTO_RADSEC ? "radsec" : "testing123");
+        fprintf(f_srv, "# Server Secret\n");
+        fprintf(f_srv, "%s %s\n", cfg->radius.server, sec);
+        fprintf(f_srv, "127.0.0.1 %s\n", sec);
+        fprintf(f_srv, "localhost %s\n", sec);
+        fclose(f_srv);
+        safe_system("chmod 600 /etc/ppp/radius/servers 2>/dev/null || true");
+    }
+
+    /* 3. Write radius.conf */
+    FILE *f_conf = fopen("/etc/ppp/radius/radius.conf", "w");
+    if (f_conf) {
+        uint16_t auth_p = cfg->radius.auth_port > 0 ? cfg->radius.auth_port : (cfg->radius.proto == RADIUS_PROTO_RADSEC ? 2083 : 1812);
+        uint16_t acct_p = cfg->radius.acct_port > 0 ? cfg->radius.acct_port : (cfg->radius.proto == RADIUS_PROTO_RADSEC ? 2083 : 1813);
+        const char *nas_id = cfg->radius.nas_identifier[0] ? cfg->radius.nas_identifier : "FluxWAN-BRAS-01";
+
+        fprintf(f_conf, "# FluxWAN RADIUS Client Configuration\n");
+        if (cfg->radius.proto == RADIUS_PROTO_RADSEC) {
+            /* RadSec TLS: radius.so connects locally to RadSec TLS relay bridge */
+            fprintf(f_conf, "authserver 127.0.0.1:11812\n");
+            fprintf(f_conf, "acctserver 127.0.0.1:11813\n");
+        } else {
+            /* Standard UDP */
+            fprintf(f_conf, "authserver %s:%u\n", cfg->radius.server, auth_p);
+            fprintf(f_conf, "acctserver %s:%u\n", cfg->radius.server, acct_p);
+        }
+        fprintf(f_conf, "servers /etc/ppp/radius/servers\n");
+        fprintf(f_conf, "dictionary /etc/ppp/radius/dictionary\n");
+        fprintf(f_conf, "default_realm\n");
+        fprintf(f_conf, "radius_timeout %u\n", cfg->radius.proto == RADIUS_PROTO_RADSEC ? 10 : 5);
+        fprintf(f_conf, "radius_retries 3\n");
+        fprintf(f_conf, "nas_identifier %s\n", nas_id);
+        fclose(f_conf);
+    }
+
+    /* 4. If RadSec TLS mode is active, configure and launch the RadSec TLS bridge */
+    if (cfg->radius.proto == RADIUS_PROTO_RADSEC) {
+        uint16_t remote_port = cfg->radius.auth_port > 0 ? cfg->radius.auth_port : 2083;
+        LOG_INFO("[RadSec Engine] Activating RFC 6614 RADIUS-over-TLS (RadSec) bridge to %s:%u...",
+                 cfg->radius.server, remote_port);
+
+        safe_system("pkill -f 'fluxwan-radsec-bridge' 2>/dev/null || true");
+        safe_system("pkill -f 'radsecproxy' 2>/dev/null || true");
+
+        FILE *f_radsec = fopen("/usr/local/bin/fluxwan-radsec-bridge", "w");
+        if (f_radsec) {
+            fprintf(f_radsec, "#!/bin/sh\n");
+            fprintf(f_radsec, "# FluxWAN Automated RadSec RFC 6614 TLS Relay Bridge\n");
+            fprintf(f_radsec, "SERVER=\"%s\"\n", cfg->radius.server);
+            fprintf(f_radsec, "PORT=\"%u\"\n", remote_port);
+            fprintf(f_radsec, "SNI=\"%s\"\n", cfg->radius.sni_hostname[0] ? cfg->radius.sni_hostname : cfg->radius.server);
+            fprintf(f_radsec, "CA_OPT=\"\"\n");
+            if (cfg->radius.ca_cert_path[0]) {
+                fprintf(f_radsec, "[ -f \"%s\" ] && CA_OPT=\"-CAfile %s\"\n", cfg->radius.ca_cert_path, cfg->radius.ca_cert_path);
+            }
+            fprintf(f_radsec, "CERT_OPT=\"\"\n");
+            if (cfg->radius.client_cert_path[0]) {
+                fprintf(f_radsec, "[ -f \"%s\" ] && CERT_OPT=\"-cert %s\"\n", cfg->radius.client_cert_path, cfg->radius.client_cert_path);
+            }
+            fprintf(f_radsec, "KEY_OPT=\"\"\n");
+            if (cfg->radius.client_key_path[0]) {
+                fprintf(f_radsec, "[ -f \"%s\" ] && KEY_OPT=\"-key %s\"\n", cfg->radius.client_key_path, cfg->radius.client_key_path);
+            }
+
+            fprintf(f_radsec, "if which radsecproxy >/dev/null 2>&1; then\n");
+            fprintf(f_radsec, "  cat << 'RSEOF' > /etc/radsecproxy.conf\n");
+            fprintf(f_radsec, "ListenUDP 127.0.0.1:11812\n");
+            fprintf(f_radsec, "ListenUDP 127.0.0.1:11813\n");
+            fprintf(f_radsec, "Server upstream_radsec {\n");
+            fprintf(f_radsec, "  type TLS\n");
+            fprintf(f_radsec, "  host $SERVER:$PORT\n");
+            fprintf(f_radsec, "  secret \"%s\"\n", cfg->radius.secret[0] ? cfg->radius.secret : "radsec");
+            fprintf(f_radsec, "}\n");
+            fprintf(f_radsec, "RSEOF\n");
+            fprintf(f_radsec, "  exec radsecproxy -c /etc/radsecproxy.conf -f\n");
+            fprintf(f_radsec, "elif which socat >/dev/null 2>&1; then\n");
+            fprintf(f_radsec, "  exec socat UDP-LISTEN:11812,fork,reuseaddr OPENSSL:$SERVER:$PORT,servername=$SNI $CA_OPT $CERT_OPT $KEY_OPT\n");
+            fprintf(f_radsec, "fi\n");
+
+            fclose(f_radsec);
+            safe_system("chmod +x /usr/local/bin/fluxwan-radsec-bridge 2>/dev/null || true");
+            safe_system("nohup /usr/local/bin/fluxwan-radsec-bridge >/tmp/radsec_bridge.log 2>&1 &");
+        }
+    }
 #else
     (void)cfg;
 #endif
@@ -248,6 +405,25 @@ static int setup_pppoe_scripts(const pppoe_server_config_t *cfg) {
                 fprintf(f_up, "fi\n");
             }
         }
+
+        /* Dynamic RADIUS / RadSec Rate Limiting (MikroTik-Rate-Limit / WISPr) */
+        fprintf(f_up,
+            "# Dynamic RADIUS / RadSec Rate Limiting\n"
+            "RADATTR=\"/var/run/radattr.$1\"\n"
+            "if [ -f \"$RADATTR\" ]; then\n"
+            "  MK_RATE=$(grep -i 'Mikrotik-Rate-Limit' \"$RADATTR\" | awk '{print $2}' | tr -d '\"' | cut -d'/' -f1)\n"
+            "  if [ -n \"$MK_RATE\" ]; then\n"
+            "    case \"$MK_RATE\" in\n"
+            "      *M|*m) RATE_KB=$((${MK_RATE%%[Mm]} * 1024)) ;;\n"
+            "      *k|*K) RATE_KB=${MK_RATE%%[Kk]} ;;\n"
+            "      *[0-9]) RATE_KB=$((MK_RATE / 1000)) ;;\n"
+            "    esac\n"
+            "    if [ \"$RATE_KB\" -gt 0 ] 2>/dev/null; then\n"
+            "      tc qdisc del dev \"$1\" root 2>/dev/null || true\n"
+            "      tc qdisc add dev \"$1\" root tbf rate \"${RATE_KB}kbit\" burst 64kbit latency 50ms 2>/dev/null || true\n"
+            "    fi\n"
+            "  fi\n"
+            "fi\n");
         fclose(f_up);
         safe_system("chmod +x /etc/ppp/ip-up 2>/dev/null || true");
     }
@@ -257,7 +433,7 @@ static int setup_pppoe_scripts(const pppoe_server_config_t *cfg) {
     if (f_down) {
         fprintf(f_down, "#!/bin/sh\n");
         fprintf(f_down, "# FluxWAN Broadband Session Teardown Hook\n");
-        fprintf(f_down, "rm -f \"/run/fluxwan/pppoe/$1.session\" 2>/dev/null || true\n");
+        fprintf(f_down, "rm -f \"/run/fluxwan/pppoe/$1.session\" \"/var/run/radattr.$1\" 2>/dev/null || true\n");
         fclose(f_down);
         safe_system("chmod +x /etc/ppp/ip-down 2>/dev/null || true");
     }
@@ -285,7 +461,8 @@ int pppoe_server_start(pppoe_server_ctx_t *ctx) {
     safe_system("modprobe pppox 2>/dev/null || true");
     safe_system("modprobe ppp_generic 2>/dev/null || true");
 
-    /* 2. Write options, secrets, and hooks */
+    /* 2. Write options, secrets, radius configuration, and hooks */
+    setup_radius_config(cfg);
     write_pppoe_server_options(cfg);
     write_pppoe_secrets(cfg);
     setup_pppoe_scripts(cfg);
@@ -330,6 +507,8 @@ int pppoe_server_stop(pppoe_server_ctx_t *ctx) {
 #if defined(__linux__)
     safe_system("killall -TERM pppoe-server 2>/dev/null || true");
     safe_system("pkill -TERM -f \"pppd.*pppoe-server-options\" 2>/dev/null || true");
+    safe_system("pkill -f 'fluxwan-radsec-bridge' 2>/dev/null || true");
+    safe_system("pkill -f 'radsecproxy' 2>/dev/null || true");
     safe_system("rm -rf /run/fluxwan/pppoe/* 2>/dev/null || true");
 #endif
 
@@ -342,6 +521,7 @@ int pppoe_server_reload(pppoe_server_ctx_t *ctx) {
     pthread_mutex_lock(&ctx->lock);
 
     pppoe_server_config_t *cfg = &ctx->config->pppoe_server;
+    setup_radius_config(cfg);
     write_pppoe_server_options(cfg);
     write_pppoe_secrets(cfg);
     setup_pppoe_scripts(cfg);

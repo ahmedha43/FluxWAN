@@ -984,29 +984,41 @@ int net_apply_wan_shield(const fluxwan_config_t *config) {
     safe_system("iptables -t mangle -N FLUXWAN_STEALTH_TTL 2>/dev/null || iptables-legacy -t mangle -N FLUXWAN_STEALTH_TTL 2>/dev/null || true");
     safe_system("iptables -t mangle -F FLUXWAN_STEALTH_TTL 2>/dev/null || iptables-legacy -t mangle -F FLUXWAN_STEALTH_TTL 2>/dev/null || true");
     safe_system("iptables -t mangle -D POSTROUTING -j FLUXWAN_STEALTH_TTL 2>/dev/null || iptables-legacy -t mangle -D POSTROUTING -j FLUXWAN_STEALTH_TTL 2>/dev/null || true");
-    safe_system("iptables -t mangle -A POSTROUTING -j FLUXWAN_STEALTH_TTL 2>/dev/null || iptables-legacy -t mangle -A POSTROUTING -j FLUXWAN_STEALTH_TTL 2>/dev/null || true");
 
-    /* Clamp outgoing IPv4 TTL to 64 so upstream ISP sees identical single-host TTL for all client traffic */
-    for (uint32_t i = 0; i < config->wan_count; i++) {
-        const wan_config_t *w = &config->wans[i];
-        if (!w->name[0]) continue;
-        char ttl_cmd[512];
-        snprintf(ttl_cmd, sizeof(ttl_cmd),
-                 "iptables -t mangle -A FLUXWAN_STEALTH_TTL -o %s -j TTL --ttl-set 64 2>/dev/null || "
-                 "iptables-legacy -t mangle -A FLUXWAN_STEALTH_TTL -o %s -j TTL --ttl-set 64 2>/dev/null || true",
-                 w->name, w->name);
-        safe_system(ttl_cmd);
+    if (config->stealth.enabled) {
+        safe_system("iptables -t mangle -A POSTROUTING -j FLUXWAN_STEALTH_TTL 2>/dev/null || iptables-legacy -t mangle -A POSTROUTING -j FLUXWAN_STEALTH_TTL 2>/dev/null || true");
+
+        uint8_t ttl = config->stealth.ttl_value > 0 ? config->stealth.ttl_value : 64;
+
+        /* Clamp outgoing IPv4 TTL so upstream ISP sees identical single-host TTL for all client traffic */
+        for (uint32_t i = 0; i < config->wan_count; i++) {
+            const wan_config_t *w = &config->wans[i];
+            if (!w->name[0]) continue;
+            char ttl_cmd[512];
+            snprintf(ttl_cmd, sizeof(ttl_cmd),
+                     "iptables -t mangle -A FLUXWAN_STEALTH_TTL -o %s -j TTL --ttl-set %u 2>/dev/null || "
+                     "iptables-legacy -t mangle -A FLUXWAN_STEALTH_TTL -o %s -j TTL --ttl-set %u 2>/dev/null || true",
+                     w->name, ttl, w->name, ttl);
+            safe_system(ttl_cmd);
+        }
+        char vlan_ttl[256];
+        snprintf(vlan_ttl, sizeof(vlan_ttl), "iptables -t mangle -A FLUXWAN_STEALTH_TTL -o ppp+ -j TTL --ttl-set %u 2>/dev/null || true", ttl);
+        safe_system(vlan_ttl);
+        snprintf(vlan_ttl, sizeof(vlan_ttl), "iptables -t mangle -A FLUXWAN_STEALTH_TTL -o macvlan+ -j TTL --ttl-set %u 2>/dev/null || true", ttl);
+        safe_system(vlan_ttl);
+        snprintf(vlan_ttl, sizeof(vlan_ttl), "iptables -t mangle -A FLUXWAN_STEALTH_TTL -o mv_+ -j TTL --ttl-set %u 2>/dev/null || true", ttl);
+        safe_system(vlan_ttl);
+        snprintf(vlan_ttl, sizeof(vlan_ttl), "iptables -t mangle -A FLUXWAN_STEALTH_TTL -o wlan+ -j TTL --ttl-set %u 2>/dev/null || true", ttl);
+        safe_system(vlan_ttl);
     }
-    safe_system("iptables -t mangle -A FLUXWAN_STEALTH_TTL -o ppp+ -j TTL --ttl-set 64 2>/dev/null || true");
-    safe_system("iptables -t mangle -A FLUXWAN_STEALTH_TTL -o macvlan+ -j TTL --ttl-set 64 2>/dev/null || true");
-    safe_system("iptables -t mangle -A FLUXWAN_STEALTH_TTL -o mv_+ -j TTL --ttl-set 64 2>/dev/null || true");
-    safe_system("iptables -t mangle -A FLUXWAN_STEALTH_TTL -o wlan+ -j TTL --ttl-set 64 2>/dev/null || true");
 
     /* 4. Traceroute Cloaking: Suppress ICMP Time Exceeded (Type 11) leakage on WAN */
     safe_system("iptables -D OUTPUT -p icmp --icmp-type time-exceeded -j DROP 2>/dev/null || true");
-    safe_system("iptables -A OUTPUT -p icmp --icmp-type time-exceeded -j DROP 2>/dev/null || true");
     safe_system("iptables -D OUTPUT -p icmp --icmp-type destination-unreachable -j DROP 2>/dev/null || true");
-    safe_system("iptables -A OUTPUT -p icmp --icmp-type destination-unreachable -j DROP 2>/dev/null || true");
+    if (config->stealth.enabled && config->stealth.cloak_traceroute) {
+        safe_system("iptables -A OUTPUT -p icmp --icmp-type time-exceeded -j DROP 2>/dev/null || true");
+        safe_system("iptables -A OUTPUT -p icmp --icmp-type destination-unreachable -j DROP 2>/dev/null || true");
+    }
 
     /* 5. Restrict Web Management Port 80 -> 8080 Redirection strictly to LAN */
     safe_system("iptables -t nat -D PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 8080 2>/dev/null || true");

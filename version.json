@@ -1,32 +1,29 @@
 {
-  "latest_version": "1.3.2",
+  "latest_version": "1.3.3",
   "channel": "stable",
-  "release_date": "2026-10-02",
+  "release_date": "2026-10-03",
   "min_compatible_version": "1.2.0",
   "changelog": [
+    "Full RadSec Protocol Support (RFC 6614 — RADIUS over TLS on TCP port 2083) with mTLS encryption",
+    "Standard RADIUS AAA Client (RFC 2865 / 2866) with CoA / Disconnect support (RFC 3576)",
+    "Carrier Stealth Shield: Outgoing IPv4 TTL Normalization (Anti-Tethering & Single-Hop Masking)",
+    "Traceroute Cloaking (suppresses ICMP Type 11 Time Exceeded leakage) and WAN Port Scan Blackhole",
+    "Dynamic subscriber rate limiting via MikroTik-Rate-Limit (VSA 14988) and WISPr dictionary attributes",
+    "Glassmorphism Web Dashboard interactive cards for RADIUS / RadSec AAA and Carrier Stealth Shield",
     "Fix ICMP ping prober latency calculation for dynamic DHCP interfaces (resolved 0 ms RTT issue)",
     "Automatic probe target fallback to gateway IP or 8.8.8.8 for all WAN types",
-    "Enhanced raw socket error recovery preventing interface probe stalls",
-    "Interactive one-click update checking button in topbar and sidebar with dedicated bilingual OTA modal",
-    "Stealth MAC Cloaking: Authentic TP-Link, Tenda, and D-Link OUIs with non-sequential random MACs (Strictly NO MikroTik)",
+    "Stealth MAC Cloaking: Authentic TP-Link, Tenda, and D-Link OUIs with non-sequential random MACs",
     "UDHCPC Option 60 cloaked as TP-Link Archer C6 replacing BusyBox signatures",
-    "Custom Cloned MAC support in WAN configuration and web management UI",
-    "Real-time update manifest fetching with automatic CDN cache-busting",
-    "Fixed semver comparison in web UI and OTA daemon to correctly recognize timestamp build updates",
-    "Alpine Linux musl-native binary build for 100% hardware & VM appliance compatibility",
-    "CI pipeline fully green: all 10 test suites pass on GitHub Actions (CMake + make)",
     "Uncrackable Ed25519 asymmetric cryptographic licensing engine (RFC 8032)",
     "Hardware fingerprint binding (HWID) anti-cloning and anti-theft protection",
     "Anti-clock rollback monotonic watermark ledger preventing NTP/time tampering",
-    "Functional kernel interlocking with Maglev and eBPF routing weight zeroing",
-    "Web dashboard interactive License & Security tab with 1-click HWID copy and instant activation",
-    "Dedicated desktop GUI FluxWAN License Studio application for vendor key generation"
+    "Alpine Linux musl-native binary build for 100% hardware & VM appliance compatibility"
   ],
   "packages": {
     "core": {
       "url": "https://raw.githubusercontent.com/ahmedha43/FluxWAN/main/dist/fluxwan",
-      "sha256": "06ff55f2cb7c84c85177e437f090de5c0fb00c9328aabac9fdb8d3bb62747ad4",
-      "size_bytes": 384384
+      "sha256": "894d80f1e5ebe84d075a92724d5bcfaec2252b78807e363c785c46a7b9a493f2",
+      "size_bytes": 400768
     },
     "full_iso": {
       "url": "https://github.com/ahmedha43/FluxWAN/releases/download/v1.2.5/fluxwan-os-x86_64.iso",

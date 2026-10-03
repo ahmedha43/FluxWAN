@@ -825,7 +825,8 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
 
     /* Broadband PPPoE Server Summary */
     offset += snprintf(buf + offset, max_len - offset,
-        "  \"pppoe_server\": { \"enabled\": %s, \"lan_mode\": \"%s\", \"interface\": \"%s\", \"local_ip\": \"%s\", \"pool_start\": \"%s\", \"pool_end\": \"%s\", \"max_sessions\": %u, \"user_count\": %u, \"profile_count\": %u },\n",
+        "  \"pppoe_server\": { \"enabled\": %s, \"lan_mode\": \"%s\", \"interface\": \"%s\", \"local_ip\": \"%s\", \"pool_start\": \"%s\", \"pool_end\": \"%s\", \"max_sessions\": %u, \"user_count\": %u, \"profile_count\": %u,\n"
+        "    \"radius\": { \"enabled\": %s, \"proto\": \"%s\", \"server\": \"%s\", \"auth_port\": %u, \"acct_port\": %u, \"nas_identifier\": \"%s\" } },\n",
         config->pppoe_server.enabled ? "true" : "false",
         config->pppoe_server.lan_mode[0] ? config->pppoe_server.lan_mode : "dual",
         config->pppoe_server.interface[0] ? config->pppoe_server.interface : "eth0",
@@ -834,7 +835,21 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
         config->pppoe_server.pool_end[0] ? config->pppoe_server.pool_end : "10.100.0.254",
         config->pppoe_server.pool_count > 0 ? config->pppoe_server.pool_count : 250,
         config->pppoe_server.user_count,
-        config->pppoe_server.profile_count);
+        config->pppoe_server.profile_count,
+        config->pppoe_server.radius.enabled ? "true" : "false",
+        config->pppoe_server.radius.proto == RADIUS_PROTO_RADSEC ? "radsec" : "udp",
+        config->pppoe_server.radius.server,
+        config->pppoe_server.radius.auth_port > 0 ? config->pppoe_server.radius.auth_port : (config->pppoe_server.radius.proto == RADIUS_PROTO_RADSEC ? 2083 : 1812),
+        config->pppoe_server.radius.acct_port > 0 ? config->pppoe_server.radius.acct_port : (config->pppoe_server.radius.proto == RADIUS_PROTO_RADSEC ? 2083 : 1813),
+        config->pppoe_server.radius.nas_identifier[0] ? config->pppoe_server.radius.nas_identifier : "FluxWAN-BRAS-01");
+
+    /* Carrier Stealth Shield */
+    offset += snprintf(buf + offset, max_len - offset,
+        "  \"stealth\": { \"enabled\": %s, \"ttl_value\": %u, \"cloak_traceroute\": %s, \"block_wan_probes\": %s },\n",
+        config->stealth.enabled ? "true" : "false",
+        config->stealth.ttl_value > 0 ? config->stealth.ttl_value : 64,
+        config->stealth.cloak_traceroute ? "true" : "false",
+        config->stealth.block_wan_probes ? "true" : "false");
 
     /* ===== System Telemetry: CPU, RAM, Uptime, Time ===== */
 
@@ -1513,6 +1528,38 @@ static void build_json_broadband_status(web_server_ctx_t *ctx, char *buf, size_t
     dyn_buf_printf(&db, "  \"active_sessions_count\": %u,\n", active_sessions);
     dyn_buf_printf(&db, "  \"total_users\": %u,\n", cfg->user_count);
     dyn_buf_printf(&db, "  \"total_profiles\": %u,\n", cfg->profile_count);
+
+    /* RADIUS / RadSec AAA Client */
+    dyn_buf_printf(&db, "  \"radius\": {\n"
+                        "    \"enabled\": %s,\n"
+                        "    \"proto\": \"%s\",\n"
+                        "    \"server\": \"%s\",\n"
+                        "    \"secret\": \"%s\",\n"
+                        "    \"auth_port\": %u,\n"
+                        "    \"acct_port\": %u,\n"
+                        "    \"coa_port\": %u,\n"
+                        "    \"interim_interval\": %u,\n"
+                        "    \"nas_identifier\": \"%s\",\n"
+                        "    \"tls_verify_cert\": %s,\n"
+                        "    \"ca_cert_path\": \"%s\",\n"
+                        "    \"client_cert_path\": \"%s\",\n"
+                        "    \"client_key_path\": \"%s\",\n"
+                        "    \"sni_hostname\": \"%s\"\n"
+                        "  },\n",
+                        cfg->radius.enabled ? "true" : "false",
+                        cfg->radius.proto == RADIUS_PROTO_RADSEC ? "radsec" : "udp",
+                        cfg->radius.server,
+                        cfg->radius.secret,
+                        cfg->radius.auth_port > 0 ? cfg->radius.auth_port : (cfg->radius.proto == RADIUS_PROTO_RADSEC ? 2083 : 1812),
+                        cfg->radius.acct_port > 0 ? cfg->radius.acct_port : (cfg->radius.proto == RADIUS_PROTO_RADSEC ? 2083 : 1813),
+                        cfg->radius.coa_port > 0 ? cfg->radius.coa_port : 3799,
+                        cfg->radius.interim_interval > 0 ? cfg->radius.interim_interval : 300,
+                        cfg->radius.nas_identifier[0] ? cfg->radius.nas_identifier : "FluxWAN-BRAS-01",
+                        cfg->radius.tls_verify_cert ? "true" : "false",
+                        cfg->radius.ca_cert_path,
+                        cfg->radius.client_cert_path,
+                        cfg->radius.client_key_path,
+                        cfg->radius.sni_hostname);
 
     /* Profiles list */
     dyn_buf_append(&db, "  \"profiles\": [\n");
@@ -4405,6 +4452,88 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
             wan_manager_add_log("WARN", "Broadband session on %s disconnected manually by admin", ifname);
         }
         const char *rb = "{\"status\":\"ok\",\"message\":\"Session disconnected successfully\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "POST /api/v1/broadband/radius") != NULL || strstr(req, "POST /api/v1/pppoe/radius") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        if (body) {
+            body += 4;
+            radius_config_t *rad = &ctx->config->pppoe_server.radius;
+            rad->enabled = extract_json_bool(body, "enabled", rad->enabled);
+            char sval[128];
+            if (extract_json_string(body, "proto", sval, sizeof(sval))) {
+                if (strcasecmp(sval, "radsec") == 0 || strcasecmp(sval, "tls") == 0) {
+                    rad->proto = RADIUS_PROTO_RADSEC;
+                } else {
+                    rad->proto = RADIUS_PROTO_UDP;
+                }
+            }
+            if (extract_json_string(body, "server", sval, sizeof(sval))) safe_str_copy(rad->server, sval, sizeof(rad->server));
+            if (extract_json_string(body, "secret", sval, sizeof(sval))) safe_str_copy(rad->secret, sval, sizeof(rad->secret));
+            int auth_p = extract_json_int(body, "auth_port", 0);
+            if (auth_p > 0) rad->auth_port = (uint16_t)auth_p;
+            int acct_p = extract_json_int(body, "acct_port", 0);
+            if (acct_p > 0) rad->acct_port = (uint16_t)acct_p;
+            int coa_p = extract_json_int(body, "coa_port", 0);
+            if (coa_p > 0) rad->coa_port = (uint16_t)coa_p;
+            int interim = extract_json_int(body, "interim_interval", 0);
+            if (interim > 0) rad->interim_interval = (uint32_t)interim;
+            if (extract_json_string(body, "nas_identifier", sval, sizeof(sval))) safe_str_copy(rad->nas_identifier, sval, sizeof(rad->nas_identifier));
+            rad->tls_verify_cert = extract_json_bool(body, "tls_verify_cert", rad->tls_verify_cert);
+            if (extract_json_string(body, "ca_cert_path", sval, sizeof(sval))) safe_str_copy(rad->ca_cert_path, sval, sizeof(rad->ca_cert_path));
+            if (extract_json_string(body, "client_cert_path", sval, sizeof(sval))) safe_str_copy(rad->client_cert_path, sval, sizeof(rad->client_cert_path));
+            if (extract_json_string(body, "client_key_path", sval, sizeof(sval))) safe_str_copy(rad->client_key_path, sval, sizeof(rad->client_key_path));
+            if (extract_json_string(body, "sni_hostname", sval, sizeof(sval))) safe_str_copy(rad->sni_hostname, sval, sizeof(rad->sni_hostname));
+
+            config_save(get_config_target_path(ctx), ctx->config);
+            if (ctx->pppoe_srv && ctx->config->pppoe_server.enabled) {
+                pppoe_server_reload(ctx->pppoe_srv);
+            }
+            wan_manager_add_log("INFO", "RADIUS / RadSec AAA configuration updated (%s, mode: %s, server: %s)",
+                                rad->enabled ? "ENABLED" : "DISABLED",
+                                rad->proto == RADIUS_PROTO_RADSEC ? "RadSec TLS (RFC 6614)" : "Standard UDP",
+                                rad->server);
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"RADIUS / RadSec AAA configuration saved\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "POST /api/v1/stealth") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        if (body) {
+            body += 4;
+            stealth_config_t *st = &ctx->config->stealth;
+            st->enabled = extract_json_bool(body, "enabled", st->enabled);
+            int ttl = extract_json_int(body, "ttl_value", 0);
+            if (ttl > 0 && ttl <= 255) st->ttl_value = (uint8_t)ttl;
+            st->cloak_traceroute = extract_json_bool(body, "cloak_traceroute", st->cloak_traceroute);
+            st->block_wan_probes = extract_json_bool(body, "block_wan_probes", st->block_wan_probes);
+
+            config_save(get_config_target_path(ctx), ctx->config);
+            net_apply_wan_shield(ctx->config);
+            wan_manager_add_log("INFO", "Carrier Stealth Shield updated (%s, TTL=%u, Cloak=%s)",
+                                st->enabled ? "ACTIVE" : "DISABLED",
+                                st->ttl_value > 0 ? st->ttl_value : 64,
+                                st->cloak_traceroute ? "ON" : "OFF");
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"Carrier Stealth Shield settings updated\"}";
         char resp[256]; int len = snprintf(resp, sizeof(resp),
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
             strlen(rb), rb);
