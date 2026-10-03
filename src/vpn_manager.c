@@ -404,12 +404,12 @@ int vpn_manager_apply_zerotier(const zerotier_config_t *zt) {
     if (system("which zerotier-cli >/dev/null 2>&1") != 0 && system("which zerotier-one >/dev/null 2>&1") != 0) {
         LOG_WARN("[ZeroTier] zerotier-cli not detected! Attempting automatic installation...");
         wan_manager_add_log("WARN", "ZeroTier daemon not installed. Attempting automatic package installation...");
-        safe_system("curl -s https://install.zerotier.com | bash 2>/dev/null || apt-get update -y && apt-get install -y zerotier-one 2>/dev/null || apk add zerotier-one 2>/dev/null || true");
+        safe_system("curl -fsSL -o /tmp/zerotier-one.apk http://dl-cdn.alpinelinux.org/alpine/v3.17/community/x86_64/zerotier-one-1.10.2-r0.apk && apk add --allow-untrusted /tmp/zerotier-one.apk 2>/dev/null || curl -s https://install.zerotier.com | sh 2>/dev/null || apt-get update -y && apt-get install -y zerotier-one 2>/dev/null || apk add zerotier-one 2>/dev/null || true");
     }
 
     /* Ensure ZeroTier daemon is actively running */
     if (system("pgrep zerotier-one >/dev/null 2>&1") != 0) {
-        safe_system("systemctl enable --now zerotier-one 2>/dev/null || service zerotier-one start 2>/dev/null || rc-service zerotier-one start 2>/dev/null || zerotier-one -d 2>/dev/null");
+        safe_system("systemctl enable --now zerotier-one 2>/dev/null || service zerotier-one start 2>/dev/null || rc-service zerotier-one start 2>/dev/null || (nohup zerotier-one -d </dev/null >/dev/null 2>&1 &)");
         /* Wait up to 3 seconds for control socket / auth token */
         for (int retry = 0; retry < 6; retry++) {
             usleep(500000);
@@ -656,7 +656,7 @@ int vpn_manager_sync_status(vpn_config_t *vpn) {
     /* 2. ZeroTier Telemetry Sync via `zerotier-cli -j listnetworks` or tabular */
     vpn_manager_zt_refresh_node_id(&vpn->zerotier);
 
-    if (vpn->zerotier.enabled) {
+    if (vpn->zerotier.enabled || vpn->zerotier.network_count > 0) {
         bool json_parsed = false;
         FILE *fp_j = popen("zerotier-cli -j listnetworks 2>/dev/null", "r");
         if (fp_j) {
