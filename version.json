@@ -1,9 +1,13 @@
 {
-  "latest_version": "1.3.8",
+  "latest_version": "1.3.9",
   "channel": "stable",
   "release_date": "2026-10-03",
   "min_compatible_version": "1.2.0",
   "changelog": [
+    "Dropbear SSH Server Auto-Startup: Built-in automatic Dropbear daemon launcher on system boot across appliance, ISO, and hard disk installs (port 22, root login enabled)",
+    "Alpine Linux ZeroTier Engine: Offline package embedding in ISO build and smart runtime auto-installer for Alpine environments",
+    "ZeroTier Background Daemon Detachment: Non-blocking daemon management preventing pipe deadlocks and web worker freezes",
+    "Enhanced VPN Telemetry Sync: Real-time network state sync triggering even before initial config save",
     "Fix ZeroTier network join not sending join request (auto-enable daemon, await control socket readiness)",
     "Fix config wipe on general Save: VPN networks, WireGuard peers/keys, stealth, auth, and license settings now preserved",
     "ZeroTier Network ID input sanitization (strips non-hex, enforces 16 chars) in both UI and server",
@@ -51,7 +55,7 @@
   "packages": {
     "core": {
       "url": "https://raw.githubusercontent.com/ahmedha43/FluxWAN/main/dist/fluxwan",
-      "sha256": "66c5a6ad1d6ca488b63dd87a84ea4938f5cf450f5f65a5b76f72c2cf2a705cc4",
+      "sha256": "49687f1a82d3ef54c310ba09ec8f84a3779e08cc1875a0aae6b2c0de97a7d6e9",
       "size_bytes": 470400
     },
     "full_iso": {
