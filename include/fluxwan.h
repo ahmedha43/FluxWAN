@@ -62,7 +62,7 @@ typedef int socket_t;
 #define INVALID_SOCKET (-1)
 #endif
 
-#define FLUXWAN_VERSION "1.3.3"
+#define FLUXWAN_VERSION "1.3.4"
 #define FLUXWAN_AUTHOR "Ahmed Al-Dulaimi (أحمد الدليمي)"
 #define FLUXWAN_LICENSE "GNU GPLv3"
 #define FLUXWAN_COPYRIGHT "Copyright (C) 2026 Ahmed Al-Dulaimi. All rights reserved."
@@ -410,9 +410,9 @@ typedef struct {
     char starlink_wan_name[MAX_IFNAME_LEN];
 } nat46_config_t;
 
-#define MAX_PPPOE_USERS 256
-#define MAX_PPPOE_PROFILES 32
-#define MAX_PPPOE_SESSIONS 256
+#define MAX_PPPOE_USERS 4096
+#define MAX_PPPOE_PROFILES 64
+#define MAX_PPPOE_SESSIONS 1024
 
 /* PPPoE Bandwidth Profile Definition */
 typedef struct {

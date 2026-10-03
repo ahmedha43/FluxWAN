@@ -1,9 +1,15 @@
 {
-  "latest_version": "1.3.3",
+  "latest_version": "1.3.4",
   "channel": "stable",
   "release_date": "2026-10-03",
   "min_compatible_version": "1.2.0",
   "changelog": [
+    "SASMAN Migration Engine: Full Excel (.xlsx, .xls) and CSV subscriber import & export with interactive preview table",
+    "Direct SAS4 Billing System API Sync with official OpenSSL AES-256-CBC decryptor and multi-page user extraction",
+    "Automatic speed profile recognition, auto-creation with bandwidth limits, and expiration date conversion (Excel serial / ISO)",
+    "Increased subscriber database capacity to 4,096 PPPoE accounts and 64 speed profiles",
+    "Export subscribers directly to Microsoft Excel (.xlsx) and SASMAN/MikroTik-compatible CSV templates",
+    "CORS Preflight HTTP OPTIONS support for frictionless cross-origin API integration",
     "Full RadSec Protocol Support (RFC 6614 — RADIUS over TLS on TCP port 2083) with mTLS encryption",
     "Standard RADIUS AAA Client (RFC 2865 / 2866) with CoA / Disconnect support (RFC 3576)",
     "Carrier Stealth Shield: Outgoing IPv4 TTL Normalization (Anti-Tethering & Single-Hop Masking)",
@@ -22,8 +28,8 @@
   "packages": {
     "core": {
       "url": "https://raw.githubusercontent.com/ahmedha43/FluxWAN/main/dist/fluxwan",
-      "sha256": "894d80f1e5ebe84d075a92724d5bcfaec2252b78807e363c785c46a7b9a493f2",
-      "size_bytes": 400768
+      "sha256": "34a7fe8a25bc560d0f7084286c63477b82f4b8861cb4366d2f704ada5f36eed9",
+      "size_bytes": 421248
     },
     "full_iso": {
       "url": "https://github.com/ahmedha43/FluxWAN/releases/download/v1.2.5/fluxwan-os-x86_64.iso",

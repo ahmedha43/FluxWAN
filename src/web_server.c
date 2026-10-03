@@ -80,6 +80,20 @@ static inline void safe_str_copy(char *dst, const char *src, size_t max_len) {
     dst[slen] = '\0';
 }
 
+static inline void safe_str_concat(char *dst, const char *src, size_t max_len) {
+    if (!dst || max_len == 0 || !src) return;
+    size_t dlen = strlen(dst);
+    if (dlen >= max_len - 1) return;
+    size_t slen = strlen(src);
+    if (dlen + slen >= max_len) slen = max_len - dlen - 1;
+    memcpy(dst + dlen, src, slen);
+    dst[dlen + slen] = '\0';
+}
+
+static int extract_json_int(const char *json, const char *key, int default_val);
+static bool extract_json_bool(const char *json, const char *key, bool default_val);
+static uint64_t extract_json_uint64(const char *json, const char *key, uint64_t default_val);
+
 static const char *find_matching_bracket(const char *start) {
     if (!start || *start != '[') return NULL;
     int depth = 0;
@@ -366,7 +380,7 @@ web_server_ctx_t *web_server_init(fluxwan_config_t *config, netlink_ctx_t *nl, d
     ctx->nl = nl;
     ctx->dhcp = dhcp;
     ctx->start_time = time(NULL);
-    ctx->req_buf = malloc(131072);
+    ctx->req_buf = malloc(4194304);
     if (!ctx->req_buf) {
         free(ctx);
         return NULL;
@@ -1496,6 +1510,338 @@ static void build_json_clients(web_server_ctx_t *ctx, char *buf, size_t max_len)
     snprintf(buf + offset, max_len - offset, "\n  ],\n  \"count\": %d\n}\n", client_count);
 }
 
+static uint64_t parse_subscriber_expiration(const char *raw) {
+    if (!raw || !raw[0]) return 0;
+    while (*raw == ' ' || *raw == '\t' || *raw == '"') raw++;
+    if (!*raw) return 0;
+
+    /* 1. Check if pure numeric integer timestamp (e.g. 1779331200) */
+    char *endptr = NULL;
+    double dval = strtod(raw, &endptr);
+    if (dval > 1000000000.0 && (*endptr == '\0' || *endptr == '"' || *endptr == ' ')) {
+        return (uint64_t)dval;
+    }
+
+    /* 2. Check if Excel date serial float (e.g. 45000.0 - 55000.0) */
+    if (dval >= 35000.0 && dval <= 80000.0 && (*endptr == '\0' || *endptr == '"' || *endptr == ' ')) {
+        /* Days between 1899-12-30 and 1970-01-01 is 25569 */
+        double unix_sec = (dval - 25569.0) * 86400.0;
+        if (unix_sec > 0) return (uint64_t)unix_sec;
+    }
+
+    /* 3. Check standard YYYY-MM-DD or YYYY-MM-DD HH:MM:SS */
+    int year = 0, month = 0, day = 0, hour = 0, min = 0, sec = 0;
+    if (sscanf(raw, "%d-%d-%d %d:%d:%d", &year, &month, &day, &hour, &min, &sec) >= 3 ||
+        sscanf(raw, "%d/%d/%d %d:%d:%d", &year, &month, &day, &hour, &min, &sec) >= 3 ||
+        sscanf(raw, "%d-%d-%d", &year, &month, &day) == 3 ||
+        sscanf(raw, "%d/%d/%d", &year, &month, &day) == 3) {
+
+        struct tm tm_exp;
+        memset(&tm_exp, 0, sizeof(tm_exp));
+        tm_exp.tm_year = year - 1900;
+        tm_exp.tm_mon = month - 1;
+        tm_exp.tm_mday = day;
+        tm_exp.tm_hour = hour;
+        tm_exp.tm_min = min;
+        tm_exp.tm_sec = sec;
+        tm_exp.tm_isdst = -1;
+        time_t t = mktime(&tm_exp);
+        if (t > 0) return (uint64_t)t;
+    }
+    return 0;
+}
+
+static int parse_csv_line(const char *line, char fields[][128], int max_fields) {
+    int f_idx = 0;
+    const char *p = line;
+    while (*p && f_idx < max_fields) {
+        while (*p == ' ' || *p == '\t') p++;
+        char *dst = fields[f_idx];
+        size_t dlen = 0;
+        if (*p == '"') {
+            p++;
+            while (*p) {
+                if (*p == '"' && *(p + 1) == '"') {
+                    if (dlen < 127) dst[dlen++] = '"';
+                    p += 2;
+                } else if (*p == '"') {
+                    p++;
+                    break;
+                } else {
+                    if (dlen < 127) dst[dlen++] = *p;
+                    p++;
+                }
+            }
+            while (*p && *p != ',' && *p != '\r' && *p != '\n') p++;
+        } else {
+            while (*p && *p != ',' && *p != '\r' && *p != '\n') {
+                if (dlen < 127) dst[dlen++] = *p;
+                p++;
+            }
+        }
+        dst[dlen] = '\0';
+        f_idx++;
+        if (*p == ',') p++;
+        else break;
+    }
+    return f_idx;
+}
+
+static int parse_broadband_import_csv(const char *csv_text, pppoe_user_t *users, uint32_t *user_cnt, bool *replace_mode) {
+    if (!csv_text || !users || !user_cnt || !replace_mode) return -1;
+    *user_cnt = 0;
+
+    char line_buf[2048];
+    const char *p = csv_text;
+
+    int col_user = -1, col_pass = -1, col_prof = -1, col_ip = -1, col_exp = -1, col_en = -1, col_notes = -1;
+    int col_fn = -1, col_ln = -1, col_phone = -1;
+    bool header_parsed = false;
+
+    while (*p && *user_cnt < MAX_PPPOE_USERS) {
+        size_t llen = 0;
+        while (*p && *p != '\n' && llen < sizeof(line_buf) - 1) {
+            line_buf[llen++] = *p++;
+        }
+        if (*p == '\n') p++;
+        while (llen > 0 && (line_buf[llen - 1] == '\r' || line_buf[llen - 1] == ' ')) line_buf[--llen] = '\0';
+        line_buf[llen] = '\0';
+        if (llen == 0) continue;
+
+        char fields[32][128];
+        memset(fields, 0, sizeof(fields));
+        int num_f = parse_csv_line(line_buf, fields, 32);
+        if (num_f <= 0) continue;
+
+        if (!header_parsed) {
+            header_parsed = true;
+            for (int i = 0; i < num_f; i++) {
+                if (strcasecmp(fields[i], "username") == 0 || strcasecmp(fields[i], "user") == 0) col_user = i;
+                else if (strcasecmp(fields[i], "password") == 0 || strcasecmp(fields[i], "ct_password") == 0 || strcasecmp(fields[i], "pass") == 0) col_pass = i;
+                else if (strcasecmp(fields[i], "profile_name") == 0 || strcasecmp(fields[i], "profile") == 0 || strcasecmp(fields[i], "group_name") == 0) col_prof = i;
+                else if (strcasecmp(fields[i], "static_ip") == 0 || strcasecmp(fields[i], "ip") == 0) col_ip = i;
+                else if (strcasecmp(fields[i], "expiration") == 0 || strcasecmp(fields[i], "expires_at") == 0 || strcasecmp(fields[i], "expiry") == 0) col_exp = i;
+                else if (strcasecmp(fields[i], "enabled") == 0 || strcasecmp(fields[i], "status") == 0 || strcasecmp(fields[i], "active") == 0) col_en = i;
+                else if (strcasecmp(fields[i], "notes") == 0 || strcasecmp(fields[i], "comment") == 0) col_notes = i;
+                else if (strcasecmp(fields[i], "firstname") == 0) col_fn = i;
+                else if (strcasecmp(fields[i], "lastname") == 0) col_ln = i;
+                else if (strcasecmp(fields[i], "phone") == 0) col_phone = i;
+            }
+            if (col_user == -1) {
+                col_user = 0; col_pass = 1; col_prof = 2; col_exp = 3; col_notes = 4; col_ip = 5;
+            } else {
+                continue;
+            }
+        }
+
+        pppoe_user_t u;
+        memset(&u, 0, sizeof(u));
+        if (col_user >= 0 && col_user < num_f) safe_str_copy(u.username, fields[col_user], sizeof(u.username));
+        if (col_pass >= 0 && col_pass < num_f) safe_str_copy(u.password, fields[col_pass], sizeof(u.password));
+        if (col_prof >= 0 && col_prof < num_f) safe_str_copy(u.profile, fields[col_prof], sizeof(u.profile));
+        if (col_ip >= 0 && col_ip < num_f) safe_str_copy(u.static_ip, fields[col_ip], sizeof(u.static_ip));
+        if (col_notes >= 0 && col_notes < num_f) safe_str_copy(u.comment, fields[col_notes], sizeof(u.comment));
+
+        if (!u.comment[0]) {
+            char name_part[128] = {0};
+            if (col_fn >= 0 && col_fn < num_f && fields[col_fn][0]) {
+                safe_str_copy(name_part, fields[col_fn], sizeof(name_part));
+            }
+            if (col_ln >= 0 && col_ln < num_f && fields[col_ln][0]) {
+                if (name_part[0]) safe_str_concat(name_part, " ", sizeof(name_part));
+                safe_str_concat(name_part, fields[col_ln], sizeof(name_part));
+            }
+            if (col_phone >= 0 && col_phone < num_f && fields[col_phone][0]) {
+                if (name_part[0]) safe_str_concat(name_part, " - ", sizeof(name_part));
+                safe_str_concat(name_part, fields[col_phone], sizeof(name_part));
+            }
+            safe_str_copy(u.comment, name_part, sizeof(u.comment));
+        }
+
+        u.enabled = true;
+        if (col_en >= 0 && col_en < num_f) {
+            if (strcmp(fields[col_en], "0") == 0 || strcasecmp(fields[col_en], "false") == 0 || strcasecmp(fields[col_en], "disabled") == 0) {
+                u.enabled = false;
+            }
+        }
+
+        if (col_exp >= 0 && col_exp < num_f && fields[col_exp][0]) {
+            u.expires_at = parse_subscriber_expiration(fields[col_exp]);
+        }
+
+        if (u.username[0]) {
+            if (!u.password[0]) safe_str_copy(u.password, "123456", sizeof(u.password));
+            if (!u.profile[0]) safe_str_copy(u.profile, "Standard_25M", sizeof(u.profile));
+            users[(*user_cnt)++] = u;
+        }
+    }
+    return 0;
+}
+
+static int parse_broadband_import_json(const char *body,
+                                      pppoe_user_t *users, uint32_t *user_cnt,
+                                      pppoe_profile_t *profs, uint32_t *prof_cnt,
+                                      bool *replace_mode) {
+    if (!body || !users || !user_cnt || !profs || !prof_cnt || !replace_mode) return -1;
+    *user_cnt = 0;
+    *prof_cnt = 0;
+    *replace_mode = false;
+
+    char mval[32] = {0};
+    if (extract_json_string(body, "mode", mval, sizeof(mval))) {
+        if (strcasecmp(mval, "replace") == 0) {
+            *replace_mode = true;
+        }
+    }
+
+    /* 1. Parse Profiles Array if present */
+    const char *p_pos = strstr(body, "\"profiles\"");
+    if (p_pos) {
+        const char *parr = strchr(p_pos, '[');
+        if (parr) {
+            const char *curr = parr + 1;
+            while (*curr && *curr != ']' && *prof_cnt < MAX_PPPOE_PROFILES) {
+                while (*curr && *curr != '{' && *curr != ']') curr++;
+                if (*curr != '{') break;
+                const char *obj_start = curr;
+                const char *obj_end = NULL;
+                int depth = 0;
+                bool in_str = false;
+                for (const char *s = obj_start; *s; s++) {
+                    if (*s == '\\' && in_str) { s++; continue; }
+                    if (*s == '"') in_str = !in_str;
+                    if (!in_str) {
+                        if (*s == '{') depth++;
+                        else if (*s == '}') {
+                            depth--;
+                            if (depth == 0) { obj_end = s; break; }
+                        }
+                    }
+                }
+                if (!obj_end) break;
+
+                size_t o_len = (size_t)(obj_end - obj_start + 1);
+                char *obj_buf = malloc(o_len + 1);
+                if (obj_buf) {
+                    memcpy(obj_buf, obj_start, o_len);
+                    obj_buf[o_len] = '\0';
+
+                    pppoe_profile_t prof;
+                    memset(&prof, 0, sizeof(prof));
+                    extract_json_string(obj_buf, "name", prof.name, sizeof(prof.name));
+                    prof.rate_down_kbps = (uint32_t)extract_json_int(obj_buf, "rate_down_kbps", 0);
+                    prof.rate_up_kbps = (uint32_t)extract_json_int(obj_buf, "rate_up_kbps", 0);
+                    prof.validity_days = (uint32_t)extract_json_int(obj_buf, "validity_days", 30);
+                    extract_json_string(obj_buf, "description", prof.description, sizeof(prof.description));
+
+                    if (prof.name[0]) {
+                        profs[(*prof_cnt)++] = prof;
+                    }
+                    free(obj_buf);
+                }
+                curr = obj_end + 1;
+            }
+        }
+    }
+
+    /* 2. Parse Users Array */
+    const char *u_pos = strstr(body, "\"users\"");
+    const char *uarr = NULL;
+    if (u_pos) {
+        uarr = strchr(u_pos, '[');
+    } else {
+        const char *b = body;
+        while (*b == ' ' || *b == '\t' || *b == '\r' || *b == '\n') b++;
+        if (*b == '[') uarr = b;
+    }
+
+    if (uarr) {
+        const char *curr = uarr + 1;
+        while (*curr && *curr != ']' && *user_cnt < MAX_PPPOE_USERS) {
+            while (*curr && *curr != '{' && *curr != ']') curr++;
+            if (*curr != '{') break;
+            const char *obj_start = curr;
+            const char *obj_end = NULL;
+            int depth = 0;
+            bool in_str = false;
+            for (const char *s = obj_start; *s; s++) {
+                if (*s == '\\' && in_str) { s++; continue; }
+                if (*s == '"') in_str = !in_str;
+                if (!in_str) {
+                    if (*s == '{') depth++;
+                    else if (*s == '}') {
+                        depth--;
+                        if (depth == 0) { obj_end = s; break; }
+                    }
+                }
+            }
+            if (!obj_end) break;
+
+            size_t o_len = (size_t)(obj_end - obj_start + 1);
+            char *obj_buf = malloc(o_len + 1);
+            if (obj_buf) {
+                memcpy(obj_buf, obj_start, o_len);
+                obj_buf[o_len] = '\0';
+
+                pppoe_user_t u;
+                memset(&u, 0, sizeof(u));
+                extract_json_string(obj_buf, "username", u.username, sizeof(u.username));
+                extract_json_string(obj_buf, "password", u.password, sizeof(u.password));
+                if (!u.password[0]) extract_json_string(obj_buf, "ct_password", u.password, sizeof(u.password));
+
+                extract_json_string(obj_buf, "profile", u.profile, sizeof(u.profile));
+                if (!u.profile[0]) extract_json_string(obj_buf, "profile_name", u.profile, sizeof(u.profile));
+                if (!u.profile[0]) extract_json_string(obj_buf, "group_name", u.profile, sizeof(u.profile));
+
+                extract_json_string(obj_buf, "static_ip", u.static_ip, sizeof(u.static_ip));
+                extract_json_string(obj_buf, "comment", u.comment, sizeof(u.comment));
+                if (!u.comment[0]) extract_json_string(obj_buf, "notes", u.comment, sizeof(u.comment));
+                if (!u.comment[0]) {
+                    char fn[64] = {0}, ln[64] = {0}, ph[32] = {0};
+                    extract_json_string(obj_buf, "firstname", fn, sizeof(fn));
+                    extract_json_string(obj_buf, "lastname", ln, sizeof(ln));
+                    extract_json_string(obj_buf, "phone", ph, sizeof(ph));
+                    if (fn[0] || ln[0] || ph[0]) {
+                        snprintf(u.comment, sizeof(u.comment), "%s %s %s", fn, ln, ph);
+                        size_t cl = strlen(u.comment);
+                        while (cl > 0 && u.comment[cl-1] == ' ') u.comment[--cl] = '\0';
+                        char *cp = u.comment;
+                        while (*cp == ' ') cp++;
+                        if (cp != u.comment) memmove(u.comment, cp, strlen(cp) + 1);
+                    }
+                }
+
+                u.enabled = extract_json_bool(obj_buf, "enabled", true);
+                u.created_at = extract_json_uint64(obj_buf, "created_at", 0);
+                u.expires_at = extract_json_uint64(obj_buf, "expires_at", 0);
+
+                if (u.expires_at == 0) {
+                    char exp_raw[64] = {0};
+                    if (extract_json_string(obj_buf, "expiration", exp_raw, sizeof(exp_raw))) {
+                        u.expires_at = parse_subscriber_expiration(exp_raw);
+                    }
+                }
+
+                int vdays = extract_json_int(obj_buf, "validity_days", -1);
+                if (vdays >= 0) {
+                    if (vdays == 0) u.expires_at = 0;
+                    else u.expires_at = (uint64_t)time(NULL) + (uint64_t)vdays * 86400ULL;
+                }
+
+                if (u.username[0]) {
+                    if (!u.profile[0]) safe_str_copy(u.profile, "Standard_25M", sizeof(u.profile));
+                    if (!u.password[0]) safe_str_copy(u.password, "123456", sizeof(u.password));
+                    users[(*user_cnt)++] = u;
+                }
+                free(obj_buf);
+            }
+            curr = obj_end + 1;
+        }
+    }
+
+    return 0;
+}
+
 static void build_json_broadband_status(web_server_ctx_t *ctx, char *buf, size_t max_len) {
     if (!ctx || !buf || max_len == 0) return;
     const pppoe_server_config_t *cfg = &ctx->config->pppoe_server;
@@ -2521,7 +2867,7 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
 
     char *req = ctx->req_buf;
     if (!req) return -1;
-    size_t max_req = 131072;
+    size_t max_req = 4194304;
     ssize_t n = recv(client_fd, req, (int)(max_req - 1), 0);
     if (n <= 0) {
 #if defined(_WIN32) || defined(_WIN64)
@@ -2569,6 +2915,19 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
         peer_ip = peer_addr.sin_addr.s_addr;
     }
 #endif
+
+    if (strncmp(req, "OPTIONS ", 8) == 0) {
+        const char *resp = "HTTP/1.1 204 No Content\r\n"
+                           "Access-Control-Allow-Origin: *\r\n"
+                           "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n"
+                           "Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With\r\n"
+                           "Access-Control-Max-Age: 86400\r\n"
+                           "Content-Length: 0\r\n"
+                           "Connection: close\r\n\r\n";
+        send(client_fd, resp, (int)strlen(resp), 0);
+        close_client_socket(client_fd);
+        return 0;
+    }
 
     if (strstr(req, "POST /api/v1/login") != NULL) {
         time_t now = time(NULL);
@@ -4505,6 +4864,103 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
         }
         const char *rb = "{\"status\":\"ok\",\"message\":\"RADIUS / RadSec AAA configuration saved\"}";
         char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "GET /api/v1/broadband/export.csv") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        size_t csv_cap = MAX_PPPOE_USERS * 256 + 2048;
+        char *csv_buf = malloc(csv_cap);
+        if (!csv_buf) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Out of memory\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        int csv_len = pppoe_server_export_csv(&ctx->config->pppoe_server, csv_buf, csv_cap);
+        if (csv_len < 0) csv_len = 0;
+
+        char hdr[512];
+        int hdr_len = snprintf(hdr, sizeof(hdr),
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/csv; charset=utf-8\r\n"
+            "Content-Disposition: attachment; filename=\"fluxwan_subscribers_export.csv\"\r\n"
+            "Access-Control-Allow-Origin: *\r\n"
+            "Content-Length: %d\r\n"
+            "Connection: close\r\n\r\n", csv_len);
+
+        send(client_fd, hdr, hdr_len, 0);
+        if (csv_len > 0) {
+            send(client_fd, csv_buf, csv_len, 0);
+        }
+        free(csv_buf);
+        close_client_socket(client_fd);
+        return 0;
+    } else if (strstr(req, "POST /api/v1/broadband/import") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        if (!body) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Empty request body\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        body += 4;
+        while (*body == ' ' || *body == '\t' || *body == '\r' || *body == '\n') body++;
+
+        pppoe_user_t *imported_users = malloc(sizeof(pppoe_user_t) * MAX_PPPOE_USERS);
+        pppoe_profile_t *imported_profs = malloc(sizeof(pppoe_profile_t) * MAX_PPPOE_PROFILES);
+        if (!imported_users || !imported_profs) {
+            if (imported_users) free(imported_users);
+            if (imported_profs) free(imported_profs);
+            const char *rb = "{\"status\":\"error\",\"message\":\"Out of memory\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+
+        uint32_t user_cnt = 0;
+        uint32_t prof_cnt = 0;
+        bool replace_mode = false;
+
+        if (*body == '{' || *body == '[') {
+            parse_broadband_import_json(body, imported_users, &user_cnt, imported_profs, &prof_cnt, &replace_mode);
+        } else {
+            parse_broadband_import_csv(body, imported_users, &user_cnt, &replace_mode);
+        }
+
+        if (ctx->pppoe_srv && (user_cnt > 0 || replace_mode)) {
+            pppoe_server_bulk_import(ctx->pppoe_srv, imported_users, user_cnt, imported_profs, prof_cnt, replace_mode);
+            config_save(get_config_target_path(ctx), ctx->config);
+            wan_manager_add_log("INFO", "Bulk imported %u subscribers, %u profiles (mode: %s, total active: %u)",
+                                user_cnt, prof_cnt, replace_mode ? "replace" : "merge",
+                                ctx->config->pppoe_server.user_count);
+        }
+
+        free(imported_users);
+        free(imported_profs);
+
+        char rb[512];
+        snprintf(rb, sizeof(rb),
+                 "{\"status\":\"ok\",\"message\":\"Import completed successfully\",\"imported_users\":%u,\"imported_profiles\":%u,\"total_users\":%u}",
+                 user_cnt, prof_cnt, ctx->config->pppoe_server.user_count);
+
+        char resp[1024]; int len = snprintf(resp, sizeof(resp),
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
             strlen(rb), rb);
         send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;

@@ -105,7 +105,18 @@ int pppoe_server_renew_user(pppoe_server_ctx_t *ctx, const char *username, uint3
 int pppoe_server_toggle_user(pppoe_server_ctx_t *ctx, const char *username, bool enable);
 
 /**
- * Periodic tick to check for expired active sessions and disconnect them
+ * Bulk import subscribers and speed profiles (mode: replace_mode = true to clear existing, false to merge/update)
+ */
+int pppoe_server_bulk_import(pppoe_server_ctx_t *ctx, const pppoe_user_t *new_users, uint32_t user_cnt,
+                             const pppoe_profile_t *new_profs, uint32_t prof_cnt, bool replace_mode);
+
+/**
+ * Export all subscribers to CSV format (compatible with SASMAN and Excel)
+ */
+int pppoe_server_export_csv(const pppoe_server_config_t *cfg, char *buf, size_t max_len);
+
+/**
+ * Periodic tick for subscriber expiry enforcement and session disconnects
  */
 void pppoe_server_periodic_tick(pppoe_server_ctx_t *ctx, uint64_t now_ms);
 

@@ -951,3 +951,148 @@ int pppoe_server_delete_profile(pppoe_server_ctx_t *ctx, const char *name) {
     pthread_mutex_unlock(&ctx->lock);
     return 0;
 }
+
+int pppoe_server_bulk_import(pppoe_server_ctx_t *ctx, const pppoe_user_t *new_users, uint32_t user_cnt,
+                             const pppoe_profile_t *new_profs, uint32_t prof_cnt, bool replace_mode) {
+    if (!ctx) return -1;
+    pthread_mutex_lock(&ctx->lock);
+    pppoe_server_config_t *cfg = &ctx->config->pppoe_server;
+
+    /* 1. If replace_mode, reset current users */
+    if (replace_mode) {
+        cfg->user_count = 0;
+        memset(cfg->users, 0, sizeof(cfg->users));
+    }
+
+    /* 2. Process profiles first */
+    for (uint32_t p = 0; p < prof_cnt; p++) {
+        const pppoe_profile_t *prof = &new_profs[p];
+        if (!prof->name[0]) continue;
+
+        int found_idx = -1;
+        for (uint32_t i = 0; i < cfg->profile_count; i++) {
+            if (strcmp(cfg->profiles[i].name, prof->name) == 0) {
+                found_idx = (int)i;
+                break;
+            }
+        }
+        if (found_idx >= 0) {
+            cfg->profiles[found_idx] = *prof;
+        } else if (cfg->profile_count < MAX_PPPOE_PROFILES) {
+            cfg->profiles[cfg->profile_count++] = *prof;
+        }
+    }
+
+    /* 3. Process users */
+    time_t now_sec = time(NULL);
+    for (uint32_t u = 0; u < user_cnt; u++) {
+        const pppoe_user_t *nu = &new_users[u];
+        if (!nu->username[0] || !nu->password[0]) continue;
+
+        pppoe_user_t user_copy = *nu;
+        if (user_copy.created_at == 0) user_copy.created_at = (uint64_t)now_sec;
+
+        /* Auto-create profile if user has a profile not yet in cfg */
+        if (user_copy.profile[0]) {
+            bool prof_exists = false;
+            for (uint32_t p = 0; p < cfg->profile_count; p++) {
+                if (strcmp(cfg->profiles[p].name, user_copy.profile) == 0) {
+                    prof_exists = true;
+                    /* If user has no expiry but profile has validity, calculate expiry */
+                    if (user_copy.expires_at == 0 && cfg->profiles[p].validity_days > 0) {
+                        user_copy.expires_at = (uint64_t)now_sec + ((uint64_t)cfg->profiles[p].validity_days * 86400ULL);
+                    }
+                    break;
+                }
+            }
+            if (!prof_exists && cfg->profile_count < MAX_PPPOE_PROFILES) {
+                pppoe_profile_t autoprof;
+                memset(&autoprof, 0, sizeof(autoprof));
+                safe_str_copy(autoprof.name, user_copy.profile, sizeof(autoprof.name));
+                autoprof.rate_down_kbps = 10240; /* 10 Mbps default */
+                autoprof.rate_up_kbps = 5120;    /* 5 Mbps default */
+                autoprof.validity_days = 30;
+                safe_str_copy(autoprof.description, "Auto-created on import", sizeof(autoprof.description));
+                cfg->profiles[cfg->profile_count++] = autoprof;
+                if (user_copy.expires_at == 0) {
+                    user_copy.expires_at = (uint64_t)now_sec + (30ULL * 86400ULL);
+                }
+            }
+        }
+
+        int found_user = -1;
+        for (uint32_t i = 0; i < cfg->user_count; i++) {
+            if (strcmp(cfg->users[i].username, user_copy.username) == 0) {
+                found_user = (int)i;
+                break;
+            }
+        }
+
+        if (found_user >= 0) {
+            cfg->users[found_user] = user_copy;
+        } else if (cfg->user_count < MAX_PPPOE_USERS) {
+            cfg->users[cfg->user_count++] = user_copy;
+        }
+    }
+
+    write_pppoe_secrets(cfg);
+    setup_pppoe_scripts(cfg);
+    pthread_mutex_unlock(&ctx->lock);
+
+    LOG_INFO("[Broadband] Bulk import completed: %u users, %u profiles (mode: %s, total users now: %u)",
+             user_cnt, prof_cnt, replace_mode ? "replace" : "merge", cfg->user_count);
+    return 0;
+}
+
+int pppoe_server_export_csv(const pppoe_server_config_t *cfg, char *buf, size_t max_len) {
+    if (!cfg || !buf || max_len == 0) return -1;
+    size_t offset = 0;
+
+    /* Write CSV Header matching standard SASMAN template */
+    offset += snprintf(buf + offset, max_len - offset,
+        "id,username,firstname,lastname,city,phone,balance,expiration,email,static_ip,enabled,notes,profile_name,mac,parent_name,ct_password,address,contract_id,created_at\r\n");
+
+    for (uint32_t i = 0; i < cfg->user_count && offset < max_len - 512; i++) {
+        const pppoe_user_t *u = &cfg->users[i];
+
+        /* Format expiration date */
+        char exp_str[64] = "";
+        if (u->expires_at > 0) {
+            time_t exp_t = (time_t)u->expires_at;
+            struct tm tm_buf;
+#if defined(_WIN32) || defined(_WIN64)
+            localtime_s(&tm_buf, &exp_t);
+#else
+            localtime_r(&exp_t, &tm_buf);
+#endif
+            strftime(exp_str, sizeof(exp_str), "%Y-%m-%d %H:%M:%S", &tm_buf);
+        }
+
+        /* Format created_at date */
+        char crt_str[64] = "";
+        if (u->created_at > 0) {
+            time_t crt_t = (time_t)u->created_at;
+            struct tm tm_buf;
+#if defined(_WIN32) || defined(_WIN64)
+            localtime_s(&tm_buf, &crt_t);
+#else
+            localtime_r(&crt_t, &tm_buf);
+#endif
+            strftime(crt_str, sizeof(crt_str), "%Y-%m-%d %H:%M:%S", &tm_buf);
+        }
+
+        offset += snprintf(buf + offset, max_len - offset,
+            "%u,\"%s\",\"%s\",\"\",\"\",\"\",\"0.00\",\"%s\",\"\",\"%s\",%d,\"%s\",\"%s\",\"N/A\",\"admin\",\"%s\",\"\",\"\",\"%s\"\r\n",
+            i + 1,
+            u->username,
+            u->comment,
+            exp_str,
+            u->static_ip,
+            u->enabled ? 1 : 0,
+            u->comment,
+            u->profile,
+            u->password,
+            crt_str);
+    }
+    return (int)offset;
+}

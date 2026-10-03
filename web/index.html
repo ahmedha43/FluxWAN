@@ -7,6 +7,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
     <style>
         body { background-color: #0b0f19; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; }
         .glass-card { background: rgba(23, 32, 51, 0.75); backdrop-filter: blur(14px); border: 1px solid rgba(255, 255, 255, 0.08); }
@@ -1290,6 +1292,257 @@
                 <div class="flex items-center justify-end space-x-3 pt-3 border-t border-slate-800">
                     <button type="button" @click="showAddProfileModal = false" class="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white border border-slate-700 bg-slate-800 transition" x-text="currentLang==='ar' ? 'إلغاء' : 'Cancel'"></button>
                     <button type="button" @click="saveBroadbandProfile()" class="px-5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-lg transition" x-text="currentLang==='ar' ? '💾 إضافة الباقة' : 'Save Profile'"></button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal: Import & Export Subscribers & Profiles -->
+        <div x-show="showImportExportModal" x-transition class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
+            <div class="glass-card max-w-4xl w-full p-5 sm:p-6 rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl space-y-4 max-h-[92vh] flex flex-col">
+                <!-- Header -->
+                <div class="flex items-center justify-between border-b border-slate-800 pb-3 flex-shrink-0">
+                    <div class="flex items-center space-x-3">
+                        <div class="p-2.5 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xl">
+                            📥
+                        </div>
+                        <div>
+                            <h3 class="text-base font-bold text-white flex items-center gap-2">
+                                <span x-text="currentLang==='ar' ? 'استيراد وتصدير المشتركين والباقات' : 'Broadband Subscribers Import & Export'"></span>
+                                <span class="px-2 py-0.5 rounded-full text-3xs font-mono bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">SASMAN &amp; SAS4 Engine</span>
+                            </h3>
+                            <p class="text-3xs sm:text-2xs text-slate-400" x-text="currentLang==='ar' ? 'استيراد فوري من ملفات Excel و CSV، أو سحب مباشر من منظومة SAS4، مع دعم كامل للتواريخ والباقات والتصدير' : 'Import subscribers from Excel/CSV or sync directly from SAS4 billing API with profiles and expiry dates.'"></p>
+                        </div>
+                    </div>
+                    <button type="button" @click="closeImportModal()" class="text-slate-400 hover:text-white text-lg p-1">✕</button>
+                </div>
+
+                <!-- Tabs Navigation -->
+                <div class="flex flex-wrap gap-2 border-b border-slate-800/80 pb-2.5 flex-shrink-0">
+                    <button type="button" @click="importTab = 'excel'"
+                            :class="importTab === 'excel' ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-800/70 text-slate-400 hover:text-white border border-slate-700'"
+                            class="px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5">
+                        <span>📊</span>
+                        <span x-text="currentLang==='ar' ? 'استيراد ملف (Excel / CSV)' : 'Excel / CSV File'"></span>
+                    </button>
+                    <button type="button" @click="importTab = 'sas4'"
+                            :class="importTab === 'sas4' ? 'bg-cyan-600 text-white shadow-md' : 'bg-slate-800/70 text-slate-400 hover:text-white border border-slate-700'"
+                            class="px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5">
+                        <span>⚡</span>
+                        <span x-text="currentLang==='ar' ? 'سحب مباشر من SAS4 API' : 'Direct SAS4 API Sync'"></span>
+                    </button>
+                    <button type="button" @click="importTab = 'json'"
+                            :class="importTab === 'json' ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-800/70 text-slate-400 hover:text-white border border-slate-700'"
+                            class="px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5">
+                        <span>📋</span>
+                        <span x-text="currentLang==='ar' ? 'استيراد JSON / SASMAN' : 'Raw JSON / Backup'"></span>
+                    </button>
+                    <button type="button" @click="importTab = 'export'"
+                            :class="importTab === 'export' ? 'bg-purple-600 text-white shadow-md' : 'bg-slate-800/70 text-slate-400 hover:text-white border border-slate-700'"
+                            class="px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5">
+                        <span>📤</span>
+                        <span x-text="currentLang==='ar' ? 'تصدير المشتركين (Export)' : 'Export Subscribers'"></span>
+                    </button>
+                </div>
+
+                <!-- Tab Content: Scrollable Body -->
+                <div class="overflow-y-auto flex-1 space-y-4 pr-1 text-xs">
+                    <!-- Global Mode Settings (For Import Tabs) -->
+                    <div x-show="importTab !== 'export'" class="p-3 bg-slate-950/70 rounded-xl border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div class="flex items-center space-x-2">
+                            <span class="text-3xs text-slate-400 font-semibold uppercase" x-text="currentLang==='ar' ? 'نمط الاستيراد:' : 'Import Mode:'"></span>
+                            <div class="inline-flex p-0.5 rounded-lg bg-slate-900 border border-slate-800">
+                                <button type="button" @click="importMode = 'merge'"
+                                        :class="importMode === 'merge' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'"
+                                        class="px-3 py-1 rounded-md text-3xs font-bold transition"
+                                        x-text="currentLang==='ar' ? '🔄 دمج وتحديث (Merge)' : 'Merge & Update'"></button>
+                                <button type="button" @click="importMode = 'replace'"
+                                        :class="importMode === 'replace' ? 'bg-rose-600 text-white shadow' : 'text-slate-400 hover:text-white'"
+                                        class="px-3 py-1 rounded-md text-3xs font-bold transition"
+                                        x-text="currentLang==='ar' ? '⚠️ استبدال شامل (Replace)' : 'Replace All'"></button>
+                            </div>
+                        </div>
+                        <div class="text-3xs text-slate-400">
+                            <span x-show="importMode === 'merge'" x-text="currentLang==='ar' ? 'سيتم تحديث المشتركين المطابقين وإضافة الجدد دون مسح المشتركين السابقين.' : 'Updates existing subscribers and appends new ones without data loss.'"></span>
+                            <span x-show="importMode === 'replace'" class="text-rose-400" x-text="currentLang==='ar' ? 'تحذير: سيتم مسح قائمة المشتركين الحالية واستبدالها بالكامل بالقائمة المستوردة.' : 'Caution: Clears current user database and replaces it completely.'"></span>
+                        </div>
+                    </div>
+
+                    <!-- TAB 1: EXCEL / CSV UPLOAD -->
+                    <div x-show="importTab === 'excel'" class="space-y-4">
+                        <!-- Dropzone -->
+                        <div class="border-2 border-dashed border-slate-700 hover:border-emerald-500/60 rounded-2xl p-6 text-center bg-slate-950/40 hover:bg-slate-950/70 transition cursor-pointer relative"
+                             @click="$refs.excelFileInput.click()"
+                             @dragover.prevent="$event.dataTransfer.dropEffect = 'copy'"
+                             @drop.prevent="handleFileDrop($event)">
+                            <input type="file" x-ref="excelFileInput" @change="handleFileUpload($event)" accept=".xlsx, .xls, .csv" class="hidden">
+                            <div class="text-3xl mb-2">📁</div>
+                            <div class="text-sm font-bold text-white mb-1" x-text="importFileName || (currentLang==='ar' ? 'اضغط هنا أو اسحب وأفلت ملف Excel أو CSV' : 'Click or Drag & Drop Excel / CSV file here')"></div>
+                            <div class="text-3xs text-slate-400" x-text="currentLang==='ar' ? 'يدعم قوالب SASMAN و SAS4 و MikroTik (.xlsx, .xls, .csv) مع التعرف التلقائي على الأعمدة والتواريخ' : 'Supports SASMAN, SAS4 and MikroTik templates (.xlsx, .xls, .csv) with auto-column and expiration detection'"></div>
+                        </div>
+                    </div>
+
+                    <!-- TAB 2: SAS4 DIRECT API -->
+                    <div x-show="importTab === 'sas4'" class="space-y-4">
+                        <div class="p-4 bg-slate-950/60 rounded-xl border border-slate-800 space-y-3">
+                            <div class="flex items-center space-x-2 text-cyan-400 font-bold">
+                                <span>🌐</span>
+                                <span x-text="currentLang==='ar' ? 'بيانات الاتصال بمنظومة SAS4 Billing' : 'SAS4 Billing Server Connection'"></span>
+                            </div>
+                            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                <div class="sm:col-span-1">
+                                    <label class="text-3xs text-slate-400 block mb-1 font-semibold uppercase">API Base URL</label>
+                                    <input type="text" x-model="sas4Form.url" placeholder="http://192.168.1.100/admin/api" class="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono text-xs">
+                                </div>
+                                <div>
+                                    <label class="text-3xs text-slate-400 block mb-1 font-semibold uppercase" x-text="currentLang==='ar' ? 'اسم المستخدم (Admin)' : 'Admin Username'"></label>
+                                    <input type="text" x-model="sas4Form.username" placeholder="admin" class="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono text-xs">
+                                </div>
+                                <div>
+                                    <label class="text-3xs text-slate-400 block mb-1 font-semibold uppercase" x-text="currentLang==='ar' ? 'كلمة المرور (Password)' : 'Password'"></label>
+                                    <input type="password" x-model="sas4Form.password" placeholder="••••••••" class="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono text-xs">
+                                </div>
+                            </div>
+
+                            <div class="flex items-center justify-between pt-2">
+                                <span class="text-3xs text-slate-500" x-text="currentLang==='ar' ? 'يتم فك تشفير كلمات المرور باستخدام مفتاح SAS4 الرسمي OpenSSL AES-256-CBC.' : 'Decrypts passwords using official SAS4 AES-256-CBC engine.'"></span>
+                                <button type="button" @click="fetchFromSas4Api()" :disabled="sas4Form.syncing || !sas4Form.url || !sas4Form.username || !sas4Form.password"
+                                        class="px-4 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-md disabled:opacity-50 flex items-center space-x-1.5">
+                                    <span x-show="sas4Form.syncing" class="animate-spin text-sm">⏳</span>
+                                    <span x-show="!sas4Form.syncing">⚡</span>
+                                    <span x-text="sas4Form.syncing ? (currentLang==='ar'?'جاري السحب...':'Syncing...') : (currentLang==='ar'?'بدء سحب المشتركين من SAS4':'Fetch Subscribers from SAS4')"></span>
+                                </button>
+                            </div>
+
+                            <!-- Progress Bar -->
+                            <div x-show="sas4Form.syncing || sas4Form.progressText" class="space-y-1.5 pt-2 border-t border-slate-800/80">
+                                <div class="flex justify-between text-3xs text-slate-300 font-mono">
+                                    <span x-text="sas4Form.progressText"></span>
+                                    <span x-text="sas4Form.progressPct + '%'"></span>
+                                </div>
+                                <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                    <div class="h-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-all duration-300" :style="'width: ' + sas4Form.progressPct + '%'"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- TAB 3: RAW JSON / BACKUP -->
+                    <div x-show="importTab === 'json'" class="space-y-3">
+                        <div>
+                            <label class="text-3xs text-slate-400 block mb-1 font-semibold uppercase" x-text="currentLang==='ar' ? 'ألصق كود JSON الخاص بالمشتركين أو نسخة SASMAN الاحتياطية' : 'Paste Subscribers JSON or SASMAN Export'"></label>
+                            <textarea x-model="rawJsonInput" rows="6" placeholder='[{"username":"user1","password":"123","profile":"Standard_25M","expiration":"2026-11-01 12:00:00"}]' class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-mono text-2xs"></textarea>
+                        </div>
+                        <button type="button" @click="parseRawJsonInput()" :disabled="!rawJsonInput.trim()"
+                                class="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-md disabled:opacity-50">
+                            <span x-text="currentLang==='ar' ? '🔍 فحص وتحليل كود الـ JSON' : 'Parse & Validate JSON'"></span>
+                        </button>
+                    </div>
+
+                    <!-- TAB 4: EXPORT -->
+                    <div x-show="importTab === 'export'" class="space-y-4">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <!-- Excel Export Card -->
+                            <div class="p-5 bg-slate-950/60 rounded-2xl border border-slate-800 space-y-3 flex flex-col justify-between">
+                                <div class="space-y-1.5">
+                                    <div class="text-2xl">📊</div>
+                                    <div class="text-sm font-bold text-white" x-text="currentLang==='ar' ? 'تصدير كملف إكسل (Excel .xlsx)' : 'Export to Excel (.xlsx)'"></div>
+                                    <div class="text-3xs text-slate-400" x-text="currentLang==='ar' ? 'تصدير جدول المشتركين بالكامل بتنسيق Microsoft Excel حديث مع التواريخ والحالات والباقات.' : 'Generates a clean spreadsheet with all subscribers, passwords, profiles and expiration.'"></div>
+                                </div>
+                                <button type="button" @click="exportToExcel()" class="w-full py-2.5 rounded-xl font-bold text-xs bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/30 transition flex items-center justify-center space-x-1.5">
+                                    <span>📥</span>
+                                    <span x-text="currentLang==='ar' ? 'تحميل ملف Excel (.xlsx)' : 'Download Excel File'"></span>
+                                </button>
+                            </div>
+
+                            <!-- CSV Export Card -->
+                            <div class="p-5 bg-slate-950/60 rounded-2xl border border-slate-800 space-y-3 flex flex-col justify-between">
+                                <div class="space-y-1.5">
+                                    <div class="text-2xl">📄</div>
+                                    <div class="text-sm font-bold text-white" x-text="currentLang==='ar' ? 'تصدير كملف CSV (قالب SASMAN القياسي)' : 'Export CSV (SASMAN Template)'"></div>
+                                    <div class="text-3xs text-slate-400" x-text="currentLang==='ar' ? 'ملف نصي CSV متوافق 100% مع منظومة SASMAN و MikroTik لإعادة الاستيراد في أي وقت.' : '100% SASMAN & MikroTik compatible CSV format for easy migration.'"></div>
+                                </div>
+                                <button type="button" @click="exportToCsv()" class="w-full py-2.5 rounded-xl font-bold text-xs bg-cyan-600 hover:bg-cyan-500 text-white shadow-lg shadow-cyan-900/30 transition flex items-center justify-center space-x-1.5">
+                                    <span>📥</span>
+                                    <span x-text="currentLang==='ar' ? 'تحميل ملف CSV القياسي' : 'Download Standard CSV'"></span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- PREVIEW TABLE SECTION (Shown when users are loaded for import) -->
+                    <div x-show="importPreviewUsers.length > 0 && importTab !== 'export'" class="space-y-3 pt-3 border-t border-slate-800">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-2">
+                                <span class="text-sm font-bold text-white flex items-center gap-1.5">
+                                    <span>👁️</span>
+                                    <span x-text="currentLang==='ar' ? 'معاينة المشتركين المكتشفين جاهزة للاستيراد' : 'Discovered Subscribers Ready for Import'"></span>
+                                </span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="px-2 py-0.5 rounded-full text-3xs font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40" x-text="importPreviewUsers.length + ' ' + (currentLang==='ar'?'مشترك سليم':'Valid')"></span>
+                                <template x-if="importPreviewProfiles.length > 0">
+                                    <span class="px-2 py-0.5 rounded-full text-3xs font-mono font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40" x-text="importPreviewProfiles.length + ' ' + (currentLang==='ar'?'باقات سرعة':'Profiles')"></span>
+                                </template>
+                            </div>
+                        </div>
+
+                        <!-- Table -->
+                        <div class="overflow-x-auto max-h-56 rounded-xl border border-slate-800 bg-slate-950/60">
+                            <table class="w-full text-left text-3xs text-slate-300 font-mono">
+                                <thead class="bg-slate-900 text-slate-400 uppercase font-semibold sticky top-0 border-b border-slate-800">
+                                    <tr>
+                                        <th class="px-3 py-2">#</th>
+                                        <th class="px-3 py-2" x-text="currentLang==='ar' ? 'اسم المستخدم' : 'Username'"></th>
+                                        <th class="px-3 py-2" x-text="currentLang==='ar' ? 'كلمة المرور' : 'Password'"></th>
+                                        <th class="px-3 py-2" x-text="currentLang==='ar' ? 'الباقة' : 'Profile'"></th>
+                                        <th class="px-3 py-2" x-text="currentLang==='ar' ? 'تاريخ الانتهاء' : 'Expiry Date'"></th>
+                                        <th class="px-3 py-2" x-text="currentLang==='ar' ? 'آيبي ثابت' : 'Static IP'"></th>
+                                        <th class="px-3 py-2" x-text="currentLang==='ar' ? 'الاسم والملاحظات' : 'Comment/Phone'"></th>
+                                        <th class="px-3 py-2" x-text="currentLang==='ar' ? 'الحالة' : 'Status'"></th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-800/60">
+                                    <template x-for="(u, idx) in importPreviewUsers.slice(0, 50)" :key="idx">
+                                        <tr class="hover:bg-slate-800/40 transition">
+                                            <td class="px-3 py-1.5 text-slate-500" x-text="idx + 1"></td>
+                                            <td class="px-3 py-1.5 font-bold text-white" x-text="u.username"></td>
+                                            <td class="px-3 py-1.5 text-slate-400" x-text="u.password"></td>
+                                            <td class="px-3 py-1.5">
+                                                <span class="px-1.5 py-0.5 rounded text-4xs bg-indigo-500/20 text-indigo-300 border border-indigo-500/30" x-text="u.profile"></span>
+                                            </td>
+                                            <td class="px-3 py-1.5">
+                                                <span :class="u.expires_at > 0 ? 'text-cyan-300' : 'text-slate-500'" x-text="u.expires_at > 0 ? formatEpoch(u.expires_at) : (currentLang==='ar'?'♾️ دائم':'Unlimited')"></span>
+                                            </td>
+                                            <td class="px-3 py-1.5 text-slate-400" x-text="u.static_ip || '-'"></td>
+                                            <td class="px-3 py-1.5 font-sans text-slate-300 truncate max-w-[120px]" x-text="u.comment || '-'"></td>
+                                            <td class="px-3 py-1.5">
+                                                <span class="px-1.5 py-0.5 rounded text-4xs font-sans" :class="u.enabled ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'" x-text="u.enabled ? (currentLang==='ar'?'نشط':'Active') : (currentLang==='ar'?'معطل':'Disabled')"></span>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                        <template x-if="importPreviewUsers.length > 50">
+                            <div class="text-3xs text-slate-500 text-center" x-text="(currentLang==='ar'?'يتم عرض أول 50 مشترك من أصل ':'Showing first 50 subscribers out of ') + importPreviewUsers.length"></div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Footer Action Buttons -->
+                <div class="flex items-center justify-between pt-3 border-t border-slate-800 flex-shrink-0">
+                    <button type="button" @click="closeImportModal()" class="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white border border-slate-700 bg-slate-800 transition" x-text="currentLang==='ar' ? 'إغلاق' : 'Close'"></button>
+                    
+                    <div class="flex items-center gap-2">
+                        <template x-if="importTab !== 'export' && importPreviewUsers.length > 0">
+                            <button type="button" @click="executeBulkImport()" :disabled="isImporting"
+                                    class="px-5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-lg shadow-emerald-900/30 transition flex items-center space-x-1.5 disabled:opacity-50">
+                                <span x-show="isImporting" class="animate-spin text-sm">⏳</span>
+                                <span x-show="!isImporting">🚀</span>
+                                <span x-text="isImporting ? (currentLang==='ar'?'جاري الاستيراد...':'Importing...') : ((currentLang==='ar'?'تأكيد استيراد ':'Confirm Import of ') + importPreviewUsers.length + (currentLang==='ar'?' مشترك إلى السيرفر':' Subscribers'))"></span>
+                            </button>
+                        </template>
+                    </div>
                 </div>
             </div>
         </div>
@@ -2646,10 +2899,16 @@
                             </h3>
                             <p class="text-xs text-slate-400" x-text="currentLang==='ar' ? 'إضافة وتعديل وحذف اشتراكات الـ PPPoE وتحديد الباقات' : 'Manage credentials, passwords, and assigned profiles.'"></p>
                         </div>
-                        <button type="button" @click="openAddUserModal()" class="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold text-xs shadow-md transition flex items-center space-x-1.5">
-                            <span>+</span>
-                            <span x-text="currentLang==='ar' ? 'إضافة مشترك جديد' : 'Add New User'"></span>
-                        </button>
+                        <div class="flex items-center gap-2">
+                            <button type="button" @click="openImportExportModal()" class="px-3 py-1.5 rounded-xl border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 font-bold text-xs shadow-md transition flex items-center space-x-1.5">
+                                <span>📥</span>
+                                <span x-text="currentLang==='ar' ? 'استيراد وتصدير' : 'Import / Export'"></span>
+                            </button>
+                            <button type="button" @click="openAddUserModal()" class="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold text-xs shadow-md transition flex items-center space-x-1.5">
+                                <span>+</span>
+                                <span x-text="currentLang==='ar' ? 'إضافة مشترك' : 'Add User'"></span>
+                            </button>
+                        </div>
                     </div>
 
                     <div class="overflow-x-auto">
@@ -4189,6 +4448,22 @@
                 showAddUserModal: false,
                 showAddProfileModal: false,
                 showRenewModal: false,
+                showImportExportModal: false,
+                importTab: 'excel',
+                importMode: 'merge',
+                importFileName: '',
+                importPreviewUsers: [],
+                importPreviewProfiles: [],
+                isImporting: false,
+                rawJsonInput: '',
+                sas4Form: {
+                    url: 'http://192.168.1.100/admin/api',
+                    username: 'admin',
+                    password: '',
+                    syncing: false,
+                    progressText: '',
+                    progressPct: 0
+                },
                 renewForm: {
                     username: '',
                     currentProfile: '',
@@ -4532,6 +4807,293 @@
                         this.fetchBroadbandStatus();
                         this.showToast(this.currentLang === 'ar' ? 'تم حذف الباقة' : 'Profile deleted');
                     });
+                },
+                openImportExportModal() {
+                    this.importPreviewUsers = [];
+                    this.importPreviewProfiles = [];
+                    this.importFileName = '';
+                    this.rawJsonInput = '';
+                    this.importMode = 'merge';
+                    this.importTab = 'excel';
+                    this.showImportExportModal = true;
+                },
+                closeImportModal() {
+                    this.showImportExportModal = false;
+                },
+                handleFileUpload(event) {
+                    const file = event.target.files ? event.target.files[0] : null;
+                    if (!file) return;
+                    this.processSpreadsheetFile(file);
+                },
+                handleFileDrop(event) {
+                    const file = event.dataTransfer.files ? event.dataTransfer.files[0] : null;
+                    if (!file) return;
+                    this.processSpreadsheetFile(file);
+                },
+                processSpreadsheetFile(file) {
+                    this.importFileName = file.name;
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        try {
+                            const data = new Uint8Array(e.target.result);
+                            const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+                            const firstSheetName = workbook.SheetNames[0];
+                            const worksheet = workbook.Sheets[firstSheetName];
+                            const jsonRows = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false });
+                            this.processParsedRows(jsonRows);
+                        } catch (err) {
+                            console.error("Failed to parse sheet:", err);
+                            this.showToast(this.currentLang === 'ar' ? 'فشل قراءة الملف: ' + err.message : 'Failed to parse file: ' + err.message);
+                        }
+                    };
+                    reader.readAsArrayBuffer(file);
+                },
+                processParsedRows(jsonRows) {
+                    const users = [];
+                    const profileSet = new Set();
+
+                    for (const row of jsonRows) {
+                        const u = {};
+                        u.username = String(row.username || row.user || row['User Name'] || row['اسم المستخدم'] || '').trim();
+                        if (!u.username) continue;
+
+                        u.password = String(row.password || row.ct_password || row.pass || row['كلمة المرور'] || '123456').trim();
+                        u.profile = String(row.profile_name || row.profile || row.group_name || row['باقة السرعة'] || 'Standard_25M').trim();
+                        if (!u.profile) u.profile = 'Standard_25M';
+                        profileSet.add(u.profile);
+
+                        u.static_ip = String(row.static_ip || row.ip || '').trim();
+
+                        let comment = String(row.comment || row.notes || '').trim();
+                        const fn = String(row.firstname || '').trim();
+                        const ln = String(row.lastname || '').trim();
+                        const ph = String(row.phone || '').trim();
+                        if (!comment && (fn || ln || ph)) {
+                            comment = [fn, ln, ph].filter(Boolean).join(' - ');
+                        }
+                        u.comment = comment;
+
+                        if (row.enabled !== undefined && row.enabled !== '') {
+                            const enStr = String(row.enabled).toLowerCase().trim();
+                            u.enabled = !(enStr === '0' || enStr === 'false' || enStr === 'disabled' || enStr === 'no');
+                        } else {
+                            u.enabled = true;
+                        }
+
+                        const rawExp = row.expiration || row.expires_at || row.expiry || row['تاريخ الانتهاء'] || '';
+                        u.expires_at = this.parseExpirationToEpoch(rawExp);
+
+                        users.push(u);
+                    }
+
+                    this.importPreviewUsers = users;
+                    this.importPreviewProfiles = Array.from(profileSet).map(name => {
+                        const existing = (this.broadbandStatus.profiles || []).find(p => p.name === name);
+                        return existing || {
+                            name: name,
+                            rate_down_kbps: 10240,
+                            rate_up_kbps: 5120,
+                            validity_days: 30,
+                            description: 'Auto-created from import'
+                        };
+                    });
+
+                    this.showToast(this.currentLang === 'ar' ? `تم التعرف على ${users.length} مشترك بنجاح` : `Discovered ${users.length} subscribers`);
+                },
+                parseExpirationToEpoch(val) {
+                    if (!val) return 0;
+                    if (typeof val === 'number') {
+                        if (val > 1000000000) return Math.floor(val);
+                        if (val >= 35000 && val <= 80000) {
+                            return Math.floor((val - 25569) * 86400);
+                        }
+                    }
+                    const str = String(val).trim();
+                    if (!str || str.toLowerCase() === 'unlimited' || str === '0') return 0;
+
+                    const num = Number(str);
+                    if (!isNaN(num) && num > 1000000000) return Math.floor(num);
+                    if (!isNaN(num) && num >= 35000 && num <= 80000) {
+                        return Math.floor((num - 25569) * 86400);
+                    }
+
+                    const parsed = Date.parse(str.replace(/-/g, '/'));
+                    if (!isNaN(parsed) && parsed > 0) {
+                        return Math.floor(parsed / 1000);
+                    }
+                    return 0;
+                },
+                parseRawJsonInput() {
+                    try {
+                        let data = JSON.parse(this.rawJsonInput);
+                        if (!Array.isArray(data)) {
+                            if (data.users && Array.isArray(data.users)) {
+                                if (data.mode) this.importMode = data.mode;
+                                data = data.users;
+                            } else {
+                                throw new Error("JSON must be an array of users or an object with 'users' array.");
+                            }
+                        }
+                        this.processParsedRows(data);
+                    } catch (e) {
+                        this.showToast(this.currentLang === 'ar' ? 'خطأ في بنية JSON: ' + e.message : 'Invalid JSON: ' + e.message);
+                    }
+                },
+                async fetchFromSas4Api() {
+                    const form = this.sas4Form;
+                    form.syncing = true;
+                    form.progressPct = 5;
+                    form.progressText = this.currentLang === 'ar' ? 'جاري الاتصال والتحقق من التشفير...' : 'Connecting to SAS4...';
+
+                    try {
+                        const rawURL = form.url.replace(/\/+$/, '');
+                        let cleanBase = rawURL.replace(/\/admin\/?$/, '').replace(/\/api\/?$/, '').replace(/\/index\.php\/?$/, '');
+
+                        const endpoints = [
+                            cleanBase + '/admin/api/index.php/api',
+                            cleanBase + '/api/index.php/api',
+                            rawURL + '/api'
+                        ];
+
+                        const passphrase = "abcdefghijuklmno0123456789012345";
+                        const loginObj = { username: form.username, password: form.password, language: 'en' };
+                        const encryptedLogin = CryptoJS.AES.encrypt(JSON.stringify(loginObj), passphrase).toString();
+
+                        let token = null;
+                        let activeEp = null;
+
+                        for (const ep of endpoints) {
+                            form.progressText = (this.currentLang === 'ar' ? 'محاولة تسجيل الدخول عبر: ' : 'Authenticating: ') + ep;
+                            try {
+                                const resp = await fetch(ep + '/login', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ payload: encryptedLogin })
+                                });
+                                if (resp.ok) {
+                                    const json = await resp.json();
+                                    token = json.token || (json.data && json.data.token);
+                                    if (token) {
+                                        activeEp = ep;
+                                        break;
+                                    }
+                                }
+                            } catch (e) {
+                                // continue to next candidate
+                            }
+                        }
+
+                        if (!token || !activeEp) {
+                            throw new Error(this.currentLang === 'ar' ? 'فشل تسجيل الدخول لمنظومة SAS4 أو تم حظر الاتصال (CORS)' : 'SAS4 Authentication failed or CORS blocked');
+                        }
+
+                        form.progressPct = 25;
+                        form.progressText = this.currentLang === 'ar' ? 'تم تسجيل الدخول بنجاح! جاري جلب قوائم المشتركين...' : 'Logged in. Fetching users...';
+
+                        const cols = ["id", "username", "firstname", "lastname", "phone", "balance", "expiration", "static_ip", "enabled", "profile_name", "ct_password", "created_at"];
+                        let allUsers = [];
+                        let page = 1;
+
+                        while (page <= 25) {
+                            const fetchObj = { page: page, count: 200, columns: cols };
+                            const encFetch = CryptoJS.AES.encrypt(JSON.stringify(fetchObj), passphrase).toString();
+
+                            const uResp = await fetch(activeEp + '/index/user', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                                body: JSON.stringify({ payload: encFetch })
+                            });
+                            if (!uResp.ok) break;
+                            const uJson = await uResp.json();
+                            const pageData = uJson.data || [];
+                            if (pageData.length === 0) break;
+                            allUsers = allUsers.concat(pageData);
+                            form.progressPct = Math.min(80, 25 + page * 5);
+                            form.progressText = (this.currentLang === 'ar' ? 'تم جلب ' : 'Fetched ') + allUsers.length + (this.currentLang === 'ar' ? ' مشترك...' : ' subscribers...');
+                            if (pageData.length < 200) break;
+                            page++;
+                        }
+
+                        form.progressPct = 90;
+                        form.progressText = this.currentLang === 'ar' ? 'جاري معالجة البيانات وتجهيز جدول المعاينة...' : 'Processing subscriber records...';
+
+                        this.processParsedRows(allUsers);
+                        form.progressPct = 100;
+                        form.progressText = this.currentLang === 'ar' ? 'اكتمل السحب بنجاح!' : 'Sync completed successfully!';
+                    } catch (err) {
+                        console.error("SAS4 sync failed:", err);
+                        form.progressText = err.message;
+                        this.showToast(err.message);
+                    } finally {
+                        form.syncing = false;
+                    }
+                },
+                executeBulkImport() {
+                    if (!this.authToken || this.importPreviewUsers.length === 0) return;
+                    this.isImporting = true;
+
+                    const payload = {
+                        mode: this.importMode,
+                        users: this.importPreviewUsers,
+                        profiles: this.importPreviewProfiles
+                    };
+
+                    fetch('/api/v1/broadband/import', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': this.authToken },
+                        body: JSON.stringify(payload)
+                    })
+                    .then(r => r.json())
+                    .then(d => {
+                        this.isImporting = false;
+                        if (d.status === 'ok') {
+                            this.closeImportModal();
+                            this.fetchBroadbandStatus();
+                            this.showToast(this.currentLang === 'ar' ? `✅ تم استيراد ${d.imported_users} مشترك و ${d.imported_profiles} باقة بنجاح!` : `Imported ${d.imported_users} users and ${d.imported_profiles} profiles!`);
+                        } else {
+                            this.showToast(this.currentLang === 'ar' ? 'فشل الاستيراد: ' + (d.message || '') : 'Import failed: ' + (d.message || ''));
+                        }
+                    })
+                    .catch(err => {
+                        this.isImporting = false;
+                        this.showToast('Import error: ' + err.message);
+                    });
+                },
+                exportToExcel() {
+                    const users = this.broadbandStatus.users || [];
+                    if (users.length === 0) {
+                        this.showToast(this.currentLang === 'ar' ? 'لا يوجد مشتركين للتصدير' : 'No subscribers to export');
+                        return;
+                    }
+
+                    const rows = users.map((u, i) => ({
+                        'id': i + 1,
+                        'username': u.username,
+                        'password': u.password,
+                        'profile_name': u.profile,
+                        'expiration': u.expires_at > 0 ? this.formatEpoch(u.expires_at) : 'Unlimited',
+                        'static_ip': u.static_ip || '',
+                        'enabled': u.enabled ? 1 : 0,
+                        'notes': u.comment || '',
+                        'created_at': u.created_at > 0 ? this.formatEpoch(u.created_at) : ''
+                    }));
+
+                    const ws = XLSX.utils.json_to_sheet(rows);
+                    const wb = XLSX.utils.book_new();
+                    XLSX.utils.book_append_sheet(wb, ws, "Subscribers");
+                    const fname = "fluxwan_subscribers_" + new Date().toISOString().slice(0, 10) + ".xlsx";
+                    XLSX.writeFile(wb, fname);
+                    this.showToast(this.currentLang === 'ar' ? 'تم تنزيل ملف الإكسل بنجاح' : 'Excel file downloaded');
+                },
+                exportToCsv() {
+                    const url = '/api/v1/broadband/export.csv';
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'fluxwan_subscribers_export.csv';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    this.showToast(this.currentLang === 'ar' ? 'تم بدء تحميل ملف CSV' : 'Downloading CSV file');
                 },
                 isEditing: false,
                 hasLoadedInitialConfig: false,
