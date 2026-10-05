@@ -6877,6 +6877,9 @@
                     })
                     .then(d => {
                         if (d.interfaces) {
+                            // Filter out virtual/tunnel adapters (ZeroTier, WireGuard, TUN/TAP, PPP, etc.)
+                            d.interfaces = d.interfaces.filter(i => (i.is_physical || i.is_wireless) && !i.name.startsWith('zt') && !i.name.startsWith('wg') && !i.name.startsWith('tun') && !i.name.startsWith('tap') && !i.name.startsWith('ppp'));
+
                             const now = Date.now();
                             // Sort interfaces naturally: eth0 (LAN) first, then eth1, eth2, etc.
                             d.interfaces.sort((a, b) => {

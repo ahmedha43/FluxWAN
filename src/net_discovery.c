@@ -166,8 +166,43 @@ int net_discovery_scan(const fluxwan_config_t *config, iface_discovery_result_t 
         if (entry->d_name[0] == '.') continue;
         if (strcmp(entry->d_name, "lo") == 0) continue; /* Ignore loopback */
 
+        /* Ignore known virtual interfaces (ZeroTier, WireGuard, VPNs, tunnels, bridge, containers) */
+        if (strncmp(entry->d_name, "zt", 2) == 0 ||
+            strncmp(entry->d_name, "wg", 2) == 0 ||
+            strncmp(entry->d_name, "tun", 3) == 0 ||
+            strncmp(entry->d_name, "tap", 3) == 0 ||
+            strncmp(entry->d_name, "ppp", 3) == 0 ||
+            strncmp(entry->d_name, "sit", 3) == 0 ||
+            strncmp(entry->d_name, "gre", 3) == 0 ||
+            strncmp(entry->d_name, "ipip", 4) == 0 ||
+            strncmp(entry->d_name, "veth", 4) == 0 ||
+            strncmp(entry->d_name, "docker", 6) == 0 ||
+            strncmp(entry->d_name, "br-", 3) == 0 ||
+            strncmp(entry->d_name, "dummy", 5) == 0) {
+            continue;
+        }
+
+        /* Check if physical hardware device */
+        char device_path[256];
+        snprintf(device_path, sizeof(device_path), "/sys/class/net/%s/device", entry->d_name);
+        bool is_physical = (access(device_path, F_OK) == 0);
+
+        /* Check if wireless (802.11 WiFi) device */
+        char wpath[256];
+        snprintf(wpath, sizeof(wpath), "/sys/class/net/%s/wireless", entry->d_name);
+        char ppath[256];
+        snprintf(ppath, sizeof(ppath), "/sys/class/net/%s/phy80211", entry->d_name);
+        bool is_wireless = (access(wpath, F_OK) == 0 || access(ppath, F_OK) == 0 || strncmp(entry->d_name, "wlan", 4) == 0);
+
+        /* STRICT HARDWARE FILTER: Only real physical Ethernet cards and real WiFi adapters */
+        if (!is_physical && !is_wireless) {
+            continue;
+        }
+
         physical_interface_t *p = &out_result->interfaces[out_result->count];
         safe_str_copy(p->name, entry->d_name, sizeof(p->name));
+        p->is_physical = is_physical;
+        p->is_wireless = is_wireless;
 
         /* Read MAC address */
         read_sysfs_string(p->name, "address", p->mac_addr, sizeof(p->mac_addr));
@@ -233,18 +268,6 @@ int net_discovery_scan(const fluxwan_config_t *config, iface_discovery_result_t 
                 }
             }
         }
-
-        /* Check if physical hardware device */
-        char device_path[256];
-        snprintf(device_path, sizeof(device_path), "/sys/class/net/%s/device", p->name);
-        p->is_physical = (access(device_path, F_OK) == 0);
-
-        /* Check if wireless (802.11 WiFi) device */
-        char wpath[256];
-        snprintf(wpath, sizeof(wpath), "/sys/class/net/%s/wireless", p->name);
-        char ppath[256];
-        snprintf(ppath, sizeof(ppath), "/sys/class/net/%s/phy80211", p->name);
-        p->is_wireless = (access(wpath, F_OK) == 0 || access(ppath, F_OK) == 0 || strncmp(p->name, "wlan", 4) == 0);
 
         /* Read IPv6 Global Address */
         read_ipv6_addr(p->name, p->ip6_addr, sizeof(p->ip6_addr));
