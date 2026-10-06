@@ -183,6 +183,11 @@ int proxy_manager_parse_uri(const char *uri, wan_proxy_config_t *out_proxy) {
             extract_query_param(query, "security", out_proxy->security, sizeof(out_proxy->security));
         }
         if (out_proxy->sni[0] && !out_proxy->host[0]) safe_str_copy(out_proxy->host, out_proxy->sni, sizeof(out_proxy->host));
+        if (out_proxy->host[0] && !out_proxy->sni[0]) safe_str_copy(out_proxy->sni, out_proxy->host, sizeof(out_proxy->sni));
+        if (out_proxy->port == 80 && strcasecmp(out_proxy->security, "tls") != 0) {
+            safe_str_copy(out_proxy->security, "none", sizeof(out_proxy->security));
+        }
+        safe_str_copy(out_proxy->raw_uri, uri, sizeof(out_proxy->raw_uri));
         return 0;
     }
 
@@ -219,6 +224,11 @@ int proxy_manager_parse_uri(const char *uri, wan_proxy_config_t *out_proxy) {
             extract_query_param(query, "security", out_proxy->security, sizeof(out_proxy->security));
         }
         if (out_proxy->sni[0] && !out_proxy->host[0]) safe_str_copy(out_proxy->host, out_proxy->sni, sizeof(out_proxy->host));
+        if (out_proxy->host[0] && !out_proxy->sni[0]) safe_str_copy(out_proxy->sni, out_proxy->host, sizeof(out_proxy->sni));
+        if (out_proxy->port == 80 && strcasecmp(out_proxy->security, "tls") != 0) {
+            safe_str_copy(out_proxy->security, "none", sizeof(out_proxy->security));
+        }
+        safe_str_copy(out_proxy->raw_uri, uri, sizeof(out_proxy->raw_uri));
         return 0;
     }
 
@@ -327,7 +337,12 @@ static int generate_proxy_config_file(const wan_config_t *wan, int wan_idx, char
     fprintf(f, "      \"uuid\": \"%s\",\n", p->uuid);
 
     /* TLS / SNI configuration */
-    bool has_tls = (strcasecmp(p->security, "tls") == 0 || p->port == 443 || p->sni[0] != '\0');
+    bool has_tls = false;
+    if (strcasecmp(p->security, "none") != 0 && strcasecmp(p->security, "plain") != 0) {
+        if (strcasecmp(p->security, "tls") == 0 || p->port == 443 || (p->sni[0] != '\0' && p->port != 80)) {
+            has_tls = true;
+        }
+    }
     if (has_tls) {
         fprintf(f, "      \"tls\": {\n");
         fprintf(f, "        \"enabled\": true,\n");
@@ -387,6 +402,9 @@ void proxy_manager_close(proxy_manager_ctx_t *ctx) {
 int proxy_manager_start_wan(proxy_manager_ctx_t *ctx, uint32_t wan_idx) {
     if (!ctx || !ctx->config || wan_idx >= ctx->config->wan_count) return -1;
     wan_config_t *wan = &ctx->config->wans[wan_idx];
+    if (wan->enabled && wan->proxy.enabled && !wan->proxy.server[0] && wan->proxy.raw_uri[0]) {
+        proxy_manager_parse_uri(wan->proxy.raw_uri, &wan->proxy);
+    }
     if (!wan->enabled || !wan->proxy.enabled || !wan->proxy.server[0]) {
         return proxy_manager_stop_wan(ctx, wan_idx);
     }

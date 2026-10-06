@@ -2065,7 +2065,7 @@
                                     <div class="bg-indigo-950/30 p-2 rounded-lg border border-indigo-500/20 space-y-1">
                                         <label class="text-4xs text-indigo-300 font-semibold block" x-text="currentLang==='ar' ? '⚡ استيراد رابط مباشر (vless://, vmess://, trojan://, ss://):' : '⚡ 1-Click Quick Import Link:'"></label>
                                         <div class="flex items-center space-x-1.5">
-                                            <input type="text" x-model="wan.proxy_raw_uri" class="flex-1 bg-slate-950 border border-slate-700 rounded-md px-2 py-1 text-white font-mono text-3xs" placeholder="vless://uuid@server:443?type=ws&security=tls&sni=...">
+                                            <input type="text" x-model="wan.proxy_raw_uri" @input="if (wan.proxy_raw_uri && (wan.proxy_raw_uri.includes('://'))) { parseProxyUri(wan); }" @paste="$nextTick(() => parseProxyUri(wan))" class="flex-1 bg-slate-950 border border-slate-700 rounded-md px-2 py-1 text-white font-mono text-3xs" placeholder="vless://uuid@server:443?type=ws&security=tls&sni=...">
                                             <button type="button" @click="parseProxyUri(wan)" class="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-md text-3xs font-bold transition flex items-center space-x-1">
                                                 <span>📥</span>
                                                 <span x-text="currentLang==='ar' ? 'استيراد' : 'Import'"></span>
@@ -6650,34 +6650,74 @@
 
                 parseProxyUri(wan) {
                     if (!wan.proxy_raw_uri || !wan.proxy_raw_uri.trim()) return;
+                    const uri = wan.proxy_raw_uri.trim();
+
+                    /* 1. Instant Client-Side Parser for VLESS, Trojan, and Shadowsocks */
+                    try {
+                        if (uri.startsWith('vless://') || uri.startsWith('trojan://')) {
+                            const proto = uri.startsWith('vless://') ? 'vless' : 'trojan';
+                            const clean = uri.replace(/^(vless|trojan):\/\//, '');
+                            const atIdx = clean.indexOf('@');
+                            if (atIdx > 0) {
+                                wan.proxy_uuid = decodeURIComponent(clean.substring(0, atIdx));
+                                const afterAt = clean.substring(atIdx + 1);
+                                const qIdx = afterAt.indexOf('?');
+                                const hashIdx = afterAt.indexOf('#');
+                                const serverPortPart = afterAt.substring(0, qIdx > 0 ? qIdx : (hashIdx > 0 ? hashIdx : afterAt.length));
+                                const colonIdx = serverPortPart.indexOf(':');
+                                if (colonIdx > 0) {
+                                    wan.proxy_server = serverPortPart.substring(0, colonIdx);
+                                    wan.proxy_port = parseInt(serverPortPart.substring(colonIdx + 1), 10) || 443;
+                                } else {
+                                    wan.proxy_server = serverPortPart;
+                                    wan.proxy_port = 443;
+                                }
+                                wan.proxy_proto = proto;
+                                wan.proxy_enabled = true;
+
+                                if (qIdx > 0) {
+                                    const qStr = afterAt.substring(qIdx + 1, hashIdx > 0 ? hashIdx : afterAt.length);
+                                    const params = new URLSearchParams(qStr);
+                                    wan.proxy_host = params.get('host') || '';
+                                    wan.proxy_sni = params.get('sni') || wan.proxy_host || '';
+                                    if (!wan.proxy_host && wan.proxy_sni) wan.proxy_host = wan.proxy_sni;
+                                    wan.proxy_path = params.get('path') || '/';
+                                    wan.proxy_transport = params.get('type') || 'ws';
+                                    wan.proxy_security = params.get('security') || (wan.proxy_port === 80 ? 'none' : 'tls');
+                                    if (wan.proxy_port === 80 && !params.get('security')) wan.proxy_security = 'none';
+                                }
+                                this.isEditing = true;
+                            }
+                        }
+                    } catch(e) {}
+
+                    /* 2. Backend Parser Synchronization */
                     fetch('/api/v1/wan/proxy/parse_uri', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
                             'X-Auth-Token': this.authToken
                         },
-                        body: JSON.stringify({ uri: wan.proxy_raw_uri.trim() })
+                        body: JSON.stringify({ uri: uri })
                     })
                     .then(r => r.json())
                     .then(d => {
                         if (d.status === 'ok' && d.proxy) {
-                            wan.proxy_proto = d.proxy.proto || 'vless';
-                            wan.proxy_server = d.proxy.server || '';
-                            wan.proxy_port = d.proxy.port || 443;
-                            wan.proxy_uuid = d.proxy.uuid || '';
-                            wan.proxy_sni = d.proxy.sni || '';
-                            wan.proxy_host = d.proxy.host || '';
-                            wan.proxy_path = d.proxy.path || '/';
-                            wan.proxy_transport = d.proxy.transport || 'ws';
-                            wan.proxy_security = d.proxy.security || 'tls';
+                            wan.proxy_proto = d.proxy.proto || wan.proxy_proto || 'vless';
+                            wan.proxy_server = d.proxy.server || wan.proxy_server || '';
+                            wan.proxy_port = d.proxy.port || wan.proxy_port || 443;
+                            wan.proxy_uuid = d.proxy.uuid || wan.proxy_uuid || '';
+                            wan.proxy_sni = d.proxy.sni || wan.proxy_sni || '';
+                            wan.proxy_host = d.proxy.host || wan.proxy_host || '';
+                            wan.proxy_path = d.proxy.path || wan.proxy_path || '/';
+                            wan.proxy_transport = d.proxy.transport || wan.proxy_transport || 'ws';
+                            wan.proxy_security = d.proxy.security || wan.proxy_security || 'tls';
                             wan.proxy_enabled = true;
                             this.isEditing = true;
                             this.showToast(this.currentLang === 'ar' ? 'تم استيراد إعدادات النفق بنجاح!' : 'Proxy configuration imported successfully!');
-                        } else {
-                            this.showToast(d.message || 'Failed to parse URI', 'error');
                         }
                     })
-                    .catch(() => this.showToast('Network error parsing URI', 'error'));
+                    .catch(() => {});
                 },
 
                 testProxyTunnel(wan) {
@@ -7270,7 +7310,23 @@
                                     rtt_ms: w.rtt_ms !== undefined ? w.rtt_ms : 0,
                                     jitter_ms: w.jitter_ms !== undefined ? w.jitter_ms : 0,
                                     packet_loss: w.packet_loss !== undefined ? w.packet_loss : 0,
-                                    probe_target: w.probe_target || ''
+                                    probe_target: w.probe_target || '',
+                                    proxy_enabled: w.proxy_enabled !== undefined ? !!w.proxy_enabled : false,
+                                    proxy_proto: w.proxy_proto || 'vless',
+                                    proxy_server: w.proxy_server || '',
+                                    proxy_port: w.proxy_port || 443,
+                                    proxy_uuid: w.proxy_uuid || '',
+                                    proxy_sni: w.proxy_sni || '',
+                                    proxy_host: w.proxy_host || '',
+                                    proxy_path: w.proxy_path || '/',
+                                    proxy_transport: w.proxy_transport || 'ws',
+                                    proxy_security: w.proxy_security || 'tls',
+                                    proxy_raw_uri: w.proxy_raw_uri || '',
+                                    proxy_tun_dev: w.proxy_tun_dev || '',
+                                    proxy_connected: !!w.proxy_connected,
+                                    proxy_latency_ms: w.proxy_latency_ms || 0,
+                                    proxyTesting: false,
+                                    proxyTestResult: ''
                                 }));
                             }
                             this.hasLoadedInitialConfig = true;
@@ -7291,11 +7347,24 @@
                                         w.uptime_sec = liveWan.uptime_sec !== undefined ? liveWan.uptime_sec : 0;
                                         w.lease_remaining_sec = liveWan.lease_remaining_sec !== undefined ? liveWan.lease_remaining_sec : 0;
                                         w.ac_name = liveWan.ac_name || '';
+                                        w.proxy_connected = !!liveWan.proxy_connected;
+                                        w.proxy_latency_ms = liveWan.proxy_latency_ms || 0;
 
                                         /* Update dynamic runtime IP/Gateway only if not actively editing */
-                                        if (!this.isEditing && (w.type === 'dhcp' || w.type === 'pppoe')) {
+                                        if (!this.isEditing) {
                                             if (liveWan.ip && liveWan.ip !== '0.0.0.0') w.ip = liveWan.ip;
                                             if (liveWan.gateway && liveWan.gateway !== '0.0.0.0') w.gateway = liveWan.gateway;
+                                            if (liveWan.proxy_enabled !== undefined) w.proxy_enabled = !!liveWan.proxy_enabled;
+                                            if (liveWan.proxy_server) w.proxy_server = liveWan.proxy_server;
+                                            if (liveWan.proxy_port) w.proxy_port = liveWan.proxy_port;
+                                            if (liveWan.proxy_proto) w.proxy_proto = liveWan.proxy_proto;
+                                            if (liveWan.proxy_uuid) w.proxy_uuid = liveWan.proxy_uuid;
+                                            if (liveWan.proxy_sni) w.proxy_sni = liveWan.proxy_sni;
+                                            if (liveWan.proxy_host) w.proxy_host = liveWan.proxy_host;
+                                            if (liveWan.proxy_path) w.proxy_path = liveWan.proxy_path;
+                                            if (liveWan.proxy_transport) w.proxy_transport = liveWan.proxy_transport;
+                                            if (liveWan.proxy_security) w.proxy_security = liveWan.proxy_security;
+                                            if (liveWan.proxy_raw_uri) w.proxy_raw_uri = liveWan.proxy_raw_uri;
                                         }
                                     }
                                 });
@@ -7343,6 +7412,11 @@
                             if (w.username && !w.ppp_username) w.ppp_username = w.username;
                             if (w.password && !w.ppp_password) w.ppp_password = w.password;
                             if (w.mac) w.custom_mac = w.mac;
+                            if (w.proxy_raw_uri && (!w.proxy_server || w.proxy_server.trim() === '')) {
+                                this.parseProxyUri(w);
+                            }
+                            w.proxy_enabled = !!w.proxy_enabled;
+                            if (w.proxy_port) w.proxy_port = parseInt(w.proxy_port, 10) || 443;
                         });
                     }
 

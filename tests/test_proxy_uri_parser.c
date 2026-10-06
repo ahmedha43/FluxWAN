@@ -54,6 +54,24 @@ int main(void) {
         printf("[PASS] Test 3: Shadowsocks URI parsed successfully.\n");
     }
 
+    /* Test 4: Real User Oodi Zero-Rating VLESS Link (Port 80 HTTP WS) */
+    {
+        const char *user_uri = "vless://713901e6-ae98-4431-addb-a32463bc0f35@turk.oodi.lol:80?encryption=none&host=www.pubgmobile.com&path=/toterVPS&security=none&type=ws#D3BOL";
+        wan_proxy_config_t cfg;
+        int rc = proxy_manager_parse_uri(user_uri, &cfg);
+        assert(rc == 0);
+        assert(cfg.proto == PROXY_PROTO_VLESS);
+        assert(strcmp(cfg.server, "turk.oodi.lol") == 0);
+        assert(cfg.port == 80);
+        assert(strcmp(cfg.uuid, "713901e6-ae98-4431-addb-a32463bc0f35") == 0);
+        assert(strcmp(cfg.host, "www.pubgmobile.com") == 0);
+        assert(strcmp(cfg.sni, "www.pubgmobile.com") == 0);
+        assert(strcmp(cfg.path, "/toterVPS") == 0);
+        assert(strcmp(cfg.transport, "ws") == 0);
+        assert(strcmp(cfg.security, "none") == 0);
+        printf("[PASS] Test 4: Real Oodi Zero-Rating Port 80 VLESS URI parsed successfully.\n");
+    }
+
     printf("=========================================\n");
     printf("   ALL PROXY URI TESTS PASSED (100%%)    \n");
     printf("=========================================\n");

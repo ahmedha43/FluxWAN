@@ -13,6 +13,7 @@
  */
 
 #include "config.h"
+#include "proxy_manager.h"
 #include <ctype.h>
 
 static char *read_file_to_string(const char *filepath) {
@@ -536,6 +537,11 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
                     if (extract_json_string(obj_str, "proxy_security", val, sizeof(val))) safe_str_copy(w->proxy.security, val, sizeof(w->proxy.security));
                     if (extract_json_string(obj_str, "proxy_raw_uri", val, sizeof(val))) safe_str_copy(w->proxy.raw_uri, val, sizeof(w->proxy.raw_uri));
                     if (extract_json_string(obj_str, "proxy_tun_dev", val, sizeof(val))) safe_str_copy(w->proxy.tun_dev, val, sizeof(w->proxy.tun_dev));
+
+                    /* If proxy is enabled and raw_uri is present but proxy_server is empty, auto-parse! */
+                    if (w->proxy.enabled && w->proxy.raw_uri[0] != '\0' && w->proxy.server[0] == '\0') {
+                        proxy_manager_parse_uri(w->proxy.raw_uri, &w->proxy);
+                    }
 
                     char state_val[32] = {0};
                     if (extract_json_string(obj_str, "state", state_val, sizeof(state_val))) {
