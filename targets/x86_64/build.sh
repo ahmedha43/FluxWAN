@@ -37,11 +37,17 @@ fi
 # ------------------------------------------------------------------------------
 # 2. Extract Kernel & Minimal Hardware Modules
 # ------------------------------------------------------------------------------
-echo "[2/4] Extracting Linux LTS Kernel & Essential Hardware Modules..."
 if [ ! -f "$ALPINE_STD_ISO" ]; then
-    echo "    * Fetching Alpine Linux 3.19 Base ISO..."
-    mkdir -p "$DIST_DIR"
-    curl -sSL "https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/x86_64/alpine-standard-3.19.1-x86_64.iso" -o "$ALPINE_STD_ISO"
+    if [ -f "/root/alpine-standard-base.iso" ]; then
+        echo "    * Using cached Alpine Base ISO from /root/alpine-standard-base.iso..."
+        cp -f "/root/alpine-standard-base.iso" "$ALPINE_STD_ISO"
+    elif [ -f "$PROJECT_ROOT/dist/alpine-standard-base.iso" ]; then
+        cp -f "$PROJECT_ROOT/dist/alpine-standard-base.iso" "$ALPINE_STD_ISO"
+    else
+        echo "    * Fetching Alpine Linux 3.19 Base ISO..."
+        mkdir -p "$DIST_DIR"
+        curl -sSL "https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/x86_64/alpine-standard-3.19.1-x86_64.iso" -o "$ALPINE_STD_ISO"
+    fi
 fi
 
 mkdir -p "$BUILD_DIR/iso_extract"
@@ -136,6 +142,7 @@ EOF
 # Copy FluxWAN binaries, BPF objects, configs and scripts into apkovl
 cp -f "$PROJECT_ROOT/fluxwan" "$APKOVL_DIR/opt/fluxwan/"
 cp -f "$PROJECT_ROOT/config/fluxwan.json" "$APKOVL_DIR/opt/fluxwan/config/"
+echo "1.4.0" > "$APKOVL_DIR/opt/fluxwan/version"
 mkdir -p "$APKOVL_DIR/root/config" "$APKOVL_DIR/config"
 ln -sf /opt/fluxwan/config/fluxwan.json "$APKOVL_DIR/root/config/fluxwan.json" 2>/dev/null || true
 ln -sf /opt/fluxwan/config/fluxwan.json "$APKOVL_DIR/config/fluxwan.json" 2>/dev/null || true
@@ -262,6 +269,31 @@ if [ -s "$CACHE_X86/zerotier-one-1.10.2-r0.apk" ]; then
     tar -xzf "$CACHE_X86/zerotier-one-1.10.2-r0.apk" -C "$APKOVL_DIR" 2>/dev/null || true
     cp -f "$CACHE_X86/zerotier-one-1.10.2-r0.apk" "$BUILD_DIR/iso_extract/apks/x86_64/" 2>/dev/null || true
 fi
+
+# Embed Standalone Proxy Engines (Sing-box, Xray, V2Ray) for Zero-Rating Multi-WAN
+echo "    * Embedding Standalone Proxy Tunneling engines (Sing-box, Xray, V2Ray)..."
+mkdir -p "$APKOVL_DIR/usr/bin" "$APKOVL_DIR/usr/local/bin"
+for pbin in sing-box xray v2ray; do
+    PB_SRC=""
+    for cand in "/usr/local/bin/$pbin" "/usr/bin/$pbin" "/bin/$pbin" "$PROJECT_ROOT/$pbin" "$PROJECT_ROOT/dist/$pbin"; do
+        if [ -x "$cand" ] && [ -s "$cand" ]; then
+            PB_SRC="$cand"
+            break
+        fi
+    done
+    if [ -z "$PB_SRC" ]; then
+        PB_SRC=$(command -v "$pbin" 2>/dev/null || true)
+    fi
+    if [ -n "$PB_SRC" ] && [ -x "$PB_SRC" ]; then
+        if [ -L "$PB_SRC" ]; then
+            PB_SRC=$(readlink -f "$PB_SRC" 2>/dev/null || realpath "$PB_SRC" 2>/dev/null || echo "$PB_SRC")
+        fi
+        cp -aL "$PB_SRC" "$APKOVL_DIR/usr/bin/$pbin" 2>/dev/null || true
+        cp -aL "$PB_SRC" "$APKOVL_DIR/usr/local/bin/$pbin" 2>/dev/null || true
+        chmod +x "$APKOVL_DIR/usr/bin/$pbin" "$APKOVL_DIR/usr/local/bin/$pbin" 2>/dev/null || true
+        echo "      -> Embedded proxy engine: $pbin ($PB_SRC)"
+    fi
+done
 
 chmod +x "$APKOVL_DIR/usr/sbin/"* "$APKOVL_DIR/sbin/"* "$APKOVL_DIR/usr/bin/"* "$APKOVL_DIR/bin/"* 2>/dev/null || true
 

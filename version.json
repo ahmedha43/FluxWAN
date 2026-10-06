@@ -1,9 +1,16 @@
 {
-  "latest_version": "1.3.9",
+  "latest_version": "1.4.0",
   "channel": "stable",
-  "release_date": "2026-10-03",
+  "release_date": "2026-10-06",
   "min_compatible_version": "1.2.0",
   "changelog": [
+    "Per-WAN Outbound Proxy Tunneling (🌐): Native support for VLESS, VMess, Trojan, and Shadowsocks protocol tunneling per physical WAN uplink",
+    "Zero-Rating SNI & Host Spoofing: 1-Click URI importer with custom SNI / Host spoofing for carrier zero-rating bypass (Oodi, Zain, restricted ISP endpoints)",
+    "Strict Physical Egress Pinning: Enforces encrypted proxy tunnel outer traffic strictly through designated physical interface via routing_mark and bind_interface",
+    "Virtual TUN Maglev LB Integration: Tunnels exposed as virtual tun_wanX uplinks directly inside Maglev consistent hashing load balancer and ICMP probers",
+    "Real-Time Proxy Latency Probing: Direct kernel TCP latency test API (POST /api/v1/wan/proxy/test) with instant feedback in dashboard",
+    "Hardware Network Adapter Filter: Virtual interfaces (ZeroTier zt*, WireGuard wg*, Docker, loopback) automatically filtered out from physical WAN/LAN selectors",
+    "Embedded Standalone Proxy Binaries: Pure static Sing-box and native Xray/V2Ray engines embedded into appliance and ISO distribution",
     "Dropbear SSH Server Auto-Startup: Built-in automatic Dropbear daemon launcher on system boot across appliance, ISO, and hard disk installs (port 22, root login enabled)",
     "Alpine Linux ZeroTier Engine: Offline package embedding in ISO build and smart runtime auto-installer for Alpine environments",
     "ZeroTier Background Daemon Detachment: Non-blocking daemon management preventing pipe deadlocks and web worker freezes",

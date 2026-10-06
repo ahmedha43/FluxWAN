@@ -314,6 +314,18 @@ cp -a /usr/lib/* "$MOUNT_DIR/usr/lib/" 2>/dev/null || true
 cp -a /usr/local/bin/* "$MOUNT_DIR/usr/local/bin/" 2>/dev/null || true
 chmod +x "$MOUNT_DIR/usr/local/bin/"* 2>/dev/null || true
 
+# Explicitly guarantee standalone proxy engines (sing-box, xray, v2ray) are copied and executable
+for pbin in sing-box xray v2ray; do
+    for psrc in "/usr/local/bin/$pbin" "/usr/bin/$pbin" "/bin/$pbin"; do
+        if [ -x "$psrc" ] && [ -s "$psrc" ]; then
+            cp -aL "$psrc" "$MOUNT_DIR/usr/local/bin/$pbin" 2>/dev/null || true
+            cp -aL "$psrc" "$MOUNT_DIR/usr/bin/$pbin" 2>/dev/null || true
+            chmod +x "$MOUNT_DIR/usr/local/bin/$pbin" "$MOUNT_DIR/usr/bin/$pbin" 2>/dev/null || true
+            break
+        fi
+    done
+done
+
 # Setup 64-bit library compatibility links
 ln -sf lib "$MOUNT_DIR/lib64" 2>/dev/null || true
 ln -sf lib "$MOUNT_DIR/usr/lib64" 2>/dev/null || true
@@ -490,6 +502,7 @@ if [ -d /opt/fluxwan ]; then
     cp -a /opt/fluxwan/* "$MOUNT_DIR/opt/fluxwan/" 2>/dev/null || true
 fi
 chmod +x "$MOUNT_DIR/opt/fluxwan/fluxwan" 2>/dev/null || true
+echo "1.4.0" > "$MOUNT_DIR/opt/fluxwan/version" 2>/dev/null || true
 
 # Locate live media boot files (Kernel, Initramfs, Modloop, Syslinux)
 echo -e "    * Locating Linux LTS Kernel & Boot Media Files..."
