@@ -516,6 +516,27 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
                     }
 
                     w->enabled = extract_json_bool(obj_str, "enabled", true);
+
+                    /* Parse WAN Proxy / Zero-Rating Tunnel settings */
+                    w->proxy.enabled = extract_json_bool(obj_str, "proxy_enabled", false);
+                    if (extract_json_string(obj_str, "proxy_proto", val, sizeof(val))) {
+                        safe_str_copy(w->proxy.proto_str, val, sizeof(w->proxy.proto_str));
+                        if (strcmp(val, "vless") == 0) w->proxy.proto = PROXY_PROTO_VLESS;
+                        else if (strcmp(val, "vmess") == 0) w->proxy.proto = PROXY_PROTO_VMESS;
+                        else if (strcmp(val, "trojan") == 0) w->proxy.proto = PROXY_PROTO_TROJAN;
+                        else if (strcmp(val, "shadowsocks") == 0) w->proxy.proto = PROXY_PROTO_SHADOWSOCKS;
+                    }
+                    if (extract_json_string(obj_str, "proxy_server", val, sizeof(val))) safe_str_copy(w->proxy.server, val, sizeof(w->proxy.server));
+                    w->proxy.port = (uint16_t)extract_json_int(obj_str, "proxy_port", 443);
+                    if (extract_json_string(obj_str, "proxy_uuid", val, sizeof(val))) safe_str_copy(w->proxy.uuid, val, sizeof(w->proxy.uuid));
+                    if (extract_json_string(obj_str, "proxy_sni", val, sizeof(val))) safe_str_copy(w->proxy.sni, val, sizeof(w->proxy.sni));
+                    if (extract_json_string(obj_str, "proxy_host", val, sizeof(val))) safe_str_copy(w->proxy.host, val, sizeof(w->proxy.host));
+                    if (extract_json_string(obj_str, "proxy_path", val, sizeof(val))) safe_str_copy(w->proxy.path, val, sizeof(w->proxy.path));
+                    if (extract_json_string(obj_str, "proxy_transport", val, sizeof(val))) safe_str_copy(w->proxy.transport, val, sizeof(w->proxy.transport));
+                    if (extract_json_string(obj_str, "proxy_security", val, sizeof(val))) safe_str_copy(w->proxy.security, val, sizeof(w->proxy.security));
+                    if (extract_json_string(obj_str, "proxy_raw_uri", val, sizeof(val))) safe_str_copy(w->proxy.raw_uri, val, sizeof(w->proxy.raw_uri));
+                    if (extract_json_string(obj_str, "proxy_tun_dev", val, sizeof(val))) safe_str_copy(w->proxy.tun_dev, val, sizeof(w->proxy.tun_dev));
+
                     char state_val[32] = {0};
                     if (extract_json_string(obj_str, "state", state_val, sizeof(state_val))) {
                         if (strcmp(state_val, "DRAINING") == 0) w->state = WAN_STATE_DRAINING;
@@ -1474,8 +1495,23 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
             fprintf(f, "      \"bandwidth_down_mbps\": %u,\n", w->bandwidth_down_mbps);
             fprintf(f, "      \"bandwidth_up_mbps\": %u,\n", w->bandwidth_up_mbps);
             fprintf(f, "      \"enabled\": %s,\n", w->enabled ? "true" : "false");
-            fprintf(f, "      \"probe_target\": \"%s\",\n", w->probe_target);
-            fprintf(f, "      \"table_id\": %u\n", w->table_id);
+            fprintf(f, "      \"table_id\": %u,\n", w->table_id);
+            fprintf(f, "      \"proxy_enabled\": %s,\n", w->proxy.enabled ? "true" : "false");
+            if (w->proxy.enabled || w->proxy.server[0]) {
+                fprintf(f, "      \"proxy_proto\": \"%s\",\n", w->proxy.proto_str[0] ? w->proxy.proto_str : "vless");
+                fprintf(f, "      \"proxy_server\": \"%s\",\n", w->proxy.server);
+                fprintf(f, "      \"proxy_port\": %u,\n", w->proxy.port > 0 ? w->proxy.port : 443);
+                fprintf(f, "      \"proxy_uuid\": \"%s\",\n", w->proxy.uuid);
+                fprintf(f, "      \"proxy_sni\": \"%s\",\n", w->proxy.sni);
+                fprintf(f, "      \"proxy_host\": \"%s\",\n", w->proxy.host);
+                fprintf(f, "      \"proxy_path\": \"%s\",\n", w->proxy.path);
+                fprintf(f, "      \"proxy_transport\": \"%s\",\n", w->proxy.transport[0] ? w->proxy.transport : "ws");
+                fprintf(f, "      \"proxy_security\": \"%s\",\n", w->proxy.security[0] ? w->proxy.security : "tls");
+                fprintf(f, "      \"proxy_raw_uri\": \"%s\",\n", w->proxy.raw_uri);
+                fprintf(f, "      \"proxy_tun_dev\": \"%s\"\n", w->proxy.tun_dev);
+            } else {
+                fprintf(f, "      \"proxy_proto\": \"vless\"\n");
+            }
             fprintf(f, "    }%s\n", (i == config->wan_count - 1) ? "" : ",");
         }
         fprintf(f, "  ],\n");

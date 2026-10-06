@@ -26,7 +26,8 @@ SRCS = src/main.c \
        src/wifi_manager.c \
        src/crypto_ed25519.c \
        src/license_manager.c \
-       src/vpn_manager.c
+       src/vpn_manager.c \
+       src/proxy_manager.c
 
 OBJS = $(SRCS:.c=.o)
 BPF_OBJS = bpf/xdp_router.bpf.o bpf/xdp_nat46.bpf.o
@@ -48,7 +49,8 @@ LAB_SRCS = tests/lab_runner.c \
            src/wifi_manager.c \
            src/crypto_ed25519.c \
            src/license_manager.c \
-           src/vpn_manager.c
+           src/vpn_manager.c \
+           src/proxy_manager.c
 
 LAB_OBJS = $(LAB_SRCS:.c=.o)
 LAB_TARGET = fluxwan_lab
@@ -63,6 +65,7 @@ TEST_POLICY = test_policy_routing
 TEST_KATRAN = test_katran_nextgen
 TEST_RFC = test_rfc8032
 TEST_LICENSE = test_license_suite
+TEST_PROXY = test_proxy_uri_parser
 
 all: ui bpf $(TARGET) $(LAB_TARGET)
 
@@ -118,7 +121,10 @@ $(TEST_RFC): tests/test_rfc8032.c src/crypto_ed25519.c
 $(TEST_LICENSE): tests/test_license_manager.c src/license_manager.c src/crypto_ed25519.c
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
-test: $(TEST_WAN) $(TEST_PPPOE) $(TEST_NAT46) $(TEST_XDP) $(TEST_GROUPS) $(TEST_POLICY) $(TEST_KATRAN) $(TEST_RFC) $(TEST_LICENSE) $(LAB_TARGET)
+$(TEST_PROXY): tests/test_proxy_uri_parser.c src/proxy_manager.c
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+test: $(TEST_WAN) $(TEST_PPPOE) $(TEST_NAT46) $(TEST_XDP) $(TEST_GROUPS) $(TEST_POLICY) $(TEST_KATRAN) $(TEST_RFC) $(TEST_LICENSE) $(TEST_PROXY) $(LAB_TARGET)
 	@echo "================================================================"
 	@echo "   Running FluxWAN Automated Test Suites                        "
 	@echo "================================================================"
@@ -139,6 +145,8 @@ test: $(TEST_WAN) $(TEST_PPPOE) $(TEST_NAT46) $(TEST_XDP) $(TEST_GROUPS) $(TEST_
 	./$(TEST_RFC)
 	@echo ""
 	./$(TEST_LICENSE)
+	@echo ""
+	./$(TEST_PROXY)
 	@echo ""
 	./$(LAB_TARGET)
 	@echo ""

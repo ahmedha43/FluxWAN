@@ -27,6 +27,7 @@
 #include "pppoe_server.h"
 #include "vpn_manager.h"
 #include "license_manager.h"
+#include "proxy_manager.h"
 
 #include <signal.h>
 #if defined(_WIN32) || defined(_WIN64)
@@ -129,10 +130,17 @@ int main(int argc, char *argv[]) {
     vpn_manager_init(&config.vpn);
     vpn_manager_apply(&config.vpn);
 
-    /* 13. Initialize Embedded Web Server & REST Engine */
+    /* 13. Initialize Outbound Proxy Subsystem (Xray / Zero-Rating Engine) */
+    proxy_manager_ctx_t *proxy_mgr = proxy_manager_init(&config);
+    if (proxy_mgr) {
+        proxy_manager_apply(proxy_mgr);
+    }
+
+    /* 14. Initialize Embedded Web Server & REST Engine */
     web_server_ctx_t *web = web_server_init(&config, nl, dhcp);
     web_server_set_wan_manager(web, wan_mgr);
     web_server_set_pppoe_server(web, pppoe_srv);
+    web_server_set_proxy_manager(web, proxy_mgr);
     web_server_start_thread(web);
 
     LOG_INFO("FluxWAN Core Daemon fully initialized and running on Bare-Metal reactor loop...");
@@ -211,11 +219,17 @@ int main(int argc, char *argv[]) {
 
         /* Periodic Timer: Licensing Engine Tick (Clock Rollback & Grace Period Tracking) */
         license_manager_tick(&config.license, now_ms);
+
+        /* Periodic Timer: Outbound Proxy Manager Tick (Supervision & Auto-Restart) */
+        if (proxy_mgr) {
+            proxy_manager_tick(proxy_mgr);
+        }
     }
 
     LOG_INFO("Shutting down FluxWAN Router Engine...");
 
     /* Graceful Cleanup */
+    if (proxy_mgr) proxy_manager_close(proxy_mgr);
     if (dns64) dns64_destroy(dns64);
     if (pppoe_srv) pppoe_server_close(pppoe_srv);
     web_server_close(web);

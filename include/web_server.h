@@ -35,6 +35,7 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd);
 
 struct wan_manager_ctx;
 struct pppoe_server_ctx;
+struct proxy_manager_ctx;
 
 /**
  * Associate WAN Manager instance with Web Server for dynamic reconfiguration
@@ -45,6 +46,11 @@ void web_server_set_wan_manager(web_server_ctx_t *ctx, struct wan_manager_ctx *w
  * Associate Broadband PPPoE Server instance with Web Server
  */
 void web_server_set_pppoe_server(web_server_ctx_t *ctx, struct pppoe_server_ctx *ps);
+
+/**
+ * Associate Proxy Manager instance with Web Server
+ */
+void web_server_set_proxy_manager(web_server_ctx_t *ctx, struct proxy_manager_ctx *pm);
 
 /**
  * Start Web Server in a dedicated background worker thread

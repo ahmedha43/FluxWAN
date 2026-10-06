@@ -23,6 +23,7 @@
 #include "wifi_manager.h"
 #include "license_manager.h"
 #include "vpn_manager.h"
+#include "proxy_manager.h"
 #include <pthread.h>
 #include <fcntl.h>
 #include <ctype.h>
@@ -64,6 +65,7 @@ struct web_server_ctx {
     dhcp_server_ctx_t *dhcp;
     struct wan_manager_ctx *wan_mgr;
     struct pppoe_server_ctx *pppoe_srv;
+    struct proxy_manager_ctx *proxy_mgr;
     time_t start_time;
     client_conn_t clients[MAX_CLIENTS];
     char *req_buf;
@@ -323,6 +325,10 @@ void web_server_set_wan_manager(web_server_ctx_t *ctx, struct wan_manager_ctx *w
 
 void web_server_set_pppoe_server(web_server_ctx_t *ctx, struct pppoe_server_ctx *ps) {
     if (ctx) ctx->pppoe_srv = ps;
+}
+
+void web_server_set_proxy_manager(web_server_ctx_t *ctx, struct proxy_manager_ctx *pm) {
+    if (ctx) ctx->proxy_mgr = pm;
 }
 
 static void set_socket_timeout(socket_t fd, int timeout_ms) {
@@ -669,7 +675,21 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
             "      \"jitter_ms\": %u,\n"
             "      \"packet_loss\": %.1f,\n"
             "      \"enabled\": %s,\n"
-            "      \"state\": \"%s\"\n"
+            "      \"state\": \"%s\",\n"
+            "      \"proxy_enabled\": %s,\n"
+            "      \"proxy_proto\": \"%s\",\n"
+            "      \"proxy_server\": \"%s\",\n"
+            "      \"proxy_port\": %u,\n"
+            "      \"proxy_uuid\": \"%s\",\n"
+            "      \"proxy_sni\": \"%s\",\n"
+            "      \"proxy_host\": \"%s\",\n"
+            "      \"proxy_path\": \"%s\",\n"
+            "      \"proxy_transport\": \"%s\",\n"
+            "      \"proxy_security\": \"%s\",\n"
+            "      \"proxy_raw_uri\": \"%s\",\n"
+            "      \"proxy_tun_dev\": \"%s\",\n"
+            "      \"proxy_connected\": %s,\n"
+            "      \"proxy_latency_ms\": %u\n"
             "    }%s\n",
             w->id, w->name, w->label, type_str,
             w->ppp_username, w->ppp_username,
@@ -694,7 +714,22 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
             w->config_weight, w->dynamic_weight,
             w->bandwidth_down_mbps, w->bandwidth_up_mbps,
             w->metrics.rtt_ms, w->metrics.jitter_ms,
-            w->metrics.packet_loss_pct, w->enabled ? "true" : "false", state_str, (i == config->wan_count - 1) ? "" : ",");
+            w->metrics.packet_loss_pct, w->enabled ? "true" : "false", state_str,
+            w->proxy.enabled ? "true" : "false",
+            w->proxy.proto_str[0] ? w->proxy.proto_str : "vless",
+            w->proxy.server,
+            w->proxy.port > 0 ? w->proxy.port : 443,
+            w->proxy.uuid,
+            w->proxy.sni,
+            w->proxy.host,
+            w->proxy.path,
+            w->proxy.transport[0] ? w->proxy.transport : "ws",
+            w->proxy.security[0] ? w->proxy.security : "tls",
+            w->proxy.raw_uri,
+            w->proxy.tun_dev,
+            w->proxy.is_connected ? "true" : "false",
+            w->proxy.latency_ms,
+            (i == config->wan_count - 1) ? "" : ",");
     }
 
     offset += snprintf(buf + offset, max_len - offset, "  ],\n  \"groups\": [\n");
@@ -2992,6 +3027,88 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
             wan_manager_add_log("WARN", "Failed login attempt with username '%s'", user);
         }
         close_client_socket(client_fd);
+    } else if (strstr(req, "POST /api/v1/wan/proxy/parse_uri") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+
+        const char *body = strstr(req, "\r\n\r\n");
+        if (body) body += 4;
+        char uri[512] = {0};
+        if (body) {
+            extract_json_string(body, "uri", uri, sizeof(uri));
+        }
+
+        wan_proxy_config_t parsed;
+        if (uri[0] && proxy_manager_parse_uri(uri, &parsed) == 0) {
+            char resp_body[1024];
+            snprintf(resp_body, sizeof(resp_body),
+                "{\n"
+                "  \"status\": \"ok\",\n"
+                "  \"proxy\": {\n"
+                "    \"proto\": \"%s\",\n"
+                "    \"server\": \"%s\",\n"
+                "    \"port\": %u,\n"
+                "    \"uuid\": \"%s\",\n"
+                "    \"sni\": \"%s\",\n"
+                "    \"host\": \"%s\",\n"
+                "    \"path\": \"%s\",\n"
+                "    \"transport\": \"%s\",\n"
+                "    \"security\": \"%s\"\n"
+                "  }\n"
+                "}",
+                parsed.proto_str, parsed.server, parsed.port, parsed.uuid,
+                parsed.sni, parsed.host, parsed.path, parsed.transport, parsed.security);
+
+            char resp[2048];
+            int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(resp_body), resp_body);
+            send(client_fd, resp, len, 0);
+        } else {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Failed to parse proxy link. Supports vless://, vmess://, trojan://, ss://\"}";
+            char resp[512];
+            int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0);
+        }
+        close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "POST /api/v1/wan/proxy/test") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+
+        const char *body = strstr(req, "\r\n\r\n");
+        if (body) body += 4;
+        wan_proxy_config_t test_p;
+        memset(&test_p, 0, sizeof(test_p));
+        if (body) {
+            extract_json_string(body, "server", test_p.server, sizeof(test_p.server));
+            test_p.port = (uint16_t)extract_json_int(body, "port", 443);
+        }
+
+        uint32_t lat_ms = 0;
+        int rc = proxy_manager_test_tunnel(&test_p, &lat_ms);
+        char resp_body[256];
+        if (rc == 0) {
+            snprintf(resp_body, sizeof(resp_body), "{\"status\":\"ok\",\"latency_ms\":%u}", lat_ms);
+        } else {
+            snprintf(resp_body, sizeof(resp_body), "{\"status\":\"error\",\"message\":\"Host unreachable or connection refused\"}");
+        }
+        char resp[512];
+        int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(resp_body), resp_body);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
     } else if (strstr(req, "GET /api/v1/interfaces") != NULL) {
         if (!is_request_authorized(ctx->config, req)) {
             const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
@@ -5727,6 +5844,9 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
                             pppoe_server_reload(ctx->pppoe_srv);
                         }
                         vpn_manager_apply(&ctx->config->vpn);
+                        if (ctx->proxy_mgr) {
+                            proxy_manager_apply(ctx->proxy_mgr);
+                        }
                     }
                     free(test_cfg);
                 }
@@ -5735,6 +5855,9 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
 
         /* Re-apply configuration to Linux Kernel & Policy Routing */
         net_apply_configuration(ctx->config, ctx->nl);
+        if (ctx->proxy_mgr) {
+            proxy_manager_apply(ctx->proxy_mgr);
+        }
         if (ctx->wan_mgr) {
             wan_manager_rebalance(ctx->wan_mgr);
         }

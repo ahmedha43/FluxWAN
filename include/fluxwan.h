@@ -161,6 +161,36 @@ typedef struct {
     uint64_t last_probe_time;
 } wan_metrics_t;
 
+/* Outbound Proxy Protocol Types */
+typedef enum {
+    PROXY_PROTO_NONE = 0,
+    PROXY_PROTO_VLESS,
+    PROXY_PROTO_VMESS,
+    PROXY_PROTO_TROJAN,
+    PROXY_PROTO_SHADOWSOCKS
+} proxy_proto_t;
+
+/* Outbound Proxy Tunnel Configuration (Zero-Rating / Xray / Sing-box) */
+typedef struct {
+    bool enabled;
+    proxy_proto_t proto;          /* PROXY_PROTO_VLESS, etc. */
+    char proto_str[16];           /* "vless", "vmess", "trojan", "shadowsocks" */
+    char server[128];             /* Remote server IP or domain */
+    uint16_t port;                /* Remote server port (e.g. 443, 80) */
+    char uuid[64];                /* Client UUID / Password */
+    char sni[128];                /* Target SNI (e.g. zero-rated host portal.oodi.iq) */
+    char host[128];               /* HTTP/WS Host header */
+    char path[128];               /* WebSocket path e.g. /ws */
+    char transport[16];           /* "ws", "tcp", "grpc", "http" */
+    char security[16];            /* "tls", "none", "reality" */
+    char raw_uri[512];            /* Full URI for quick 1-click import */
+    char tun_dev[16];             /* Virtual TUN device e.g. "tun_wan3" */
+    uint32_t tun_ip;              /* Virtual IP (network byte order) */
+    int pid;                      /* Daemon PID */
+    bool is_connected;
+    uint32_t latency_ms;
+} wan_proxy_config_t;
+
 /* WAN Interface Definition */
 typedef struct {
     uint32_t id;
@@ -216,6 +246,9 @@ typedef struct {
     uint16_t link_mtu;            /* e.g. 1500, 1492 */
     uint32_t mtu;                 /* WAN MTU (PPPoE 1492, Starlink 1420, Fiber 1500) */
     char dns_servers[64];         /* e.g. "1.1.1.1, 8.8.8.8" */
+
+    /* Outbound Proxy Tunnel (Xray / Sing-box / Zero-Rating SNI Engine) */
+    wan_proxy_config_t proxy;
 } wan_config_t;
 
 #define MAX_WAN_GROUPS 8

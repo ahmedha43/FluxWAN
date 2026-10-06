@@ -60,6 +60,10 @@ static void apply_mss_clamping(const wan_config_t *wan) {
         snprintf(cmd, sizeof(cmd), "iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -o ppp+ -j TCPMSS --set-mss %u 2>/dev/null || iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -o ppp+ -j TCPMSS --set-mss %u 2>/dev/null", mss, mss);
         safe_system(cmd);
     }
+    if (wan->proxy.enabled && wan->proxy.tun_dev[0]) {
+        snprintf(cmd, sizeof(cmd), "iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -o %s -j TCPMSS --set-mss 1380 2>/dev/null || iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -o %s -j TCPMSS --set-mss 1380 2>/dev/null", wan->proxy.tun_dev, wan->proxy.tun_dev);
+        safe_system(cmd);
+    }
 #endif
     LOG_INFO("[QoS / MTU] Configuring TCP MSS Clamping to %u bytes on %s", mss, wan->name);
 }
@@ -221,13 +225,44 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
                 wifi_manager_connect(w->name, w->wifi_ssid, w->wifi_password, w->wifi_security);
             }
 
-            /* Apply MSS Clamping for PPPoE / Low MTU links */
+            /* Apply Outbound Proxy Tunnel (Zero-Rating / Xray / Sing-box Engine) */
+            if (w->proxy.enabled && w->proxy.tun_dev[0]) {
+#if defined(__linux__)
+                uint32_t fwmark = 0x1000 + i;
+                char px_cmd[512];
+                /* 1. Direct proxy daemon's outer encrypted egress packets strictly out through physical WAN table */
+                snprintf(px_cmd, sizeof(px_cmd),
+                         "ip rule del fwmark 0x%x 2>/dev/null || true; "
+                         "ip rule add fwmark 0x%x table %u pref 50 2>/dev/null || true; "
+                         "ip link set %s up 2>/dev/null || true; "
+                         "ip route replace default dev %s table %u proto static metric 10 2>/dev/null || true",
+                         fwmark, fwmark, w->table_id,
+                         w->proxy.tun_dev,
+                         w->proxy.tun_dev, w->table_id);
+                safe_system(px_cmd);
+#endif
+                net_apply_wan_nat(w->proxy.tun_dev, true);
+            }
+
+            /* Apply MSS Clamping for PPPoE / Low MTU links / Proxy tunnels */
             apply_mss_clamping(w);
 
         } else {
             /* WAN is DISABLED: Completely halt routing, kill DHCP, drop NAT, and bring link down */
             if (w->type == WAN_TYPE_WIFI) {
                 wifi_manager_disconnect(w->name);
+            }
+            if (w->proxy.enabled && w->proxy.tun_dev[0]) {
+#if defined(__linux__)
+                char px_del[256];
+                uint32_t fwmark = 0x1000 + i;
+                snprintf(px_del, sizeof(px_del),
+                         "ip rule del fwmark 0x%x 2>/dev/null || true; "
+                         "ip link delete %s 2>/dev/null || true",
+                         fwmark, w->proxy.tun_dev);
+                safe_system(px_del);
+#endif
+                net_apply_wan_nat(w->proxy.tun_dev, false);
             }
 #if defined(__linux__)
             char wan_down[512];
