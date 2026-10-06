@@ -183,14 +183,14 @@ int net_discovery_scan(const fluxwan_config_t *config, iface_discovery_result_t 
         }
 
         /* Check if physical hardware device */
-        char device_path[256];
+        char device_path[512];
         snprintf(device_path, sizeof(device_path), "/sys/class/net/%s/device", entry->d_name);
         bool is_physical = (access(device_path, F_OK) == 0);
 
         /* Check if wireless (802.11 WiFi) device */
-        char wpath[256];
+        char wpath[512];
         snprintf(wpath, sizeof(wpath), "/sys/class/net/%s/wireless", entry->d_name);
-        char ppath[256];
+        char ppath[512];
         snprintf(ppath, sizeof(ppath), "/sys/class/net/%s/phy80211", entry->d_name);
         bool is_wireless = (access(wpath, F_OK) == 0 || access(ppath, F_OK) == 0 || strncmp(entry->d_name, "wlan", 4) == 0);
 

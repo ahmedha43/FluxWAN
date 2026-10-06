@@ -38,6 +38,7 @@ set(CORE_LIB_SOURCES
     src/crypto_ed25519.c
     src/license_manager.c
     src/vpn_manager.c
+    src/proxy_manager.c
 )
 
 add_executable(fluxwan src/main.c ${CORE_LIB_SOURCES})
@@ -52,6 +53,7 @@ add_executable(test_policy_routing tests/test_policy_routing.c ${CORE_LIB_SOURCE
 add_executable(test_katran_nextgen tests/test_katran_nextgen.c)
 add_executable(test_rfc8032 tests/test_rfc8032.c src/crypto_ed25519.c)
 add_executable(test_license_suite tests/test_license_manager.c src/license_manager.c src/crypto_ed25519.c)
+add_executable(test_proxy_uri_parser tests/test_proxy_uri_parser.c src/proxy_manager.c)
 target_compile_definitions(test_license_suite PRIVATE
     PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
@@ -60,7 +62,7 @@ if(MSVC)
     target_compile_options(fluxwan PRIVATE /W4 /D_CRT_SECURE_NO_WARNINGS)
     target_link_libraries(fluxwan PRIVATE Ws2_32.lib Iphlpapi.lib)
 else()
-    foreach(target fluxwan fluxwan_lab test_wan_validator test_pppoe_manager test_live_nat46_translation test_xdp_packet test_wan_groups test_policy_routing test_katran_nextgen test_rfc8032 test_license_suite)
+    foreach(target fluxwan fluxwan_lab test_wan_validator test_pppoe_manager test_live_nat46_translation test_xdp_packet test_wan_groups test_policy_routing test_katran_nextgen test_rfc8032 test_license_suite test_proxy_uri_parser)
         target_compile_options(${target} PRIVATE -O2 -Wall -Wextra -pthread)
     endforeach()
     target_link_libraries(fluxwan PRIVATE pthread m)
@@ -74,6 +76,7 @@ else()
     target_link_libraries(test_katran_nextgen PRIVATE pthread m)
     target_link_libraries(test_rfc8032 PRIVATE pthread)
     target_link_libraries(test_license_suite PRIVATE pthread)
+    target_link_libraries(test_proxy_uri_parser PRIVATE pthread m)
 endif()
 
 enable_testing()
@@ -86,4 +89,5 @@ add_test(NAME PolicyRoutingTest COMMAND test_policy_routing)
 add_test(NAME KatranNextGenTest COMMAND test_katran_nextgen)
 add_test(NAME RFC8032Test COMMAND test_rfc8032)
 add_test(NAME LicenseSuiteTest COMMAND test_license_suite)
+add_test(NAME ProxyURIParser COMMAND test_proxy_uri_parser)
 add_test(NAME LabSimulation COMMAND fluxwan_lab)
