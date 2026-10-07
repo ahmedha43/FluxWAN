@@ -1,9 +1,11 @@
 {
-  "latest_version": "1.5.0",
+  "latest_version": "1.5.1",
   "channel": "stable",
   "release_date": "2026-10-07",
   "min_compatible_version": "1.2.0",
   "changelog": [
+    "Deterministic Bare-Metal & VM Disk Installer: Resolved partition node discovery race condition on Alpine/BusyBox by removing redundant sfdisk activation and implementing kernel sysfs major:minor mknod fallback",
+    "Enhanced Ext4 Formatting Resiliency: Added proactive block node readiness checks and robust retry loops during hard disk deployment",
     "Self-Healing Kernel Driver Engine: Automatic AF_PACKET and network subsystem module detection with direct insmod fallback and unconditional boot indexing",
     "Full Out-of-the-Box Multi-WAN Engine: Complete zero-config support for all 5 WAN uplink types (DHCP, Static IP, PPPoE Client, WiFi Client, and Proxy Tunneling) from Web UI",
     "Embedded PPPoE Client & Server Suite: Natively packaged pppd 2.5.0, pppoe.so kernel plugin, rp-pppoe server daemons, and libpcap within distribution ISO",
