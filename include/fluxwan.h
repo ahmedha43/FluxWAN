@@ -62,7 +62,7 @@ typedef int socket_t;
 #define INVALID_SOCKET (-1)
 #endif
 
-#define FLUXWAN_VERSION "1.5.1"
+#define FLUXWAN_VERSION "1.5.2"
 #define FLUXWAN_AUTHOR "Ahmed Al-Dulaimi (أحمد الدليمي)"
 #define FLUXWAN_LICENSE "GNU GPLv3"
 #define FLUXWAN_COPYRIGHT "Copyright (C) 2026 Ahmed Al-Dulaimi. All rights reserved."
@@ -185,6 +185,7 @@ typedef struct {
     char security[16];            /* "tls", "none", "reality" */
     char raw_uri[512];            /* Full URI for quick 1-click import */
     char tun_dev[16];             /* Virtual TUN device e.g. "tun_wan3" */
+    char bind_interface[32];      /* Bound physical egress dev (e.g. eth1) */
     uint32_t tun_ip;              /* Virtual IP (network byte order) */
     int pid;                      /* Daemon PID */
     bool is_connected;

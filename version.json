@@ -1,9 +1,13 @@
 {
-  "latest_version": "1.5.1",
+  "latest_version": "1.5.2",
   "channel": "stable",
   "release_date": "2026-10-07",
   "min_compatible_version": "1.2.0",
   "changelog": [
+    "Native Offline Sing-Box Proxy Engine: Embedded standalone Sing-Box (v1.11.4 static) and missing libunistring shared library into bootable ISO and hard disk installations",
+    "Non-Blocking Egress Multi-WAN Prober: Implemented SO_BINDTODEVICE socket binding and asynchronous 1.5s TCP handshake polling to measure real carrier proxy latency without thread blocking",
+    "Full Proxy URI Persistence: Expanded JSON parser buffer to 1024 bytes, preventing truncation of VLESS, VMess, Trojan, and Shadowsocks link parameters",
+    "Modern Sing-Box 1.10+ Spec Compatibility: Upgraded inbounds to unified address array syntax with legacy fallback flag",
     "Deterministic Bare-Metal & VM Disk Installer: Resolved partition node discovery race condition on Alpine/BusyBox by removing redundant sfdisk activation and implementing kernel sysfs major:minor mknod fallback",
     "Enhanced Ext4 Formatting Resiliency: Added proactive block node readiness checks and robust retry loops during hard disk deployment",
     "Self-Healing Kernel Driver Engine: Automatic AF_PACKET and network subsystem module detection with direct insmod fallback and unconditional boot indexing",

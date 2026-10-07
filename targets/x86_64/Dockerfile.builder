@@ -45,7 +45,9 @@ RUN apk update && apk add --no-cache \
     libpcap \
     libpcap-dev \
     libnl3-dev \
-    libmnl-dev
+    libmnl-dev \
+    libunistring \
+    libunistring-dev
 
 WORKDIR /workspace
 

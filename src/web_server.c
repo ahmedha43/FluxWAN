@@ -2369,12 +2369,17 @@ static void build_json_debug_report(web_server_ctx_t *ctx, char *buf, size_t max
             snprintf(ppp_acc, sizeof(ppp_acc), " | Account: %s", w->ppp_username);
         }
 
+        uint32_t eff_rtt = w->metrics.rtt_ms;
+        if (w->proxy.enabled && w->proxy.latency_ms > 0) {
+            eff_rtt = w->proxy.latency_ms;
+        }
+
         r_off += snprintf(raw_report + r_off, sizeof(raw_report) - r_off,
             "%-2u  %-7s %-16s %-6s %-15s %-5u %-3ums %-4.1f%% %-10s %-3u (%.1f%%)\n"
             "            Gateway: %s%s%s%s\n",
             w->id, w->name, w->label, type_str, ip[0] ? ip : "0.0.0.0",
             w->link_mtu ? w->link_mtu : 1500,
-            w->metrics.rtt_ms, w->metrics.packet_loss_pct,
+            eff_rtt, w->metrics.packet_loss_pct,
             state_str, w->dynamic_weight, share_pct,
             gw[0] ? gw : "N/A",
             w->ac_name[0] ? " | AC: " : "",

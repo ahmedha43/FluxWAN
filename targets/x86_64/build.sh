@@ -144,6 +144,7 @@ ppp-pppoe
 rp-pppoe
 libpcap
 curl
+libunistring
 ca-certificates
 wpa_supplicant
 iw
@@ -153,7 +154,7 @@ EOF
 # Copy FluxWAN binaries, BPF objects, configs and scripts into apkovl
 cp -f "$PROJECT_ROOT/fluxwan" "$APKOVL_DIR/opt/fluxwan/"
 cp -f "$PROJECT_ROOT/config/fluxwan.json" "$APKOVL_DIR/opt/fluxwan/config/"
-echo "1.5.1" > "$APKOVL_DIR/opt/fluxwan/version"
+echo "1.5.2" > "$APKOVL_DIR/opt/fluxwan/version"
 mkdir -p "$APKOVL_DIR/root/config" "$APKOVL_DIR/config"
 ln -sf /opt/fluxwan/config/fluxwan.json "$APKOVL_DIR/root/config/fluxwan.json" 2>/dev/null || true
 ln -sf /opt/fluxwan/config/fluxwan.json "$APKOVL_DIR/config/fluxwan.json" 2>/dev/null || true
@@ -277,17 +278,19 @@ else
     fetch_and_unpack_apk "iptables-1.8.10-r3.apk" "$APKOVL_DIR"
     fetch_and_unpack_apk "ethtool-6.6-r0.apk" "$APKOVL_DIR"
     fetch_and_unpack_apk "libpcap-1.10.4-r1.apk" "$APKOVL_DIR"
+    fetch_and_unpack_apk "libunistring-1.1-r2.apk" "$APKOVL_DIR"
     fetch_and_unpack_apk "ppp-2.5.0-r5.apk" "$APKOVL_DIR"
     fetch_and_unpack_apk "ppp-daemon-2.5.0-r5.apk" "$APKOVL_DIR"
     fetch_and_unpack_apk "ppp-pppoe-2.5.0-r5.apk" "$APKOVL_DIR"
     fetch_and_unpack_apk "rp-pppoe-4.0-r1.apk" "$APKOVL_DIR"
 fi
 
-# Ensure syslinux, grub, ppp and libpcap offline packages are in ISO APK repository regardless
+# Ensure syslinux, grub, ppp, libunistring and libpcap offline packages are in ISO APK repository regardless
 fetch_and_unpack_apk "grub-2.06-r17.apk" "$BUILD_DIR/iso_extract"
 fetch_and_unpack_apk "grub-bios-2.06-r17.apk" "$BUILD_DIR/iso_extract"
 fetch_and_unpack_apk "grub-efi-2.06-r17.apk" "$BUILD_DIR/iso_extract"
 fetch_and_unpack_apk "syslinux-6.04_pre1-r15.apk" "$BUILD_DIR/iso_extract"
+fetch_and_unpack_apk "libunistring-1.1-r2.apk" "$BUILD_DIR/iso_extract"
 fetch_and_unpack_apk "libpcap-1.10.4-r1.apk" "$BUILD_DIR/iso_extract"
 fetch_and_unpack_apk "ppp-2.5.0-r5.apk" "$BUILD_DIR/iso_extract"
 fetch_and_unpack_apk "ppp-daemon-2.5.0-r5.apk" "$BUILD_DIR/iso_extract"
@@ -307,6 +310,24 @@ fi
 # Embed Standalone Proxy Engines (Sing-box, Xray, V2Ray) for Zero-Rating Multi-WAN
 echo "    * Embedding Standalone Proxy Tunneling engines (Sing-box, Xray, V2Ray)..."
 mkdir -p "$APKOVL_DIR/usr/bin" "$APKOVL_DIR/usr/local/bin"
+
+# Guarantee pure static Sing-box binary is downloaded if not present locally
+if [ ! -s "$CACHE_X86/sing-box" ]; then
+    echo "    * Fetching standalone Sing-box engine for multi-WAN proxying..."
+    curl -fL --retry 3 -sS "https://github.com/SagerNet/sing-box/releases/download/v1.11.4/sing-box-1.11.4-linux-amd64.tar.gz" -o "$CACHE_X86/sing-box.tar.gz" 2>/dev/null || true
+    if [ -s "$CACHE_X86/sing-box.tar.gz" ]; then
+        tar -xzf "$CACHE_X86/sing-box.tar.gz" -C "$CACHE_X86" 2>/dev/null || true
+        find "$CACHE_X86" -name "sing-box" -type f -exec cp -f {} "$CACHE_X86/sing-box" \; 2>/dev/null || true
+        chmod +x "$CACHE_X86/sing-box" 2>/dev/null || true
+        rm -f "$CACHE_X86/sing-box.tar.gz"
+    fi
+fi
+if [ -s "$CACHE_X86/sing-box" ]; then
+    cp -f "$CACHE_X86/sing-box" "$APKOVL_DIR/usr/local/bin/sing-box" 2>/dev/null || true
+    cp -f "$CACHE_X86/sing-box" "$APKOVL_DIR/usr/bin/sing-box" 2>/dev/null || true
+    chmod +x "$APKOVL_DIR/usr/local/bin/sing-box" "$APKOVL_DIR/usr/bin/sing-box" 2>/dev/null || true
+    echo "      -> Embedded proxy engine: sing-box (v1.11.4 static)"
+fi
 for pbin in sing-box xray v2ray; do
     PB_SRC=""
     for cand in "/usr/local/bin/$pbin" "/usr/bin/$pbin" "/bin/$pbin" "$PROJECT_ROOT/$pbin" "$PROJECT_ROOT/dist/$pbin"; do

@@ -15,6 +15,9 @@
 #include <netdb.h>
 #include <time.h>
 #include <strings.h>
+#include <poll.h>
+#include <fcntl.h>
+#include <errno.h>
 #elif defined(_WIN32) || defined(_WIN64)
 #define strcasecmp _stricmp
 #endif
@@ -318,7 +321,7 @@ static int generate_proxy_config_file(const wan_config_t *wan, int wan_idx, char
     fprintf(f, "      \"type\": \"tun\",\n");
     fprintf(f, "      \"tag\": \"tun-in\",\n");
     fprintf(f, "      \"interface_name\": \"%s\",\n", tun_name);
-    fprintf(f, "      \"inet4_address\": \"198.18.%u.1/24\",\n", (wan_idx + 10) % 250);
+    fprintf(f, "      \"address\": [\n        \"198.18.%u.1/24\"\n      ],\n", (wan_idx + 10) % 250);
     fprintf(f, "      \"mtu\": 1420,\n");
     fprintf(f, "      \"auto_route\": false,\n");
     fprintf(f, "      \"strict_route\": false,\n");
@@ -534,11 +537,11 @@ int proxy_manager_test_tunnel(const wan_proxy_config_t *proxy, uint32_t *out_lat
     int s = socket(AF_INET, SOCK_STREAM, 0);
     if (s < 0) return -1;
 
-    struct timeval tv;
-    tv.tv_sec = 2;
-    tv.tv_usec = 0;
-    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(tv));
-    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char *)&tv, sizeof(tv));
+#ifdef SO_BINDTODEVICE
+    if (proxy->bind_interface[0]) {
+        setsockopt(s, SOL_SOCKET, SO_BINDTODEVICE, proxy->bind_interface, strlen(proxy->bind_interface));
+    }
+#endif
 
     struct hostent *he = gethostbyname(proxy->server);
     if (!he) { close(s); return -1; }
@@ -549,11 +552,31 @@ int proxy_manager_test_tunnel(const wan_proxy_config_t *proxy, uint32_t *out_lat
     saddr.sin_port = htons(proxy->port);
     memcpy(&saddr.sin_addr, he->h_addr_list[0], sizeof(saddr.sin_addr));
 
-    if (connect(s, (struct sockaddr *)&saddr, sizeof(saddr)) < 0) {
-        close(s);
-        return -1;
+    /* Non-blocking connect with strict 1.5s timeout to prevent thread stalling */
+    int flags = fcntl(s, F_GETFL, 0);
+    if (flags >= 0) fcntl(s, F_SETFL, flags | O_NONBLOCK);
+
+    int rc = connect(s, (struct sockaddr *)&saddr, sizeof(saddr));
+    if (rc < 0 && (errno == EINPROGRESS || errno == EWOULDBLOCK)) {
+        struct pollfd pfd;
+        pfd.fd = s;
+        pfd.events = POLLOUT;
+        int poll_rc = poll(&pfd, 1, 1500);
+        if (poll_rc > 0 && (pfd.revents & POLLOUT)) {
+            int err = 0;
+            socklen_t len = sizeof(err);
+            if (getsockopt(s, SOL_SOCKET, SO_ERROR, &err, &len) == 0 && err == 0) {
+                rc = 0;
+            } else {
+                rc = -1;
+            }
+        } else {
+            rc = -1;
+        }
     }
     close(s);
+
+    if (rc != 0) return -1;
 
     clock_gettime(CLOCK_MONOTONIC, &end);
     uint32_t ms = (uint32_t)((end.tv_sec - start.tv_sec) * 1000 + (end.tv_nsec - start.tv_nsec) / 1000000);
@@ -582,6 +605,10 @@ void proxy_manager_tick(proxy_manager_ctx_t *ctx) {
     for (uint32_t i = 0; i < ctx->config->wan_count; i++) {
         wan_config_t *wan = &ctx->config->wans[i];
         if (wan->enabled && wan->proxy.enabled) {
+            if (wan->proxy.bind_interface[0] == '\0' && wan->name[0]) {
+                safe_str_copy(wan->proxy.bind_interface, wan->name, sizeof(wan->proxy.bind_interface));
+            }
+
             if (ctx->pids[i] > 1) {
                 if (kill(ctx->pids[i], 0) != 0) {
                     LOG_WARN("[Proxy] Proxy daemon for WAN '%s' died unexpectedly. Restarting...", wan->label);
@@ -603,9 +630,15 @@ void proxy_manager_tick(proxy_manager_ctx_t *ctx) {
                     wan->state = WAN_STATE_HEALTHY;
                 } else {
                     wan->metrics.packet_loss_pct = 100.0f;
+                    wan->proxy.latency_ms = 0;
+                    wan->metrics.rtt_ms = 0;
                     LOG_WARN("[Proxy] Tunnel probe failed for WAN '%s' (%s:%u)",
                              wan->label, wan->proxy.server, wan->proxy.port);
                 }
+            } else if (!wan->proxy.is_connected) {
+                wan->metrics.packet_loss_pct = 100.0f;
+                wan->proxy.latency_ms = 0;
+                wan->metrics.rtt_ms = 0;
             }
         }
     }

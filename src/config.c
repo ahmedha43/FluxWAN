@@ -449,7 +449,8 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
                     wan_config_t *w = &out_config->wans[idx];
                     w->id = extract_json_int(obj_str, "id", idx + 1);
                     
-                    char val[64];
+                    char val[256];
+                    char val_uri[1024];
                     if (extract_json_string(obj_str, "name", val, sizeof(val))) {
                         safe_str_copy(w->name, val, sizeof(w->name));
                     }
@@ -538,8 +539,9 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
                     if (extract_json_string(obj_str, "proxy_path", val, sizeof(val))) safe_str_copy(w->proxy.path, val, sizeof(w->proxy.path));
                     if (extract_json_string(obj_str, "proxy_transport", val, sizeof(val))) safe_str_copy(w->proxy.transport, val, sizeof(w->proxy.transport));
                     if (extract_json_string(obj_str, "proxy_security", val, sizeof(val))) safe_str_copy(w->proxy.security, val, sizeof(w->proxy.security));
-                    if (extract_json_string(obj_str, "proxy_raw_uri", val, sizeof(val))) safe_str_copy(w->proxy.raw_uri, val, sizeof(w->proxy.raw_uri));
+                    if (extract_json_string(obj_str, "proxy_raw_uri", val_uri, sizeof(val_uri))) safe_str_copy(w->proxy.raw_uri, val_uri, sizeof(w->proxy.raw_uri));
                     if (extract_json_string(obj_str, "proxy_tun_dev", val, sizeof(val))) safe_str_copy(w->proxy.tun_dev, val, sizeof(w->proxy.tun_dev));
+                    safe_str_copy(w->proxy.bind_interface, w->name, sizeof(w->proxy.bind_interface));
 
                     /* If proxy is enabled and raw_uri is present but proxy_server is empty, auto-parse! */
                     if (w->proxy.enabled && w->proxy.raw_uri[0] != '\0' && w->proxy.server[0] == '\0') {
