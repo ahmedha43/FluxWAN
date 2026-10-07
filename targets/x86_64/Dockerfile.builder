@@ -38,6 +38,10 @@ RUN apk update && apk add --no-cache \
     curl \
     dropbear \
     dropbear-ssh \
+    ppp \
+    ppp-daemon \
+    ppp-pppoe \
+    rp-pppoe \
     libnl3-dev \
     libmnl-dev
 
