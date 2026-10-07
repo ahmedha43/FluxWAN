@@ -174,31 +174,66 @@ partx -u "$TARGET_DEV" 2>/dev/null || true
 partprobe "$TARGET_DEV" 2>/dev/null || true
 blockdev --rereadpt "$TARGET_DEV" 2>/dev/null || true
 mdev -s 2>/dev/null || true
-sleep 2
+sleep 1
 
-if [ "$IS_UEFI" -eq 0 ]; then
-    sfdisk --activate "$TARGET_DEV" 1 2>/dev/null || true
-fi
+# Detect partition naming prefix (e.g. sda1 vs nvme0n1p1)
+case "$TARGET_DEV" in
+    *nvme*|*mmcblk*|*loop*)
+        PART_PREFIX="${TARGET_DEV}p"
+        ;;
+    *)
+        PART_PREFIX="${TARGET_DEV}"
+        ;;
+esac
 
-# Detect partition naming (e.g. sda1 vs nvme0n1p1)
-if [ -b "${TARGET_DEV}p1" ]; then
-    PART_PREFIX="${TARGET_DEV}p"
-else
-    PART_PREFIX="${TARGET_DEV}"
-fi
+# Helper: Ensure partition block device node is present in /dev
+ensure_partition_node() {
+    local part="$1"
+    local base_name=$(basename "$part")
+    for attempt in $(seq 1 10); do
+        if [ -b "$part" ]; then
+            return 0
+        fi
+        mdev -s 2>/dev/null || true
+        partx -u "$TARGET_DEV" 2>/dev/null || true
+        partx -a "$TARGET_DEV" 2>/dev/null || true
+        blockdev --rereadpt "$TARGET_DEV" 2>/dev/null || true
+
+        # Direct kernel mknod fallback using major:minor from sysfs
+        if [ -f "/sys/class/block/$base_name/dev" ]; then
+            local mm=$(cat "/sys/class/block/$base_name/dev" 2>/dev/null)
+            if [ -n "$mm" ]; then
+                [ -e "$part" ] && [ ! -b "$part" ] && rm -f "$part"
+                mknod "$part" b ${mm%:*} ${mm#*:} 2>/dev/null || true
+            fi
+        elif [ -f "/sys/block/$(basename "$TARGET_DEV")/$base_name/dev" ]; then
+            local mm=$(cat "/sys/block/$(basename "$TARGET_DEV")/$base_name/dev" 2>/dev/null)
+            if [ -n "$mm" ]; then
+                [ -e "$part" ] && [ ! -b "$part" ] && rm -f "$part"
+                mknod "$part" b ${mm%:*} ${mm#*:} 2>/dev/null || true
+            fi
+        fi
+
+        if [ -b "$part" ]; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
 
 EFI_PART=""
 if [ "$IS_UEFI" -eq 1 ]; then
     EFI_PART="${PART_PREFIX}1"
     ROOT_PART="${PART_PREFIX}2"
+    ensure_partition_node "$EFI_PART"
+    ensure_partition_node "$ROOT_PART"
     echo -e "    * Formatting EFI Partition ($EFI_PART as FAT32)..."
     mkfs.vfat -F 32 -n "FLUX_EFI" "$EFI_PART" >/dev/null 2>&1 || mkfs.fat -F 32 "$EFI_PART" >/dev/null 2>&1
 else
     ROOT_PART="${PART_PREFIX}1"
+    ensure_partition_node "$ROOT_PART"
 fi
-
-mdev -s 2>/dev/null || true
-sleep 1
 
 # Helper: Ensure ext4 kernel module is actively loaded in the running kernel
 ensure_ext4_ready() {
@@ -237,12 +272,17 @@ ensure_ext4_ready() {
 ensure_ext4_ready
 
 echo -e "    * Formatting Root Partition ($ROOT_PART as Ext4, Syslinux-compatible)..."
-mkfs.ext4 -F -O ^64bit,^orphan_file,^metadata_csum_seed -L "FLUXWAN_ROOT" "$ROOT_PART" || {
+ensure_partition_node "$ROOT_PART"
+if ! mkfs.ext4 -F -O ^64bit,^orphan_file,^metadata_csum_seed -L "FLUXWAN_ROOT" "$ROOT_PART"; then
     echo -e "${YELLOW}[*] Retrying ext4 format on $ROOT_PART...${NC}"
     sync
+    ensure_partition_node "$ROOT_PART"
     sleep 2
-    mkfs.ext4 -F -O ^64bit,^orphan_file,^metadata_csum_seed -L "FLUXWAN_ROOT" "$ROOT_PART"
-}
+    if ! mkfs.ext4 -F -O ^64bit,^orphan_file,^metadata_csum_seed -L "FLUXWAN_ROOT" "$ROOT_PART"; then
+        echo -e "${RED}[!] ERROR: Failed to format root partition $ROOT_PART with ext4.${NC}" >&2
+        exit 1
+    fi
+fi
 
 sync
 mdev -s 2>/dev/null || true
@@ -258,12 +298,7 @@ mkdir -p "$MOUNT_DIR"
 ensure_ext4_ready
 
 # Ensure root partition block device is ready
-if [ ! -b "$ROOT_PART" ]; then
-    echo -e "    * Waiting for $ROOT_PART block device node..."
-    mdev -s 2>/dev/null || true
-    partprobe "$TARGET_DEV" 2>/dev/null || true
-    sleep 2
-fi
+ensure_partition_node "$ROOT_PART"
 
 # Mount root partition
 MOUNTED=0
