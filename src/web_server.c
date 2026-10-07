@@ -4472,11 +4472,13 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
 
         LOG_INFO("[Update] Downloading upgrade package from: %s", pkg_url);
 
-        /* 3. Download package to /tmp/fluxwan_update.tmp */
+        /* 3. Download package to /tmp/fluxwan_update.tmp (with cache-busting) */
+        unsigned long dl_now = (unsigned long)time(NULL);
+        char sep = strchr(pkg_url, '?') ? '&' : '?';
         char dl_cmd[1024];
         snprintf(dl_cmd, sizeof(dl_cmd),
-                 "wget -q -T 60 -O /tmp/fluxwan_update.tmp \"%s\" 2>/dev/null || curl -sSL --connect-timeout 8 -m 120 \"%s\" -o /tmp/fluxwan_update.tmp 2>/dev/null",
-                 pkg_url, pkg_url);
+                 "wget -q -T 60 -O /tmp/fluxwan_update.tmp \"%s%ct=%lu\" 2>/dev/null || curl -sSL --connect-timeout 8 -m 120 \"%s%ct=%lu\" -o /tmp/fluxwan_update.tmp 2>/dev/null",
+                 pkg_url, sep, dl_now, pkg_url, sep, dl_now);
         int dl_rc = safe_system(dl_cmd);
 
         bool valid = false;
