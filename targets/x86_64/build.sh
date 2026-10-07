@@ -142,6 +142,9 @@ ppp
 ppp-daemon
 ppp-pppoe
 rp-pppoe
+libpcap
+curl
+ca-certificates
 wpa_supplicant
 iw
 wireless-regdb
@@ -246,6 +249,18 @@ if [ "$IS_ALPINE" -eq 1 ]; then
     cp -aL /usr/lib/libzstd.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
     cp -aL /usr/lib/libcrypt.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
     cp -aL /lib/libcrypt.so* "$APKOVL_DIR/lib/" 2>/dev/null || true
+    cp -aL /usr/lib/libpcap.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
+    cp -aL /usr/lib/libssl.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
+    cp -aL /lib/libssl.so* "$APKOVL_DIR/lib/" 2>/dev/null || true
+    cp -aL /usr/lib/libcrypto.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
+    cp -aL /lib/libcrypto.so* "$APKOVL_DIR/lib/" 2>/dev/null || true
+    cp -aL /usr/lib/libcurl.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
+    cp -aL /usr/lib/libcares.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
+    cp -aL /usr/lib/libnghttp2.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
+    cp -aL /usr/lib/libidn2.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
+    cp -aL /usr/lib/libpsl.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
+    cp -aL /usr/lib/libbrotlidec.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
+    cp -aL /usr/lib/libbrotlicommon.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
     cp -aL /usr/lib/pppd "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
 else
     echo "    * Non-Alpine builder detected! Fetching official Alpine 3.19 Musl bootloader packages..."
@@ -261,17 +276,19 @@ else
     fetch_and_unpack_apk "dropbear-ssh-2022.83-r4.apk" "$APKOVL_DIR"
     fetch_and_unpack_apk "iptables-1.8.10-r3.apk" "$APKOVL_DIR"
     fetch_and_unpack_apk "ethtool-6.6-r0.apk" "$APKOVL_DIR"
+    fetch_and_unpack_apk "libpcap-1.10.4-r1.apk" "$APKOVL_DIR"
     fetch_and_unpack_apk "ppp-2.5.0-r5.apk" "$APKOVL_DIR"
     fetch_and_unpack_apk "ppp-daemon-2.5.0-r5.apk" "$APKOVL_DIR"
     fetch_and_unpack_apk "ppp-pppoe-2.5.0-r5.apk" "$APKOVL_DIR"
     fetch_and_unpack_apk "rp-pppoe-4.0-r1.apk" "$APKOVL_DIR"
 fi
 
-# Ensure syslinux, grub and ppp offline packages are in ISO APK repository regardless
+# Ensure syslinux, grub, ppp and libpcap offline packages are in ISO APK repository regardless
 fetch_and_unpack_apk "grub-2.06-r17.apk" "$BUILD_DIR/iso_extract"
 fetch_and_unpack_apk "grub-bios-2.06-r17.apk" "$BUILD_DIR/iso_extract"
 fetch_and_unpack_apk "grub-efi-2.06-r17.apk" "$BUILD_DIR/iso_extract"
 fetch_and_unpack_apk "syslinux-6.04_pre1-r15.apk" "$BUILD_DIR/iso_extract"
+fetch_and_unpack_apk "libpcap-1.10.4-r1.apk" "$BUILD_DIR/iso_extract"
 fetch_and_unpack_apk "ppp-2.5.0-r5.apk" "$BUILD_DIR/iso_extract"
 fetch_and_unpack_apk "ppp-daemon-2.5.0-r5.apk" "$BUILD_DIR/iso_extract"
 fetch_and_unpack_apk "ppp-pppoe-2.5.0-r5.apk" "$BUILD_DIR/iso_extract"

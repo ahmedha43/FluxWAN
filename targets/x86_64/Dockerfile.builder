@@ -42,6 +42,8 @@ RUN apk update && apk add --no-cache \
     ppp-daemon \
     ppp-pppoe \
     rp-pppoe \
+    libpcap \
+    libpcap-dev \
     libnl3-dev \
     libmnl-dev
 
