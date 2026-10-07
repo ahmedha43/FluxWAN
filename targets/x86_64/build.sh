@@ -99,12 +99,16 @@ for kdir in "$BUILD_DIR/modloop_unpacked/modules/"*; do
                "$K_DEST/kernel/drivers/scsi/qla2xxx" \
                "$K_DEST/kernel/drivers/scsi/lpfc" 2>/dev/null || true
 
+        # Copy original modules.* metadata files from Alpine kernel (modules.builtin, modules.order, etc.)
+        cp -a "$kdir"/modules.* "$K_DEST/" 2>/dev/null || true
         # Re-generate module dependencies with depmod (depmod -b DIR expects DIR/lib/modules/$kver)
         mkdir -p "$BUILD_DIR/depmod_root/lib/modules"
         rm -rf "$BUILD_DIR/depmod_root/lib/modules/$kver"
         cp -a "$K_DEST" "$BUILD_DIR/depmod_root/lib/modules/$kver"
         depmod -b "$BUILD_DIR/depmod_root" "$kver" 2>/dev/null || true
-        cp -a "$BUILD_DIR/depmod_root/lib/modules/$kver"/modules.* "$K_DEST/" 2>/dev/null || cp -a "$kdir"/modules.* "$K_DEST/" 2>/dev/null || true
+        if [ -s "$BUILD_DIR/depmod_root/lib/modules/$kver/modules.dep" ]; then
+            cp -a "$BUILD_DIR/depmod_root/lib/modules/$kver"/modules.* "$K_DEST/" 2>/dev/null || true
+        fi
         # Also create backwards-compatible link at root of modloop
         ln -sf modules/"$kver" "$BUILD_DIR/filtered_modules/$kver" 2>/dev/null || true
     fi

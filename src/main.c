@@ -67,7 +67,9 @@ int main(int argc, char *argv[]) {
     WSADATA wsa;
     WSAStartup(MAKEWORD(2, 2), &wsa);
 #else
-    safe_system("modprobe af_packet 2>/dev/null || modprobe packet 2>/dev/null || true");
+    safe_system("depmod -a 2>/dev/null || true; "
+                "modprobe af_packet 2>/dev/null || modprobe packet 2>/dev/null || "
+                "insmod $(find /lib/modules -name 'af_packet.ko*' 2>/dev/null | head -n 1) 2>/dev/null || true");
     safe_system("modprobe nf_nat 2>/dev/null || true");
 #endif
 

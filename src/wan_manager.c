@@ -699,9 +699,13 @@ void wan_manager_periodic_tick(wan_manager_ctx_t *ctx, uint64_t now_ms) {
                     fclose(tf);
                 }
 
-                /* 2. Ensure interface is administratively UP */
-                char up_cmd[128];
-                snprintf(up_cmd, sizeof(up_cmd), "ip link set %s up 2>/dev/null || true", w->name);
+                /* 2. Ensure interface is administratively UP and AF_PACKET kernel socket is active */
+                char up_cmd[256];
+                snprintf(up_cmd, sizeof(up_cmd),
+                         "ip link set %s up 2>/dev/null || true; "
+                         "modprobe af_packet 2>/dev/null || modprobe packet 2>/dev/null || "
+                         "insmod $(find /lib/modules -name 'af_packet.ko*' 2>/dev/null | head -n 1) 2>/dev/null || true",
+                         w->name);
                 safe_system(up_cmd);
 
                 /* 3. Check if udhcpc is actively running */
