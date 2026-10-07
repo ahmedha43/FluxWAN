@@ -489,8 +489,10 @@ void pppoe_manager_tick(pppoe_manager_ctx_t *pctx,
                     w->ip_addr = htonl(ip);
                     w->gateway = htonl(gw);
                     w->netmask = htonl(0xFFFFFFFF); /* /32 Point-to-point */
-                    safe_str_copy(w->probe_target, gw_str, sizeof(w->probe_target));
-                    w->probe_target_ip = htonl(gw);
+                    if (w->probe_target[0] == '\0' || w->probe_target_ip == 0) {
+                        safe_str_copy(w->probe_target, gw_str, sizeof(w->probe_target));
+                        w->probe_target_ip = htonl(gw);
+                    }
 
                     if (on_connected) {
                         on_connected((int)i, sess->ppp_ifname, ip, gw, userdata);

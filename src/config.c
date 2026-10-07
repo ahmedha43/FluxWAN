@@ -514,6 +514,9 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
                     if (extract_json_string(obj_str, "probe_target", val, sizeof(val))) {
                         safe_str_copy(w->probe_target, val, sizeof(w->probe_target));
                         w->probe_target_ip = str_to_ip(val);
+                    } else {
+                        safe_str_copy(w->probe_target, "8.8.8.8", sizeof(w->probe_target));
+                        w->probe_target_ip = str_to_ip("8.8.8.8");
                     }
 
                     w->enabled = extract_json_bool(obj_str, "enabled", true);
@@ -1497,6 +1500,7 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
             fprintf(f, "      \"ip\": \"%s\",\n", ip);
             fprintf(f, "      \"netmask\": \"%s\",\n", mask);
             fprintf(f, "      \"gateway\": \"%s\",\n", gw);
+            fprintf(f, "      \"probe_target\": \"%s\",\n", w->probe_target[0] ? w->probe_target : "8.8.8.8");
             fprintf(f, "      \"weight\": %u,\n", w->config_weight);
             fprintf(f, "      \"bandwidth_down_mbps\": %u,\n", w->bandwidth_down_mbps);
             fprintf(f, "      \"bandwidth_up_mbps\": %u,\n", w->bandwidth_up_mbps);

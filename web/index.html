@@ -2244,8 +2244,14 @@
 
                             <!-- Health Prober Target -->
                             <div>
-                                <label class="text-2xs text-slate-400 block mb-1">Health Probe Destination (ICMP Ping)</label>
+                                <div class="flex items-center justify-between mb-1">
+                                    <label class="text-2xs text-slate-400">Health Probe Destination (ICMP Ping)</label>
+                                    <template x-if="wan.proxy_enabled">
+                                        <span class="text-4xs text-cyan-400 bg-cyan-950/60 border border-cyan-800/40 px-1.5 py-0.5 rounded font-mono font-bold">⚡ TCP RTT Auto-Probed</span>
+                                    </template>
+                                </div>
                                 <input type="text" x-model="wan.probe_target" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono" placeholder="8.8.8.8">
+                                <p class="text-4xs text-slate-500 mt-1" x-text="wan.proxy_enabled ? (currentLang==='ar' ? 'عند تفعيل النفق، يقيس المحرك زمن الاستجابة الحقيقي (RTT) تلقائياً عبر مصافحة TCP مع السيرفر بدلاً من فحص البوابة المحلية' : 'When proxy is active, the engine monitors real tunnel RTT automatically via TCP handshake.') : (currentLang==='ar' ? 'العنوان المستخدم لفحص استقرار الخط والـ Ping (الافتراضي 8.8.8.8)' : 'Target IP address for line health probing and latency (default 8.8.8.8)')"></p>
                             </div>
 
                             <!-- Bandwidth Capacity (Mbps) -->
@@ -7310,7 +7316,7 @@
                                     rtt_ms: w.rtt_ms !== undefined ? w.rtt_ms : 0,
                                     jitter_ms: w.jitter_ms !== undefined ? w.jitter_ms : 0,
                                     packet_loss: w.packet_loss !== undefined ? w.packet_loss : 0,
-                                    probe_target: w.probe_target || '',
+                                    probe_target: w.probe_target || '8.8.8.8',
                                     proxy_enabled: w.proxy_enabled !== undefined ? !!w.proxy_enabled : false,
                                     proxy_proto: w.proxy_proto || 'vless',
                                     proxy_server: w.proxy_server || '',
@@ -7354,6 +7360,7 @@
                                         if (!this.isEditing) {
                                             if (liveWan.ip && liveWan.ip !== '0.0.0.0') w.ip = liveWan.ip;
                                             if (liveWan.gateway && liveWan.gateway !== '0.0.0.0') w.gateway = liveWan.gateway;
+                                            if (liveWan.probe_target && (!w.probe_target || w.probe_target === '')) w.probe_target = liveWan.probe_target;
                                             if (liveWan.proxy_enabled !== undefined) w.proxy_enabled = !!liveWan.proxy_enabled;
                                             if (liveWan.proxy_server) w.proxy_server = liveWan.proxy_server;
                                             if (liveWan.proxy_port) w.proxy_port = liveWan.proxy_port;

@@ -452,8 +452,14 @@ int proxy_manager_start_wan(proxy_manager_ctx_t *ctx, uint32_t wan_idx) {
             ctx->pids[wan_idx] = pid;
             wan->proxy.pid = pid;
             wan->proxy.is_connected = true;
-            LOG_INFO("[Proxy] Successfully launched proxy daemon for WAN '%s' (PID: %d, Device: %s)",
-                     wan->label, pid, wan->proxy.tun_dev);
+            uint32_t init_lat = 0;
+            if (proxy_manager_test_tunnel(&wan->proxy, &init_lat) == 0 && init_lat > 0) {
+                wan->proxy.latency_ms = init_lat;
+                wan->metrics.rtt_ms = init_lat;
+                wan->metrics.packet_loss_pct = 0.0f;
+            }
+            LOG_INFO("[Proxy] Successfully launched proxy daemon for WAN '%s' (PID: %d, Device: %s, RTT: %ums)",
+                     wan->label, pid, wan->proxy.tun_dev, wan->metrics.rtt_ms);
         }
         fclose(pf);
     }
@@ -563,6 +569,16 @@ void proxy_manager_tick(proxy_manager_ctx_t *ctx) {
     if (!ctx || !ctx->config) return;
 
 #if defined(__linux__)
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    uint64_t now_ms = (uint64_t)ts.tv_sec * 1000ULL + (ts.tv_nsec / 1000000ULL);
+
+    bool should_probe = false;
+    if (now_ms - ctx->last_check_ms >= 5000) {
+        should_probe = true;
+        ctx->last_check_ms = now_ms;
+    }
+
     for (uint32_t i = 0; i < ctx->config->wan_count; i++) {
         wan_config_t *wan = &ctx->config->wans[i];
         if (wan->enabled && wan->proxy.enabled) {
@@ -570,9 +586,26 @@ void proxy_manager_tick(proxy_manager_ctx_t *ctx) {
                 if (kill(ctx->pids[i], 0) != 0) {
                     LOG_WARN("[Proxy] Proxy daemon for WAN '%s' died unexpectedly. Restarting...", wan->label);
                     proxy_manager_start_wan(ctx, i);
+                    continue;
                 }
             } else {
                 proxy_manager_start_wan(ctx, i);
+                continue;
+            }
+
+            /* Periodically test real tunnel latency and update metrics */
+            if (should_probe && wan->proxy.is_connected) {
+                uint32_t lat_ms = 0;
+                if (proxy_manager_test_tunnel(&wan->proxy, &lat_ms) == 0 && lat_ms > 0) {
+                    wan->proxy.latency_ms = lat_ms;
+                    wan->metrics.rtt_ms = lat_ms;
+                    wan->metrics.packet_loss_pct = 0.0f;
+                    wan->state = WAN_STATE_HEALTHY;
+                } else {
+                    wan->metrics.packet_loss_pct = 100.0f;
+                    LOG_WARN("[Proxy] Tunnel probe failed for WAN '%s' (%s:%u)",
+                             wan->label, wan->proxy.server, wan->proxy.port);
+                }
             }
         }
     }

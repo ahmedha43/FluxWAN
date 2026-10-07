@@ -277,7 +277,12 @@ static void on_pppoe_connected_cb(int wan_idx, const char *ppp_ifname, uint32_t 
     w->gateway = htonl(gw);
     w->netmask = inet_addr("255.255.255.255");
     if (w->probe_target_ip == 0) {
-        w->probe_target_ip = htonl(gw);
+        if (w->probe_target[0]) {
+            w->probe_target_ip = str_to_ip(w->probe_target);
+        } else {
+            w->probe_target_ip = str_to_ip("8.8.8.8");
+            snprintf(w->probe_target, sizeof(w->probe_target), "8.8.8.8");
+        }
     }
 
     char ip_str[32] = {0}, gw_str[32] = {0};
@@ -760,10 +765,9 @@ void wan_manager_periodic_tick(wan_manager_ctx_t *ctx, uint64_t now_ms) {
                         if (w->probe_target_ip == 0) {
                             if (w->probe_target[0]) {
                                 w->probe_target_ip = str_to_ip(w->probe_target);
-                            } else if (new_gw != 0) {
-                                w->probe_target_ip = new_gw;
-                                strncpy(w->probe_target, gw_str, sizeof(w->probe_target) - 1);
-                                w->probe_target[sizeof(w->probe_target) - 1] = '\0';
+                            } else {
+                                w->probe_target_ip = str_to_ip("8.8.8.8");
+                                snprintf(w->probe_target, sizeof(w->probe_target), "8.8.8.8");
                             }
                         }
 

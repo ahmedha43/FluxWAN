@@ -132,6 +132,14 @@ int prober_send_probes(prober_ctx_t *ctx) {
         wan_config_t *w = &ctx->config->wans[i];
         wan_probe_state_t *ps = &ctx->wan_states[i];
         if (!w->enabled) continue;
+        if (w->proxy.enabled) {
+            /* WAN is using Zero-Rating Proxy Tunnel.
+             * Raw ICMP packets to physical dev would be dropped by ISP zero-rating firewall,
+             * while ICMP to TUN would be intercepted locally (<1ms) by Sing-box TUN emulator.
+             * Real health and latency are managed by proxy_manager via TCP connection tests.
+             * Skip raw ICMP probe for this WAN to avoid misleading 1ms ping readings. */
+            continue;
+        }
 
         uint16_t seq = ps->current_seq++;
         uint32_t slot = seq % 16;
@@ -194,9 +202,6 @@ int prober_send_probes(prober_ctx_t *ctx) {
         uint32_t target_ip = w->probe_target_ip;
         if (target_ip == 0 && w->probe_target[0]) {
             target_ip = str_to_ip(w->probe_target);
-        }
-        if (target_ip == 0 && w->gateway != 0) {
-            target_ip = w->gateway;
         }
         if (target_ip == 0) {
             target_ip = inet_addr("8.8.8.8");

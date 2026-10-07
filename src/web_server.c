@@ -639,6 +639,11 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
             get_real_ipv6_str(w->name, real_v6, sizeof(real_v6));
         }
 
+        uint32_t effective_rtt = w->metrics.rtt_ms;
+        if (w->proxy.enabled && w->proxy.latency_ms > 0) {
+            effective_rtt = w->proxy.latency_ms;
+        }
+
         offset += snprintf(buf + offset, max_len - offset,
             "    {\n"
             "      \"id\": %u,\n"
@@ -713,7 +718,7 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
             w->probe_target,
             w->config_weight, w->dynamic_weight,
             w->bandwidth_down_mbps, w->bandwidth_up_mbps,
-            w->metrics.rtt_ms, w->metrics.jitter_ms,
+            effective_rtt, w->metrics.jitter_ms,
             w->metrics.packet_loss_pct, w->enabled ? "true" : "false", state_str,
             w->proxy.enabled ? "true" : "false",
             w->proxy.proto_str[0] ? w->proxy.proto_str : "vless",
