@@ -94,7 +94,7 @@ $(LAB_TARGET): $(LAB_OBJS)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Unit & Functional Tests
-$(TEST_WAN): tests/test_wan_validator.c src/config.c
+$(TEST_WAN): tests/test_wan_validator.c src/config.c src/proxy_manager.c
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
 $(TEST_PPPOE): tests/test_pppoe_manager.c src/pppoe_manager.c
@@ -103,13 +103,13 @@ $(TEST_PPPOE): tests/test_pppoe_manager.c src/pppoe_manager.c
 $(TEST_NAT46): tests/test_live_nat46_translation.c
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
-$(TEST_XDP): tests/xdp_packet_test.c src/config.c src/wan_manager.c src/netlink_manager.c src/bpf_loader.c src/prober.c src/sticky.c src/net_discovery.c src/pppoe_manager.c src/dhcp_server.c src/net_apply.c src/dns64_daemon.c src/wifi_manager.c src/license_manager.c src/crypto_ed25519.c
+$(TEST_XDP): tests/xdp_packet_test.c src/config.c src/wan_manager.c src/netlink_manager.c src/bpf_loader.c src/prober.c src/sticky.c src/net_discovery.c src/pppoe_manager.c src/dhcp_server.c src/net_apply.c src/dns64_daemon.c src/wifi_manager.c src/license_manager.c src/crypto_ed25519.c src/proxy_manager.c
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
 
-$(TEST_GROUPS): tests/test_wan_groups.c src/config.c src/wan_manager.c src/netlink_manager.c src/bpf_loader.c src/prober.c src/sticky.c src/net_discovery.c src/pppoe_manager.c src/dhcp_server.c src/net_apply.c src/dns64_daemon.c src/wifi_manager.c src/license_manager.c src/crypto_ed25519.c
+$(TEST_GROUPS): tests/test_wan_groups.c src/config.c src/wan_manager.c src/netlink_manager.c src/bpf_loader.c src/prober.c src/sticky.c src/net_discovery.c src/pppoe_manager.c src/dhcp_server.c src/net_apply.c src/dns64_daemon.c src/wifi_manager.c src/license_manager.c src/crypto_ed25519.c src/proxy_manager.c
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
 
-$(TEST_POLICY): tests/test_policy_routing.c src/config.c src/wan_manager.c src/netlink_manager.c src/bpf_loader.c src/prober.c src/sticky.c src/net_discovery.c src/pppoe_manager.c src/dhcp_server.c src/net_apply.c src/dns64_daemon.c src/wifi_manager.c src/license_manager.c src/crypto_ed25519.c
+$(TEST_POLICY): tests/test_policy_routing.c src/config.c src/wan_manager.c src/netlink_manager.c src/bpf_loader.c src/prober.c src/sticky.c src/net_discovery.c src/pppoe_manager.c src/dhcp_server.c src/net_apply.c src/dns64_daemon.c src/wifi_manager.c src/license_manager.c src/crypto_ed25519.c src/proxy_manager.c
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
 
 $(TEST_KATRAN): tests/test_katran_nextgen.c

@@ -44,7 +44,7 @@ set(CORE_LIB_SOURCES
 add_executable(fluxwan src/main.c ${CORE_LIB_SOURCES})
 add_executable(fluxwan_lab tests/lab_runner.c ${CORE_LIB_SOURCES})
 
-add_executable(test_wan_validator tests/test_wan_validator.c src/config.c)
+add_executable(test_wan_validator tests/test_wan_validator.c src/config.c src/proxy_manager.c)
 add_executable(test_pppoe_manager tests/test_pppoe_manager.c src/pppoe_manager.c)
 add_executable(test_live_nat46_translation tests/test_live_nat46_translation.c)
 add_executable(test_xdp_packet tests/xdp_packet_test.c ${CORE_LIB_SOURCES})
