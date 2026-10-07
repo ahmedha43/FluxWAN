@@ -1,9 +1,14 @@
 {
-  "latest_version": "1.4.1",
+  "latest_version": "1.5.0",
   "channel": "stable",
   "release_date": "2026-10-07",
   "min_compatible_version": "1.2.0",
   "changelog": [
+    "Self-Healing Kernel Driver Engine: Automatic AF_PACKET and network subsystem module detection with direct insmod fallback and unconditional boot indexing",
+    "Full Out-of-the-Box Multi-WAN Engine: Complete zero-config support for all 5 WAN uplink types (DHCP, Static IP, PPPoE Client, WiFi Client, and Proxy Tunneling) from Web UI",
+    "Embedded PPPoE Client & Server Suite: Natively packaged pppd 2.5.0, pppoe.so kernel plugin, rp-pppoe server daemons, and libpcap within distribution ISO",
+    "Dynamic DNS Resolv Sync: Automatic /etc/resolv.conf propagation capturing upstream ISP nameservers upon WAN lease acquisition with resilient fallback",
+    "Complete Network Shared Libraries: Embedded libpcap.so, libcurl.so, libssl.so.3, and libcrypto.so.3 across live ISO and persistent installations",
     "Health Probe Persistence Fix: Serialized probe_target in config_save and protected user probe target from being clobbered by PPPoE/DHCP gateway assignment",
     "Real Proxy Latency Measurement: Eliminated pseudo 1ms ICMP ping on proxy WANs by measuring authentic TCP handshake RTT periodically and reporting real tunnel latency",
     "Per-WAN Outbound Proxy Tunneling (🌐): Native support for VLESS, VMess, Trojan, and Shadowsocks protocol tunneling per physical WAN uplink",
