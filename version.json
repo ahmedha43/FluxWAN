@@ -1,9 +1,12 @@
 {
-  "latest_version": "1.5.3",
+  "latest_version": "1.5.4",
   "channel": "stable",
   "release_date": "2026-10-08",
   "min_compatible_version": "1.2.0",
   "changelog": [
+    "Dedicated Asynchronous Proxy Supervisor Worker Thread: Completely decoupled proxy process supervision and TCP/DNS health testing from the main router reactor loop, eliminating all userspace queuing delays and stabilizing ping across all physical WAN interfaces (eth1, eth2, eth3)",
+    "Native gVisor Stack & Sing-Box 1.11+ Address Compatibility: Upgraded inbounds to unified 'address': ['198.18.X.1/24'] and 'stack': 'gvisor', eliminating Go netpoller CPU spinning and startup crash loops",
+    "5-Second Restart Cooldown: Prevents rapid fork-exec thrashing and CPU starvation when remote proxy endpoints are unreachable",
     "Autonomous 24/7 Self-Healing Watchdog: Kernel packet forwarding, loose mode rp_filter, and dynamic NAT masquerade re-injection every 30 seconds",
     "PID 1 Inittab Respawn Process Supervisor: Sub-second core router engine crash recovery and auto-revival via /usr/local/bin/fluxwan-supervisor",
     "Zero-Disk Bloat Ramdisk Protection: Silent daemon logging and automatic log rotation preventing /tmp and /var/log exhaustion",
