@@ -242,6 +242,8 @@ if [ "$IS_ALPINE" -eq 1 ]; then
         fi
     done
     cp -aL /usr/lib/libxtables.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
+    cp -aL /usr/lib/xtables "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
+    cp -aL /usr/lib/libunistring.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
     cp -aL /usr/lib/libmnl.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
     cp -aL /usr/lib/libnftnl.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
     cp -aL /usr/lib/libnetfilter_conntrack.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
