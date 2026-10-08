@@ -1,9 +1,16 @@
 {
-  "latest_version": "1.5.2",
+  "latest_version": "1.5.3",
   "channel": "stable",
-  "release_date": "2026-10-07",
+  "release_date": "2026-10-08",
   "min_compatible_version": "1.2.0",
   "changelog": [
+    "Autonomous 24/7 Self-Healing Watchdog: Kernel packet forwarding, loose mode rp_filter, and dynamic NAT masquerade re-injection every 30 seconds",
+    "PID 1 Inittab Respawn Process Supervisor: Sub-second core router engine crash recovery and auto-revival via /usr/local/bin/fluxwan-supervisor",
+    "Zero-Disk Bloat Ramdisk Protection: Silent daemon logging and automatic log rotation preventing /tmp and /var/log exhaustion",
+    "3-Strike Proxy Tunnel Auto-Recovery: Automatic socket cleanup and daemon restart for stuck or dropped remote proxy sessions",
+    "Enterprise Kernel & Conntrack Tuning: 262,144 session conntrack capacity, aggressive dead session expiration, and 16MB socket buffers",
+    "Complete /usr/lib/xtables Native Packaging: Bundled iptables NAT, MASQUERADE, and mangle extension modules into rootfs",
+    "gVisor Isolated Tun Stack: Fixed Go netpoller not-pollable spinning bug, dropping CPU from 100% to 1% and restoring 40ms ping",
     "Native Offline Sing-Box Proxy Engine: Embedded standalone Sing-Box (v1.11.4 static) and missing libunistring shared library into bootable ISO and hard disk installations",
     "Non-Blocking Egress Multi-WAN Prober: Implemented SO_BINDTODEVICE socket binding and asynchronous 1.5s TCP handshake polling to measure real carrier proxy latency without thread blocking",
     "Full Proxy URI Persistence: Expanded JSON parser buffer to 1024 bytes, preventing truncation of VLESS, VMess, Trojan, and Shadowsocks link parameters",
