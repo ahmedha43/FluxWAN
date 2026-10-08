@@ -1,0 +1,11 @@
+#!/bin/sh
+# FluxWAN 24/7 Core Process Supervisor (Busybox Inittab Respawn)
+cd /opt/fluxwan || exit 1
+while true; do
+    if [ -x /opt/fluxwan/fluxwan ] && [ -f /opt/fluxwan/config/fluxwan.json ]; then
+        echo "[Supervisor] Starting FluxWAN Core Router Daemon..." > /dev/kmsg 2>/dev/null || true
+        ./fluxwan /opt/fluxwan/config/fluxwan.json >> /var/log/fluxwan.log 2>&1
+        echo "[Supervisor] FluxWAN exited with code $?. Auto-respawning in 2s..." > /dev/kmsg 2>/dev/null || true
+    fi
+    sleep 2
+done

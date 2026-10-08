@@ -3,6 +3,9 @@
 # System Initialization
 ::sysinit:/etc/init.d/rcS
 
+# 24/7 Core Engine Auto-Respawn Supervisor
+flx::respawn:/usr/local/bin/fluxwan-supervisor
+
 # Management Console (TTY1 = VGA/VMware, ttyS0 = Serial/QEMU)
 tty1::respawn:/usr/local/bin/fluxwan-menu
 ttyS0::respawn:/usr/local/bin/fluxwan-menu

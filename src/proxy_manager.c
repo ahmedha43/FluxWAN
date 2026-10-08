@@ -25,6 +25,7 @@
 struct proxy_manager_ctx {
     fluxwan_config_t *config;
     int pids[MAX_WANS];
+    uint32_t fail_counts[MAX_WANS];
     uint64_t last_check_ms;
 };
 
@@ -429,19 +430,16 @@ int proxy_manager_start_wan(proxy_manager_ctx_t *ctx, uint32_t wan_idx) {
     char pid_file[128];
     snprintf(pid_file, sizeof(pid_file), "/var/run/fluxwan_proxy_wan_%u.pid", wan_idx);
 
-    char log_file[128];
-    snprintf(log_file, sizeof(log_file), "/var/log/fluxwan_proxy_wan_%u.log", wan_idx);
-
-    /* Launch sing-box (or xray fallback) daemon in background */
+    /* Launch sing-box (or xray fallback) daemon in background with zero-disk-bloat output */
     char cmd[2048];
     snprintf(cmd, sizeof(cmd),
              "sh -c 'if which sing-box >/dev/null 2>&1; then "
-             "  sing-box run -c %s >%s 2>&1 & echo $! > %s; "
+             "  sing-box run -c %s >/dev/null 2>&1 & echo $! > %s; "
              "elif which xray >/dev/null 2>&1; then "
-             "  xray run -c %s >%s 2>&1 & echo $! > %s; "
+             "  xray run -c %s >/dev/null 2>&1 & echo $! > %s; "
              "fi' &",
-             conf_path, log_file, pid_file,
-             conf_path, log_file, pid_file);
+             conf_path, pid_file,
+             conf_path, pid_file);
 
     int rc = system(cmd);
     (void)rc;
@@ -628,12 +626,20 @@ void proxy_manager_tick(proxy_manager_ctx_t *ctx) {
                     wan->metrics.rtt_ms = lat_ms;
                     wan->metrics.packet_loss_pct = 0.0f;
                     wan->state = WAN_STATE_HEALTHY;
+                    ctx->fail_counts[i] = 0;
                 } else {
                     wan->metrics.packet_loss_pct = 100.0f;
                     wan->proxy.latency_ms = 0;
                     wan->metrics.rtt_ms = 0;
-                    LOG_WARN("[Proxy] Tunnel probe failed for WAN '%s' (%s:%u)",
-                             wan->label, wan->proxy.server, wan->proxy.port);
+                    ctx->fail_counts[i]++;
+                    LOG_WARN("[Proxy] Tunnel probe failed for WAN '%s' (%s:%u, %u/3 fails)",
+                             wan->label, wan->proxy.server, wan->proxy.port, ctx->fail_counts[i]);
+                    if (ctx->fail_counts[i] >= 3) {
+                        LOG_WARN("[Proxy Self-Healing] Tunnel unreachable for WAN '%s' after 3 consecutive probes. Auto-restarting proxy daemon...", wan->label);
+                        ctx->fail_counts[i] = 0;
+                        proxy_manager_start_wan(ctx, i);
+                        continue;
+                    }
                 }
             } else if (!wan->proxy.is_connected) {
                 wan->metrics.packet_loss_pct = 100.0f;

@@ -43,6 +43,79 @@ static void handle_signal(int sig) {
     g_running = false;
 }
 
+#if defined(__linux__)
+static void self_healing_watchdog_tick(fluxwan_config_t *config, wan_manager_ctx_t *wan_mgr) {
+    if (!config) return;
+    (void)wan_mgr;
+
+    /* 1. Ensure Kernel Packet Forwarding is ALWAYS Enabled */
+    safe_write_proc("/proc/sys/net/ipv4/ip_forward", "1");
+
+    /* 2. Self-Healing Firewall & NAT Masquerade */
+    for (uint32_t i = 0; i < config->wan_count; i++) {
+        wan_config_t *w = &config->wans[i];
+        if (w->enabled && w->state != WAN_STATE_DOWN) {
+            /* Verify Loose Mode Reverse Path Filter */
+            char rp_path[128];
+            snprintf(rp_path, sizeof(rp_path), "/proc/sys/net/ipv4/conf/%s/rp_filter", w->name);
+            safe_write_proc(rp_path, "2");
+
+            /* Verify Outbound NAT Masquerade */
+            char check_nat[256];
+            snprintf(check_nat, sizeof(check_nat),
+                     "iptables -t nat -C POSTROUTING -o %s -j MASQUERADE 2>/dev/null || "
+                     "iptables -t nat -A POSTROUTING -o %s -j MASQUERADE 2>/dev/null || true",
+                     w->name, w->name);
+            safe_system(check_nat);
+
+            if (w->proxy.enabled && w->proxy.tun_dev[0]) {
+                char check_tun_nat[256];
+                snprintf(check_tun_nat, sizeof(check_tun_nat),
+                         "iptables -t nat -C POSTROUTING -o %s -j MASQUERADE 2>/dev/null || "
+                         "iptables -t nat -A POSTROUTING -o %s -j MASQUERADE 2>/dev/null || true",
+                         w->proxy.tun_dev, w->proxy.tun_dev);
+                safe_system(check_tun_nat);
+            }
+        }
+    }
+
+    /* 3. Self-Cleaning Storage & Ramdisk Watchdog:
+     * Truncate oversized log files (> 2MB) in /var/log and remove stale tmp files */
+    safe_system("for f in /var/log/fluxwan*.log /tmp/*.log; do "
+                "  [ -f \"$f\" ] && [ $(wc -c < \"$f\" 2>/dev/null || echo 0) -gt 2097152 ] && : > \"$f\"; "
+                "done 2>/dev/null || true");
+    safe_system("rm -f /tmp/fluxwan_test_cfg.json /tmp/fluxwan_version.json 2>/dev/null || true");
+
+    /* 4. DNS Fallback Health Check */
+    if (access("/etc/resolv.conf", R_OK) != 0 || access("/etc/resolv.conf", W_OK) == 0) {
+        FILE *rf = fopen("/etc/resolv.conf", "r");
+        bool has_ns = false;
+        if (rf) {
+            char line[128];
+            while (fgets(line, sizeof(line), rf)) {
+                if (strncmp(line, "nameserver", 10) == 0) {
+                    has_ns = true;
+                    break;
+                }
+            }
+            fclose(rf);
+        }
+        if (!has_ns) {
+            FILE *wf = fopen("/etc/resolv.conf", "w");
+            if (wf) {
+                fputs("nameserver 1.1.1.1\nnameserver 8.8.8.8\n", wf);
+                fclose(wf);
+                LOG_WARN("[Watchdog] Restored missing fallback DNS resolvers in /etc/resolv.conf");
+            }
+        }
+    }
+}
+#else
+static void self_healing_watchdog_tick(fluxwan_config_t *config, wan_manager_ctx_t *wan_mgr) {
+    (void)config; (void)wan_mgr;
+}
+#endif
+
 int main(int argc, char *argv[]) {
     const char *config_path = "config/fluxwan.json";
     if (argc > 1) {
@@ -61,6 +134,7 @@ int main(int argc, char *argv[]) {
     signal(SIGTERM, handle_signal);
 #if !defined(_WIN32) && !defined(_WIN64)
     signal(SIGPIPE, SIG_IGN);
+    signal(SIGCHLD, SIG_IGN); /* Automatically reap all terminated child processes */
 #endif
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -149,6 +223,7 @@ int main(int argc, char *argv[]) {
 
     uint64_t last_probe_ms = 0;
     uint64_t last_sticky_ms = 0;
+    uint64_t last_watchdog_ms = 0;
 
     /* Main Non-Blocking Event Reactor Loop */
     while (g_running) {
@@ -225,6 +300,12 @@ int main(int argc, char *argv[]) {
         /* Periodic Timer: Outbound Proxy Manager Tick (Supervision & Auto-Restart) */
         if (proxy_mgr) {
             proxy_manager_tick(proxy_mgr);
+        }
+
+        /* Periodic Timer: 24/7 Self-Healing Watchdog (Firewall, NAT, Storage & DNS Recovery) */
+        if (now_ms - last_watchdog_ms >= 30000) {
+            self_healing_watchdog_tick(&config, wan_mgr);
+            last_watchdog_ms = now_ms;
         }
     }
 

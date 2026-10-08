@@ -1,7 +1,10 @@
-﻿# /etc/inittab - FluxWAN Network Appliance (Busybox Init - No openrc required)
+# /etc/inittab - FluxWAN Network Appliance (Busybox Init - No openrc required)
 
 # System Initialization
 ::sysinit:/etc/init.d/rcS
+
+# 24/7 Core Engine Auto-Respawn Supervisor
+flx::respawn:/usr/local/bin/fluxwan-supervisor
 
 # Management Console (TTY1 = VGA/VMware, ttyS0 = Serial/QEMU)
 tty1::respawn:/usr/local/bin/fluxwan-menu

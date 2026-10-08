@@ -367,12 +367,15 @@ ln -sf lib "$MOUNT_DIR/usr/lib64" 2>/dev/null || true
 [ -f "$MOUNT_DIR/lib/ld-musl-x86_64.so.1" ] || cp -a /lib/ld-musl* "$MOUNT_DIR/lib/" 2>/dev/null || true
 
 # Explicitly write correct inittab using Busybox init (no openrc dependency)
-mkdir -p "$MOUNT_DIR/etc/init.d"
+mkdir -p "$MOUNT_DIR/etc/init.d" "$MOUNT_DIR/usr/local/bin"
 cat > "$MOUNT_DIR/etc/inittab" << 'INITTAB_EOF'
 # /etc/inittab - FluxWAN Network Appliance (Busybox Init)
 
 # System Initialization
 ::sysinit:/etc/init.d/rcS
+
+# 24/7 Core Engine Auto-Respawn Supervisor
+flx::respawn:/usr/local/bin/fluxwan-supervisor
 
 # Management Console (TTY1 = Monitor/VGA, ttyS0 = Serial)
 tty1::respawn:/usr/local/bin/fluxwan-menu
@@ -385,6 +388,22 @@ tty3::respawn:/bin/ash
 ::shutdown:/etc/init.d/rcK
 INITTAB_EOF
 sed -i 's/\r$//' "$MOUNT_DIR/etc/inittab" 2>/dev/null || true
+
+cat > "$MOUNT_DIR/usr/local/bin/fluxwan-supervisor" << 'SUPERVISOR_EOF'
+#!/bin/sh
+# FluxWAN 24/7 Core Process Supervisor (Busybox Inittab Respawn)
+cd /opt/fluxwan || exit 1
+while true; do
+    if [ -x /opt/fluxwan/fluxwan ] && [ -f /opt/fluxwan/config/fluxwan.json ]; then
+        echo "[Supervisor] Starting FluxWAN Core Router Daemon..." > /dev/kmsg 2>/dev/null || true
+        ./fluxwan /opt/fluxwan/config/fluxwan.json >> /var/log/fluxwan.log 2>&1
+        echo "[Supervisor] FluxWAN exited with code $?. Auto-respawning in 2s..." > /dev/kmsg 2>/dev/null || true
+    fi
+    sleep 2
+done
+SUPERVISOR_EOF
+chmod +x "$MOUNT_DIR/usr/local/bin/fluxwan-supervisor" 2>/dev/null || true
+sed -i 's/\r$//' "$MOUNT_DIR/usr/local/bin/fluxwan-supervisor" 2>/dev/null || true
 
 # Write standalone, resilient /etc/init.d/rcS directly to target disk
 cat > "$MOUNT_DIR/etc/init.d/rcS" << 'RCS_EOF'
@@ -454,6 +473,17 @@ depmod -a 2>/dev/null || true
 for mod in af_packet packet loop ext4 jbd2 crc32c sd_mod ahci nvme usb_storage virtio_net e1000 e1000e igb igc ixgbe i40e ice mlx4_core mlx4_en mlx5_core bnx2x tg3 bnx2 sfc atlantic vmxnet3 r8169 tun tap macvlan ppp_generic ppp_async pppox pppoe xt_conntrack xt_nat xt_MASQUERADE xt_mark xt_statistic xt_TCPMSS sch_cake; do
     modprobe "$mod" >/dev/null 2>&1 || insmod $(find /lib/modules -name "${mod}.ko*" 2>/dev/null | head -n 1) >/dev/null 2>&1 || true
 done
+
+# 24/7 Kernel Self-Healing, Buffer Bloat Mitigation & Conntrack Tuning
+sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
+sysctl -w net.netfilter.nf_conntrack_max=262144 >/dev/null 2>&1 || true
+sysctl -w net.netfilter.nf_conntrack_tcp_timeout_established=1800 >/dev/null 2>&1 || true
+sysctl -w net.core.netdev_max_backlog=10000 >/dev/null 2>&1 || true
+sysctl -w net.core.rmem_max=16777216 >/dev/null 2>&1 || true
+sysctl -w net.core.wmem_max=16777216 >/dev/null 2>&1 || true
+sysctl -w net.ipv4.neigh.default.gc_thresh3=4096 >/dev/null 2>&1 || true
+sysctl -w vm.panic_on_oom=0 >/dev/null 2>&1 || true
+sysctl -w kernel.panic=10 >/dev/null 2>&1 || true
 
 # 5. Bring up Loopback & Physical Network Interfaces
 ip link set lo up 2>/dev/null || ifconfig lo 127.0.0.1 up 2>/dev/null || true

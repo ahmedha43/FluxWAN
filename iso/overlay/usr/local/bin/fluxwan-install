@@ -174,31 +174,66 @@ partx -u "$TARGET_DEV" 2>/dev/null || true
 partprobe "$TARGET_DEV" 2>/dev/null || true
 blockdev --rereadpt "$TARGET_DEV" 2>/dev/null || true
 mdev -s 2>/dev/null || true
-sleep 2
+sleep 1
 
-if [ "$IS_UEFI" -eq 0 ]; then
-    sfdisk --activate "$TARGET_DEV" 1 2>/dev/null || true
-fi
+# Detect partition naming prefix (e.g. sda1 vs nvme0n1p1)
+case "$TARGET_DEV" in
+    *nvme*|*mmcblk*|*loop*)
+        PART_PREFIX="${TARGET_DEV}p"
+        ;;
+    *)
+        PART_PREFIX="${TARGET_DEV}"
+        ;;
+esac
 
-# Detect partition naming (e.g. sda1 vs nvme0n1p1)
-if [ -b "${TARGET_DEV}p1" ]; then
-    PART_PREFIX="${TARGET_DEV}p"
-else
-    PART_PREFIX="${TARGET_DEV}"
-fi
+# Helper: Ensure partition block device node is present in /dev
+ensure_partition_node() {
+    local part="$1"
+    local base_name=$(basename "$part")
+    for attempt in $(seq 1 10); do
+        if [ -b "$part" ]; then
+            return 0
+        fi
+        mdev -s 2>/dev/null || true
+        partx -u "$TARGET_DEV" 2>/dev/null || true
+        partx -a "$TARGET_DEV" 2>/dev/null || true
+        blockdev --rereadpt "$TARGET_DEV" 2>/dev/null || true
+
+        # Direct kernel mknod fallback using major:minor from sysfs
+        if [ -f "/sys/class/block/$base_name/dev" ]; then
+            local mm=$(cat "/sys/class/block/$base_name/dev" 2>/dev/null)
+            if [ -n "$mm" ]; then
+                [ -e "$part" ] && [ ! -b "$part" ] && rm -f "$part"
+                mknod "$part" b ${mm%:*} ${mm#*:} 2>/dev/null || true
+            fi
+        elif [ -f "/sys/block/$(basename "$TARGET_DEV")/$base_name/dev" ]; then
+            local mm=$(cat "/sys/block/$(basename "$TARGET_DEV")/$base_name/dev" 2>/dev/null)
+            if [ -n "$mm" ]; then
+                [ -e "$part" ] && [ ! -b "$part" ] && rm -f "$part"
+                mknod "$part" b ${mm%:*} ${mm#*:} 2>/dev/null || true
+            fi
+        fi
+
+        if [ -b "$part" ]; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
 
 EFI_PART=""
 if [ "$IS_UEFI" -eq 1 ]; then
     EFI_PART="${PART_PREFIX}1"
     ROOT_PART="${PART_PREFIX}2"
+    ensure_partition_node "$EFI_PART"
+    ensure_partition_node "$ROOT_PART"
     echo -e "    * Formatting EFI Partition ($EFI_PART as FAT32)..."
     mkfs.vfat -F 32 -n "FLUX_EFI" "$EFI_PART" >/dev/null 2>&1 || mkfs.fat -F 32 "$EFI_PART" >/dev/null 2>&1
 else
     ROOT_PART="${PART_PREFIX}1"
+    ensure_partition_node "$ROOT_PART"
 fi
-
-mdev -s 2>/dev/null || true
-sleep 1
 
 # Helper: Ensure ext4 kernel module is actively loaded in the running kernel
 ensure_ext4_ready() {
@@ -237,12 +272,17 @@ ensure_ext4_ready() {
 ensure_ext4_ready
 
 echo -e "    * Formatting Root Partition ($ROOT_PART as Ext4, Syslinux-compatible)..."
-mkfs.ext4 -F -O ^64bit,^orphan_file,^metadata_csum_seed -L "FLUXWAN_ROOT" "$ROOT_PART" || {
+ensure_partition_node "$ROOT_PART"
+if ! mkfs.ext4 -F -O ^64bit,^orphan_file,^metadata_csum_seed -L "FLUXWAN_ROOT" "$ROOT_PART"; then
     echo -e "${YELLOW}[*] Retrying ext4 format on $ROOT_PART...${NC}"
     sync
+    ensure_partition_node "$ROOT_PART"
     sleep 2
-    mkfs.ext4 -F -O ^64bit,^orphan_file,^metadata_csum_seed -L "FLUXWAN_ROOT" "$ROOT_PART"
-}
+    if ! mkfs.ext4 -F -O ^64bit,^orphan_file,^metadata_csum_seed -L "FLUXWAN_ROOT" "$ROOT_PART"; then
+        echo -e "${RED}[!] ERROR: Failed to format root partition $ROOT_PART with ext4.${NC}" >&2
+        exit 1
+    fi
+fi
 
 sync
 mdev -s 2>/dev/null || true
@@ -258,12 +298,7 @@ mkdir -p "$MOUNT_DIR"
 ensure_ext4_ready
 
 # Ensure root partition block device is ready
-if [ ! -b "$ROOT_PART" ]; then
-    echo -e "    * Waiting for $ROOT_PART block device node..."
-    mdev -s 2>/dev/null || true
-    partprobe "$TARGET_DEV" 2>/dev/null || true
-    sleep 2
-fi
+ensure_partition_node "$ROOT_PART"
 
 # Mount root partition
 MOUNTED=0
@@ -314,18 +349,33 @@ cp -a /usr/lib/* "$MOUNT_DIR/usr/lib/" 2>/dev/null || true
 cp -a /usr/local/bin/* "$MOUNT_DIR/usr/local/bin/" 2>/dev/null || true
 chmod +x "$MOUNT_DIR/usr/local/bin/"* 2>/dev/null || true
 
+# Explicitly guarantee standalone proxy engines (sing-box, xray, v2ray) are copied and executable
+for pbin in sing-box xray v2ray; do
+    for psrc in "/usr/local/bin/$pbin" "/usr/bin/$pbin" "/bin/$pbin"; do
+        if [ -x "$psrc" ] && [ -s "$psrc" ]; then
+            cp -aL "$psrc" "$MOUNT_DIR/usr/local/bin/$pbin" 2>/dev/null || true
+            cp -aL "$psrc" "$MOUNT_DIR/usr/bin/$pbin" 2>/dev/null || true
+            chmod +x "$MOUNT_DIR/usr/local/bin/$pbin" "$MOUNT_DIR/usr/bin/$pbin" 2>/dev/null || true
+            break
+        fi
+    done
+done
+
 # Setup 64-bit library compatibility links
 ln -sf lib "$MOUNT_DIR/lib64" 2>/dev/null || true
 ln -sf lib "$MOUNT_DIR/usr/lib64" 2>/dev/null || true
 [ -f "$MOUNT_DIR/lib/ld-musl-x86_64.so.1" ] || cp -a /lib/ld-musl* "$MOUNT_DIR/lib/" 2>/dev/null || true
 
 # Explicitly write correct inittab using Busybox init (no openrc dependency)
-mkdir -p "$MOUNT_DIR/etc/init.d"
+mkdir -p "$MOUNT_DIR/etc/init.d" "$MOUNT_DIR/usr/local/bin"
 cat > "$MOUNT_DIR/etc/inittab" << 'INITTAB_EOF'
 # /etc/inittab - FluxWAN Network Appliance (Busybox Init)
 
 # System Initialization
 ::sysinit:/etc/init.d/rcS
+
+# 24/7 Core Engine Auto-Respawn Supervisor
+flx::respawn:/usr/local/bin/fluxwan-supervisor
 
 # Management Console (TTY1 = Monitor/VGA, ttyS0 = Serial)
 tty1::respawn:/usr/local/bin/fluxwan-menu
@@ -338,6 +388,22 @@ tty3::respawn:/bin/ash
 ::shutdown:/etc/init.d/rcK
 INITTAB_EOF
 sed -i 's/\r$//' "$MOUNT_DIR/etc/inittab" 2>/dev/null || true
+
+cat > "$MOUNT_DIR/usr/local/bin/fluxwan-supervisor" << 'SUPERVISOR_EOF'
+#!/bin/sh
+# FluxWAN 24/7 Core Process Supervisor (Busybox Inittab Respawn)
+cd /opt/fluxwan || exit 1
+while true; do
+    if [ -x /opt/fluxwan/fluxwan ] && [ -f /opt/fluxwan/config/fluxwan.json ]; then
+        echo "[Supervisor] Starting FluxWAN Core Router Daemon..." > /dev/kmsg 2>/dev/null || true
+        ./fluxwan /opt/fluxwan/config/fluxwan.json >> /var/log/fluxwan.log 2>&1
+        echo "[Supervisor] FluxWAN exited with code $?. Auto-respawning in 2s..." > /dev/kmsg 2>/dev/null || true
+    fi
+    sleep 2
+done
+SUPERVISOR_EOF
+chmod +x "$MOUNT_DIR/usr/local/bin/fluxwan-supervisor" 2>/dev/null || true
+sed -i 's/\r$//' "$MOUNT_DIR/usr/local/bin/fluxwan-supervisor" 2>/dev/null || true
 
 # Write standalone, resilient /etc/init.d/rcS directly to target disk
 cat > "$MOUNT_DIR/etc/init.d/rcS" << 'RCS_EOF'
@@ -401,9 +467,23 @@ if [ ! -d "/lib/modules/$(uname -r)" ] || [ -z "$(ls -A "/lib/modules/$(uname -r
     depmod -a 2>/dev/null || true
 fi
 
+# Ensure kernel module index is up to date
+depmod -a 2>/dev/null || true
+
 for mod in af_packet packet loop ext4 jbd2 crc32c sd_mod ahci nvme usb_storage virtio_net e1000 e1000e igb igc ixgbe i40e ice mlx4_core mlx4_en mlx5_core bnx2x tg3 bnx2 sfc atlantic vmxnet3 r8169 tun tap macvlan ppp_generic ppp_async pppox pppoe xt_conntrack xt_nat xt_MASQUERADE xt_mark xt_statistic xt_TCPMSS sch_cake; do
-    modprobe "$mod" >/dev/null 2>&1 || true
+    modprobe "$mod" >/dev/null 2>&1 || insmod $(find /lib/modules -name "${mod}.ko*" 2>/dev/null | head -n 1) >/dev/null 2>&1 || true
 done
+
+# 24/7 Kernel Self-Healing, Buffer Bloat Mitigation & Conntrack Tuning
+sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
+sysctl -w net.netfilter.nf_conntrack_max=262144 >/dev/null 2>&1 || true
+sysctl -w net.netfilter.nf_conntrack_tcp_timeout_established=1800 >/dev/null 2>&1 || true
+sysctl -w net.core.netdev_max_backlog=10000 >/dev/null 2>&1 || true
+sysctl -w net.core.rmem_max=16777216 >/dev/null 2>&1 || true
+sysctl -w net.core.wmem_max=16777216 >/dev/null 2>&1 || true
+sysctl -w net.ipv4.neigh.default.gc_thresh3=4096 >/dev/null 2>&1 || true
+sysctl -w vm.panic_on_oom=0 >/dev/null 2>&1 || true
+sysctl -w kernel.panic=10 >/dev/null 2>&1 || true
 
 # 5. Bring up Loopback & Physical Network Interfaces
 ip link set lo up 2>/dev/null || ifconfig lo 127.0.0.1 up 2>/dev/null || true
@@ -426,6 +506,11 @@ ip link set "$LAN_IFACE" up 2>/dev/null || ifconfig "$LAN_IFACE" up 2>/dev/null 
 # Standard Primary Static LAN Gateway (192.168.90.1)
 ip addr add 192.168.90.1/24 dev "$LAN_IFACE" 2>/dev/null || true
 
+# DNS Fallback Resolver
+if [ ! -s /etc/resolv.conf ]; then
+    printf "nameserver 1.1.1.1\nnameserver 8.8.8.8\n" > /etc/resolv.conf 2>/dev/null || true
+fi
+
 # 7. Web Management Port 80 -> 8080 Redirection
 iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 8080 2>/dev/null || true
 
@@ -444,7 +529,13 @@ elif [ -x /usr/sbin/dropbear ]; then
     /usr/sbin/dropbear -R -B -p 22 2>/dev/null || true
 fi
 
-# 9. Start FluxWAN Core Reactor Daemon from /opt/fluxwan with persistent config symlinks
+# 9. Start ZeroTier Daemon if installed
+if [ -x /usr/sbin/zerotier-one ] || command -v zerotier-one >/dev/null 2>&1; then
+    mkdir -p /var/lib/zerotier-one
+    (nohup /usr/sbin/zerotier-one -d </dev/null >/dev/null 2>&1 &)
+fi
+
+# 10. Start FluxWAN Core Reactor Daemon from /opt/fluxwan with persistent config symlinks
 mkdir -p /root/config /config
 ln -sf /opt/fluxwan/config/fluxwan.json /root/config/fluxwan.json 2>/dev/null || true
 ln -sf /opt/fluxwan/config/fluxwan.json /config/fluxwan.json 2>/dev/null || true
@@ -484,6 +575,7 @@ if [ -d /opt/fluxwan ]; then
     cp -a /opt/fluxwan/* "$MOUNT_DIR/opt/fluxwan/" 2>/dev/null || true
 fi
 chmod +x "$MOUNT_DIR/opt/fluxwan/fluxwan" 2>/dev/null || true
+echo "1.4.0" > "$MOUNT_DIR/opt/fluxwan/version" 2>/dev/null || true
 
 # Locate live media boot files (Kernel, Initramfs, Modloop, Syslinux)
 echo -e "    * Locating Linux LTS Kernel & Boot Media Files..."
