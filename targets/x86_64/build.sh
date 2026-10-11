@@ -266,6 +266,9 @@ if [ "$IS_ALPINE" -eq 1 ]; then
     cp -aL /usr/lib/libbrotlidec.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
     cp -aL /usr/lib/libbrotlicommon.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
     cp -aL /usr/lib/pppd "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
+    cp -aL /usr/lib/libstdc++.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
+    cp -aL /usr/lib/libgcc_s.so* "$APKOVL_DIR/usr/lib/" 2>/dev/null || true
+    cp -aL /lib/libgcc_s.so* "$APKOVL_DIR/lib/" 2>/dev/null || true
 else
     echo "    * Non-Alpine builder detected! Fetching official Alpine 3.19 Musl bootloader packages..."
     # Pure Alpine packages to prevent copying Ubuntu glibc binaries
@@ -286,9 +289,11 @@ else
     fetch_and_unpack_apk "ppp-daemon-2.5.0-r5.apk" "$APKOVL_DIR"
     fetch_and_unpack_apk "ppp-pppoe-2.5.0-r5.apk" "$APKOVL_DIR"
     fetch_and_unpack_apk "rp-pppoe-4.0-r1.apk" "$APKOVL_DIR"
+    fetch_and_unpack_apk "libgcc-12.2.1_git20220924-r4.apk" "$APKOVL_DIR"
+    fetch_and_unpack_apk "libstdc++-12.2.1_git20220924-r4.apk" "$APKOVL_DIR"
 fi
 
-# Ensure syslinux, grub, ppp, libunistring and libpcap offline packages are in ISO APK repository regardless
+# Ensure syslinux, grub, ppp, libunistring, libpcap and C++ runtimes are in ISO APK repository regardless
 fetch_and_unpack_apk "grub-2.06-r17.apk" "$BUILD_DIR/iso_extract"
 fetch_and_unpack_apk "grub-bios-2.06-r17.apk" "$BUILD_DIR/iso_extract"
 fetch_and_unpack_apk "grub-efi-2.06-r17.apk" "$BUILD_DIR/iso_extract"
@@ -299,6 +304,8 @@ fetch_and_unpack_apk "ppp-2.5.0-r5.apk" "$BUILD_DIR/iso_extract"
 fetch_and_unpack_apk "ppp-daemon-2.5.0-r5.apk" "$BUILD_DIR/iso_extract"
 fetch_and_unpack_apk "ppp-pppoe-2.5.0-r5.apk" "$BUILD_DIR/iso_extract"
 fetch_and_unpack_apk "rp-pppoe-4.0-r1.apk" "$BUILD_DIR/iso_extract"
+fetch_and_unpack_apk "libgcc-12.2.1_git20220924-r4.apk" "$BUILD_DIR/iso_extract"
+fetch_and_unpack_apk "libstdc++-12.2.1_git20220924-r4.apk" "$BUILD_DIR/iso_extract"
 
 # Fetch and embed ZeroTier One into rootfs and offline ISO repo
 if [ ! -s "$CACHE_X86/zerotier-one-1.10.2-r0.apk" ]; then
