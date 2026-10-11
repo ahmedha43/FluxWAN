@@ -434,9 +434,23 @@ web_server_ctx_t *web_server_init(fluxwan_config_t *config, netlink_ctx_t *nl, d
     return ctx;
 }
 
+typedef struct {
+    web_server_ctx_t *ctx;
+    socket_t client_fd;
+} web_client_task_t;
+
+static void *web_client_worker(void *arg) {
+    web_client_task_t *task = (web_client_task_t *)arg;
+    if (task) {
+        web_server_process_client(task->ctx, task->client_fd);
+        free(task);
+    }
+    return NULL;
+}
+
 static void *web_server_worker_thread(void *arg) {
     web_server_ctx_t *ctx = (web_server_ctx_t *)arg;
-    LOG_INFO("Web Server background worker thread started (TID %lu)...", (unsigned long)pthread_self());
+    LOG_INFO("Web Server multi-threaded worker thread started (TID %lu)...", (unsigned long)pthread_self());
 
     while (ctx->thread_running) {
         struct pollfd pfd;
@@ -448,7 +462,25 @@ static void *web_server_worker_thread(void *arg) {
         if (ret > 0 && (pfd.revents & POLLIN)) {
             socket_t client_fd = web_server_accept_client(ctx);
             if (IS_VALID_SOCK(client_fd)) {
-                web_server_process_client(ctx, client_fd);
+                web_client_task_t *task = malloc(sizeof(web_client_task_t));
+                if (task) {
+                    task->ctx = ctx;
+                    task->client_fd = client_fd;
+                    pthread_t cth;
+                    pthread_attr_t attr;
+                    pthread_attr_init(&attr);
+                    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+                    pthread_attr_setstacksize(&attr, 1024 * 1024);
+                    if (pthread_create(&cth, &attr, web_client_worker, task) != 0) {
+                        pthread_attr_destroy(&attr);
+                        web_server_process_client(ctx, client_fd);
+                        free(task);
+                    } else {
+                        pthread_attr_destroy(&attr);
+                    }
+                } else {
+                    web_server_process_client(ctx, client_fd);
+                }
             }
         }
     }
@@ -508,8 +540,9 @@ socket_t web_server_accept_client(web_server_ctx_t *ctx) {
     fcntl(client_fd, F_SETFD, FD_CLOEXEC);
 #endif
 
-    set_socket_timeout(client_fd, 3000);
+    set_socket_timeout(client_fd, 5000);
 
+    pthread_mutex_lock(&ctx->lock);
     int free_slot = -1;
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (!IS_VALID_SOCK(ctx->clients[i].fd)) {
@@ -534,8 +567,10 @@ socket_t web_server_accept_client(web_server_ctx_t *ctx) {
     if (free_slot >= 0) {
         ctx->clients[free_slot].fd = client_fd;
         ctx->clients[free_slot].is_sse = false;
+        pthread_mutex_unlock(&ctx->lock);
         return client_fd;
     }
+    pthread_mutex_unlock(&ctx->lock);
 
     CLOSE_SOCK(client_fd);
     return INVALID_SOCKET;
@@ -2907,12 +2942,9 @@ static void handle_terminal_exec(web_server_ctx_t *ctx, socket_t client_fd, cons
     close_client_socket(client_fd);
 }
 
-int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
+static int web_server_process_client_impl(web_server_ctx_t *ctx, socket_t client_fd, char *req) {
+    if (!ctx || !IS_VALID_SOCK(client_fd) || !req) return -1;
 
-    if (!ctx || !IS_VALID_SOCK(client_fd)) return -1;
-
-    char *req = ctx->req_buf;
-    if (!req) return -1;
     size_t max_req = 4194304;
     ssize_t n = recv(client_fd, req, (int)(max_req - 1), 0);
     if (n <= 0) {
@@ -2923,9 +2955,11 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
     }
     if (n <= 0) {
         close_client_socket(client_fd);
+        pthread_mutex_lock(&ctx->lock);
         for (int i = 0; i < MAX_CLIENTS; i++) {
             if (ctx->clients[i].fd == client_fd) ctx->clients[i].fd = INVALID_SOCKET;
         }
+        pthread_mutex_unlock(&ctx->lock);
         return -1;
     }
     req[n] = '\0';
@@ -5923,10 +5957,25 @@ int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
         close_client_socket(client_fd);
     }
 
+    pthread_mutex_lock(&ctx->lock);
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (ctx->clients[i].fd == client_fd && !ctx->clients[i].is_sse) {
             ctx->clients[i].fd = INVALID_SOCKET;
         }
     }
+    pthread_mutex_unlock(&ctx->lock);
     return 0;
+}
+
+int web_server_process_client(web_server_ctx_t *ctx, socket_t client_fd) {
+    if (!ctx || !IS_VALID_SOCK(client_fd)) return -1;
+    size_t max_req = 4194304;
+    char *req = malloc(max_req);
+    if (!req) {
+        close_client_socket(client_fd);
+        return -1;
+    }
+    int res = web_server_process_client_impl(ctx, client_fd, req);
+    free(req);
+    return res;
 }

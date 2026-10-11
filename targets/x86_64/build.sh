@@ -28,6 +28,7 @@ mkdir -p "$BUILD_DIR" "$ROOTFS_DIR" "$APKOVL_DIR" "$ISO_DIR"
 echo "[1/4] Compiling FluxWAN C Reactor & eBPF XDP Engine..."
 cd "$PROJECT_ROOT"
 python3 scripts/embed_ui.py || true
+make clean || true
 make fluxwan
 strip --strip-all "$PROJECT_ROOT/fluxwan" 2>/dev/null || true
 if [ -f "$PROJECT_ROOT/fluxwan_lab" ]; then

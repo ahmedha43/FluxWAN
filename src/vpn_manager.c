@@ -422,19 +422,20 @@ int vpn_manager_apply_zerotier(const zerotier_config_t *zt) {
         return 0;
     }
 
-    /* Auto-install ZeroTier package if missing on host */
+    /* Auto-install ZeroTier package in background if missing on host (never block web reactor) */
     if (system("which zerotier-cli >/dev/null 2>&1") != 0 && system("which zerotier-one >/dev/null 2>&1") != 0) {
-        LOG_WARN("[ZeroTier] zerotier-cli not detected! Attempting automatic installation...");
-        wan_manager_add_log("WARN", "ZeroTier daemon not installed. Attempting automatic package installation...");
-        safe_system("curl -fsSL -o /tmp/zerotier-one.apk http://dl-cdn.alpinelinux.org/alpine/v3.17/community/x86_64/zerotier-one-1.10.2-r0.apk && apk add --allow-untrusted /tmp/zerotier-one.apk 2>/dev/null || curl -s https://install.zerotier.com | sh 2>/dev/null || apt-get update -y && apt-get install -y zerotier-one 2>/dev/null || apk add zerotier-one 2>/dev/null || true");
+        LOG_WARN("[ZeroTier] zerotier-cli not detected on host.");
+        wan_manager_add_log("WARN", "ZeroTier daemon not installed. Triggering non-blocking background installer.");
+        safe_system("(curl --connect-timeout 4 -m 15 -fsSL -o /tmp/zerotier-one.apk http://dl-cdn.alpinelinux.org/alpine/v3.17/community/x86_64/zerotier-one-1.10.2-r0.apk && apk add --allow-untrusted /tmp/zerotier-one.apk 2>/dev/null || apk add zerotier-one 2>/dev/null) >/dev/null 2>&1 &");
+        return -1;
     }
 
     /* Ensure ZeroTier daemon is actively running */
     if (system("pgrep zerotier-one >/dev/null 2>&1") != 0) {
         safe_system("systemctl enable --now zerotier-one 2>/dev/null || service zerotier-one start 2>/dev/null || rc-service zerotier-one start 2>/dev/null || (nohup zerotier-one -d </dev/null >/dev/null 2>&1 &)");
-        /* Wait up to 3 seconds for control socket / auth token */
-        for (int retry = 0; retry < 6; retry++) {
-            usleep(500000);
+        /* Wait up to 500ms max for control socket / auth token without stalling */
+        for (int retry = 0; retry < 2; retry++) {
+            usleep(250000);
             if (system("zerotier-cli status >/dev/null 2>&1") == 0) {
                 break;
             }
