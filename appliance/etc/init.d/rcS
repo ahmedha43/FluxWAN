@@ -113,12 +113,14 @@ if [ -x /usr/sbin/zerotier-one ] || command -v zerotier-one >/dev/null 2>&1; the
     (nohup /usr/sbin/zerotier-one -d </dev/null >/dev/null 2>&1 &)
 fi
 
-# 10. Start FluxWAN Core Reactor Daemon
+# 10. Start FluxWAN Core 24/7 Supervisor
 mkdir -p /root/config /config
 ln -sf /opt/fluxwan/config/fluxwan.json /root/config/fluxwan.json 2>/dev/null || true
 ln -sf /opt/fluxwan/config/fluxwan.json /config/fluxwan.json 2>/dev/null || true
-if [ -x /opt/fluxwan/fluxwan ] && [ -f /opt/fluxwan/config/fluxwan.json ]; then
-    (cd /opt/fluxwan && ./fluxwan /opt/fluxwan/config/fluxwan.json > /var/log/fluxwan.log 2>&1 &)
+if [ -x /usr/local/bin/fluxwan-supervisor ]; then
+    (nohup /usr/local/bin/fluxwan-supervisor >/dev/null 2>&1 &)
+elif [ -x /opt/fluxwan/fluxwan ] && [ -f /opt/fluxwan/config/fluxwan.json ]; then
+    (cd /opt/fluxwan && nohup ./fluxwan /opt/fluxwan/config/fluxwan.json > /var/log/fluxwan.log 2>&1 &)
 fi
 
 # 9. Print Welcome Splash Banner to Console

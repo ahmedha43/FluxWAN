@@ -374,9 +374,6 @@ cat > "$MOUNT_DIR/etc/inittab" << 'INITTAB_EOF'
 # System Initialization
 ::sysinit:/etc/init.d/rcS
 
-# 24/7 Core Engine Auto-Respawn Supervisor
-flx::respawn:/usr/local/bin/fluxwan-supervisor
-
 # Management Console (TTY1 = Monitor/VGA, ttyS0 = Serial)
 tty1::respawn:/usr/local/bin/fluxwan-menu
 ttyS0::respawn:/usr/local/bin/fluxwan-menu
