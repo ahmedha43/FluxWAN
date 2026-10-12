@@ -77,4 +77,8 @@ chr-7.24.4.img*
 WanBlendr-main/
 /test_wan_groups
 /test_policy_routing
+/test_proxy_uri_parser
 katran/
+scratch/
+tools/
+dist/*.gz

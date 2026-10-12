@@ -72,6 +72,26 @@ int main(void) {
         printf("[PASS] Test 4: Real Oodi Zero-Rating Port 80 VLESS URI parsed successfully.\n");
     }
 
+    /* Test 5: Real User V2Box Locked Link with Post-Quantum ML-KEM VLESS Encryption */
+    {
+        const char *v2box_uri = "v2box://locked=dmxlc3M6Ly8zMDhiZWIwZS01NTMxLTRjNDAtYjI0Ny0xMmJlMzEyMzAwNDhAMzEuNzYuNzYuMTUxOjgwP3R5cGU9d3MmZW5jcnlwdGlvbj1tbGtlbTc2OHgyNTUxOXBsdXMubmF0aXZlLjBydHQuWmdJOWRoQTNEMkVxS3pDQ2pVbHVrQWFWWW5JdjY0VXJXV3BvcFJOWDdCayZkZXZpY2VJRD00QzAwMEVCRi1CMTEyLTQ5N0UtODJDRS1CQjE5MkZGRDJBODEmaG9zdD13d3cucHViZ21vYmlsZS5jb20mcGF0aD0lMkYmc2VjdXJpdHk9bm9uZSNhZG5hbi03Y29kOWIzczNs";
+        wan_proxy_config_t cfg;
+        int rc = proxy_manager_parse_uri(v2box_uri, &cfg);
+        assert(rc == 0);
+        assert(cfg.proto == PROXY_PROTO_VLESS);
+        assert(strcmp(cfg.server, "31.76.76.151") == 0);
+        assert(cfg.port == 80);
+        assert(strcmp(cfg.uuid, "308beb0e-5531-4c40-b247-12be31230048") == 0);
+        assert(strcmp(cfg.host, "www.pubgmobile.com") == 0);
+        assert(strcmp(cfg.sni, "www.pubgmobile.com") == 0);
+        assert(strcmp(cfg.path, "/") == 0);
+        assert(strcmp(cfg.transport, "ws") == 0);
+        assert(strcmp(cfg.security, "none") == 0);
+        assert(strcmp(cfg.encryption, "mlkem768x25519plus.native.0rtt.ZgI9dhA3D2EqKzCCjUlukAaVYnIv64UrWWpopRNX7Bk") == 0);
+        assert(strcmp(cfg.raw_uri, v2box_uri) == 0);
+        printf("[PASS] Test 5: Real User V2Box Locked Link with Post-Quantum ML-KEM Encryption parsed successfully.\n");
+    }
+
     printf("=========================================\n");
     printf("   ALL PROXY URI TESTS PASSED (100%%)    \n");
     printf("=========================================\n");

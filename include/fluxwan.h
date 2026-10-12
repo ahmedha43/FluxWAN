@@ -183,7 +183,8 @@ typedef struct {
     char path[128];               /* WebSocket path e.g. /ws */
     char transport[16];           /* "ws", "tcp", "grpc", "http" */
     char security[16];            /* "tls", "none", "reality" */
-    char raw_uri[512];            /* Full URI for quick 1-click import */
+    char encryption[256];         /* VLESS post-quantum encryption e.g. "mlkem768x25519plus..." */
+    char raw_uri[2048];           /* Full URI for quick 1-click import */
     char tun_dev[16];             /* Virtual TUN device e.g. "tun_wan3" */
     char bind_interface[32];      /* Bound physical egress dev (e.g. eth1) */
     uint32_t tun_ip;              /* Virtual IP (network byte order) */

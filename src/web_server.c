@@ -726,6 +726,7 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
             "      \"proxy_path\": \"%s\",\n"
             "      \"proxy_transport\": \"%s\",\n"
             "      \"proxy_security\": \"%s\",\n"
+            "      \"proxy_encryption\": \"%s\",\n"
             "      \"proxy_raw_uri\": \"%s\",\n"
             "      \"proxy_tun_dev\": \"%s\",\n"
             "      \"proxy_connected\": %s,\n"
@@ -765,6 +766,7 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
             w->proxy.path,
             w->proxy.transport[0] ? w->proxy.transport : "ws",
             w->proxy.security[0] ? w->proxy.security : "tls",
+            w->proxy.encryption[0] ? w->proxy.encryption : "none",
             w->proxy.raw_uri,
             w->proxy.tun_dev,
             w->proxy.is_connected ? "true" : "false",
@@ -3082,14 +3084,14 @@ static int web_server_process_client_impl(web_server_ctx_t *ctx, socket_t client
 
         const char *body = strstr(req, "\r\n\r\n");
         if (body) body += 4;
-        char uri[512] = {0};
+        char uri[2048] = {0};
         if (body) {
             extract_json_string(body, "uri", uri, sizeof(uri));
         }
 
         wan_proxy_config_t parsed;
         if (uri[0] && proxy_manager_parse_uri(uri, &parsed) == 0) {
-            char resp_body[1024];
+            char resp_body[2048];
             snprintf(resp_body, sizeof(resp_body),
                 "{\n"
                 "  \"status\": \"ok\",\n"
@@ -3102,19 +3104,21 @@ static int web_server_process_client_impl(web_server_ctx_t *ctx, socket_t client
                 "    \"host\": \"%s\",\n"
                 "    \"path\": \"%s\",\n"
                 "    \"transport\": \"%s\",\n"
-                "    \"security\": \"%s\"\n"
+                "    \"security\": \"%s\",\n"
+                "    \"encryption\": \"%s\"\n"
                 "  }\n"
                 "}",
                 parsed.proto_str, parsed.server, parsed.port, parsed.uuid,
-                parsed.sni, parsed.host, parsed.path, parsed.transport, parsed.security);
+                parsed.sni, parsed.host, parsed.path, parsed.transport, parsed.security,
+                parsed.encryption);
 
-            char resp[2048];
+            char resp[4096];
             int len = snprintf(resp, sizeof(resp),
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
                 strlen(resp_body), resp_body);
             send(client_fd, resp, len, 0);
         } else {
-            const char *rb = "{\"status\":\"error\",\"message\":\"Failed to parse proxy link. Supports vless://, vmess://, trojan://, ss://\"}";
+            const char *rb = "{\"status\":\"error\",\"message\":\"Failed to parse proxy link. Supports v2box://, vless://, vmess://, trojan://, ss://\"}";
             char resp[512];
             int len = snprintf(resp, sizeof(resp),
                 "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",

@@ -158,6 +158,23 @@ int proxy_manager_parse_uri(const char *uri, wan_proxy_config_t *out_proxy) {
     out_proxy->enabled = true;
     safe_str_copy(out_proxy->transport, "ws", sizeof(out_proxy->transport));
     safe_str_copy(out_proxy->security, "tls", sizeof(out_proxy->security));
+    safe_str_copy(out_proxy->encryption, "none", sizeof(out_proxy->encryption));
+
+    /* 0. V2Box Locked Link: v2box://locked=<base64> or v2box://<base64> */
+    if (strncmp(uri, "v2box://locked=", 15) == 0 || strncmp(uri, "v2box://", 8) == 0) {
+        const char *b64_str = (strncmp(uri, "v2box://locked=", 15) == 0) ? (uri + 15) : (uri + 8);
+        char decoded[2048] = {0};
+        int dlen = base64_decode(b64_str, strlen(b64_str), decoded, sizeof(decoded));
+        if (dlen > 0) {
+            int res = proxy_manager_parse_uri(decoded, out_proxy);
+            if (res == 0) {
+                /* Retain original user v2box URI for 1-click persistence */
+                safe_str_copy(out_proxy->raw_uri, uri, sizeof(out_proxy->raw_uri));
+            }
+            return res;
+        }
+        return -1;
+    }
 
     /* 1. VLESS: vless://uuid@server:port?query#name */
     if (strncmp(uri, "vless://", 8) == 0) {
@@ -185,11 +202,15 @@ int proxy_manager_parse_uri(const char *uri, wan_proxy_config_t *out_proxy) {
         out_proxy->port = (uint16_t)atoi(colon + 1);
 
         if (query) {
+            extract_query_param(query, "encryption", out_proxy->encryption, sizeof(out_proxy->encryption));
             extract_query_param(query, "sni", out_proxy->sni, sizeof(out_proxy->sni));
             extract_query_param(query, "host", out_proxy->host, sizeof(out_proxy->host));
             extract_query_param(query, "path", out_proxy->path, sizeof(out_proxy->path));
             extract_query_param(query, "type", out_proxy->transport, sizeof(out_proxy->transport));
             extract_query_param(query, "security", out_proxy->security, sizeof(out_proxy->security));
+        }
+        if (!out_proxy->encryption[0]) {
+            safe_str_copy(out_proxy->encryption, "none", sizeof(out_proxy->encryption));
         }
         if (out_proxy->sni[0] && !out_proxy->host[0]) safe_str_copy(out_proxy->host, out_proxy->sni, sizeof(out_proxy->host));
         if (out_proxy->host[0] && !out_proxy->sni[0]) safe_str_copy(out_proxy->sni, out_proxy->host, sizeof(out_proxy->sni));
@@ -417,6 +438,200 @@ static int generate_proxy_config_file(const wan_config_t *wan, int wan_idx, char
     return 0;
 }
 
+/* Helper to detect if a binary exists and is executable in standard search paths */
+static bool check_binary_available(const char *name) {
+#if defined(__linux__)
+    char path[128];
+    snprintf(path, sizeof(path), "/usr/bin/%s", name);
+    if (access(path, X_OK) == 0) return true;
+    snprintf(path, sizeof(path), "/usr/local/bin/%s", name);
+    if (access(path, X_OK) == 0) return true;
+    snprintf(path, sizeof(path), "/bin/%s", name);
+    if (access(path, X_OK) == 0) return true;
+    return false;
+#else
+    (void)name;
+    return true;
+#endif
+}
+
+/* Returns true if the proxy configuration strictly requires Xray-core (e.g. ML-KEM post-quantum) */
+static bool is_xray_required(const wan_proxy_config_t *p) {
+    if (p && p->encryption[0] && strcmp(p->encryption, "none") != 0) {
+        return true;
+    }
+    return false;
+}
+
+/* Generates Xray-core JSON configuration with native TUN inbound and VLESS Post-Quantum Encryption */
+static int generate_xray_config_file(const wan_config_t *wan, int wan_idx, char *out_path, size_t max_path) {
+    if (!wan || !out_path) return -1;
+    snprintf(out_path, max_path, "/etc/fluxwan/proxy_wan_%u.json", wan->id > 0 ? wan->id : (uint32_t)(wan_idx + 1));
+
+#if defined(__linux__)
+    mkdir("/etc/fluxwan", 0755);
+#endif
+
+    FILE *f = fopen(out_path, "w");
+    if (!f) {
+        LOG_ERROR("[Proxy] Failed to create Xray config file %s", out_path);
+        return -1;
+    }
+
+    const wan_proxy_config_t *p = &wan->proxy;
+    const char *tun_name = p->tun_dev[0] ? p->tun_dev : "tun_wan0";
+    char tun_buf[16];
+    if (!p->tun_dev[0]) {
+        snprintf(tun_buf, sizeof(tun_buf), "tun_wan%u", (unsigned int)((wan->id > 0 ? wan->id : (uint32_t)(wan_idx + 1)) % 1000));
+        tun_name = tun_buf;
+    }
+
+    char resolved_server[128];
+    safe_str_copy(resolved_server, p->server, sizeof(resolved_server));
+    struct in_addr test_addr;
+    if (inet_pton(AF_INET, p->server, &test_addr) <= 0) {
+        struct hostent *he = gethostbyname(p->server);
+        if (he && he->h_addr_list && he->h_addr_list[0]) {
+            inet_ntop(AF_INET, he->h_addr_list[0], resolved_server, sizeof(resolved_server));
+            LOG_INFO("[Proxy] Resolved server domain '%s' -> IP '%s'", p->server, resolved_server);
+        }
+    }
+
+    uint32_t fwmark = 0x1000 + wan_idx;
+    const char *proto = p->proto_str[0] ? p->proto_str : "vless";
+    const char *enc = p->encryption[0] ? p->encryption : "none";
+
+    fprintf(f, "{\n");
+    fprintf(f, "  \"log\": {\n    \"loglevel\": \"warning\"\n  },\n");
+    fprintf(f, "  \"inbounds\": [\n");
+    fprintf(f, "    {\n");
+    fprintf(f, "      \"tag\": \"tun-in\",\n");
+    fprintf(f, "      \"protocol\": \"tun\",\n");
+    fprintf(f, "      \"settings\": {\n");
+    fprintf(f, "        \"name\": \"%s\",\n", tun_name);
+    fprintf(f, "        \"mtu\": 1420,\n");
+    fprintf(f, "        \"gateway\": [\n          \"198.18.%u.1/24\"\n        ]\n", (wan_idx + 10) % 250);
+    fprintf(f, "      }\n");
+    fprintf(f, "    }\n");
+    fprintf(f, "  ],\n");
+
+    /* Outbounds */
+    fprintf(f, "  \"outbounds\": [\n");
+    fprintf(f, "    {\n");
+    fprintf(f, "      \"protocol\": \"%s\",\n", proto);
+    fprintf(f, "      \"settings\": {\n");
+
+    if (strcmp(proto, "vless") == 0) {
+        fprintf(f, "        \"vnext\": [\n");
+        fprintf(f, "          {\n");
+        fprintf(f, "            \"address\": \"%s\",\n", resolved_server);
+        fprintf(f, "            \"port\": %u,\n", p->port > 0 ? p->port : 443);
+        fprintf(f, "            \"users\": [\n");
+        fprintf(f, "              {\n");
+        fprintf(f, "                \"id\": \"%s\",\n", p->uuid);
+        fprintf(f, "                \"encryption\": \"%s\",\n", enc);
+        fprintf(f, "                \"level\": 0\n");
+        fprintf(f, "              }\n");
+        fprintf(f, "            ]\n");
+        fprintf(f, "          }\n");
+        fprintf(f, "        ]\n");
+    } else if (strcmp(proto, "vmess") == 0) {
+        fprintf(f, "        \"vnext\": [\n");
+        fprintf(f, "          {\n");
+        fprintf(f, "            \"address\": \"%s\",\n", resolved_server);
+        fprintf(f, "            \"port\": %u,\n", p->port > 0 ? p->port : 443);
+        fprintf(f, "            \"users\": [\n");
+        fprintf(f, "              {\n");
+        fprintf(f, "                \"id\": \"%s\",\n", p->uuid);
+        fprintf(f, "                \"alterId\": 0,\n");
+        fprintf(f, "                \"security\": \"auto\"\n");
+        fprintf(f, "              }\n");
+        fprintf(f, "            ]\n");
+        fprintf(f, "          }\n");
+        fprintf(f, "        ]\n");
+    } else if (strcmp(proto, "trojan") == 0) {
+        fprintf(f, "        \"servers\": [\n");
+        fprintf(f, "          {\n");
+        fprintf(f, "            \"address\": \"%s\",\n", resolved_server);
+        fprintf(f, "            \"port\": %u,\n", p->port > 0 ? p->port : 443);
+        fprintf(f, "            \"password\": \"%s\"\n", p->uuid);
+        fprintf(f, "          }\n");
+        fprintf(f, "        ]\n");
+    } else if (strcmp(proto, "shadowsocks") == 0) {
+        fprintf(f, "        \"servers\": [\n");
+        fprintf(f, "          {\n");
+        fprintf(f, "            \"address\": \"%s\",\n", resolved_server);
+        fprintf(f, "            \"port\": %u,\n", p->port > 0 ? p->port : 8388);
+        fprintf(f, "            \"password\": \"%s\",\n", p->uuid);
+        fprintf(f, "            \"method\": \"chacha20-ietf-poly1305\"\n");
+        fprintf(f, "          }\n");
+        fprintf(f, "        ]\n");
+    }
+
+    fprintf(f, "      },\n");
+
+    /* Stream settings (TLS, WebSocket, physical binding) */
+    bool has_tls = false;
+    if (strcasecmp(p->security, "none") != 0 && strcasecmp(p->security, "plain") != 0) {
+        if (strcasecmp(p->security, "tls") == 0 || p->port == 443 || (p->sni[0] != '\0' && p->port != 80)) {
+            has_tls = true;
+        }
+    }
+
+    const char *network = (strcasecmp(p->transport, "ws") == 0 || p->path[0] != '\0') ? "ws" : "tcp";
+
+    fprintf(f, "      \"streamSettings\": {\n");
+    fprintf(f, "        \"network\": \"%s\",\n", network);
+    fprintf(f, "        \"security\": \"%s\",\n", has_tls ? "tls" : "none");
+
+    if (has_tls) {
+        const char *s_sni = p->sni[0] ? p->sni : (p->host[0] ? p->host : resolved_server);
+        fprintf(f, "        \"tlsSettings\": {\n");
+        fprintf(f, "          \"serverName\": \"%s\",\n", s_sni);
+        fprintf(f, "          \"allowInsecure\": true\n");
+        fprintf(f, "        },\n");
+    }
+
+    if (strcmp(network, "ws") == 0) {
+        const char *h = p->host[0] ? p->host : p->sni;
+        fprintf(f, "        \"wsSettings\": {\n");
+        fprintf(f, "          \"path\": \"%s\",\n", p->path[0] ? p->path : "/");
+        if (h && h[0]) {
+            fprintf(f, "          \"headers\": {\n");
+            fprintf(f, "            \"Host\": \"%s\"\n", h);
+            fprintf(f, "          }\n");
+        }
+        fprintf(f, "        },\n");
+    }
+
+    /* Sockopt: strict physical WAN binding & fwmark */
+    fprintf(f, "        \"sockopt\": {\n");
+    fprintf(f, "          \"mark\": %u,\n", fwmark);
+    fprintf(f, "          \"interface\": \"%s\"\n", wan->name);
+    fprintf(f, "        }\n");
+    fprintf(f, "      }\n");
+    fprintf(f, "    },\n");
+
+    /* Direct freedom outbound with egress interface pinning */
+    fprintf(f, "    {\n");
+    fprintf(f, "      \"tag\": \"direct\",\n");
+    fprintf(f, "      \"protocol\": \"freedom\",\n");
+    fprintf(f, "      \"streamSettings\": {\n");
+    fprintf(f, "        \"sockopt\": {\n");
+    fprintf(f, "          \"mark\": %u,\n", fwmark);
+    fprintf(f, "          \"interface\": \"%s\"\n", wan->name);
+    fprintf(f, "        }\n");
+    fprintf(f, "      }\n");
+    fprintf(f, "    }\n");
+    fprintf(f, "  ]\n");
+    fprintf(f, "}\n");
+    fclose(f);
+
+    LOG_INFO("[Proxy] Generated Xray-core configuration for WAN '%s' at %s (Device %s, Mark 0x%x, Enc: %s)",
+             wan->label, out_path, wan->name, fwmark, enc);
+    return 0;
+}
+
 #if defined(__linux__)
 static void proxy_manager_supervise_tick(proxy_manager_ctx_t *ctx);
 static void *proxy_supervisor_worker(void *arg) {
@@ -483,8 +698,18 @@ int proxy_manager_start_wan(proxy_manager_ctx_t *ctx, uint32_t wan_idx) {
         snprintf(wan->proxy.tun_dev, sizeof(wan->proxy.tun_dev), "tun_wan%u", (unsigned int)((wan->id > 0 ? wan->id : (wan_idx + 1)) % 1000));
     }
 
+    /* Select appropriate engine: Xray-core for Post-Quantum ML-KEM or Sing-box */
+    bool use_xray = false;
+    if (is_xray_required(&wan->proxy)) {
+        use_xray = true;
+    } else if (!check_binary_available("sing-box") && check_binary_available("xray")) {
+        use_xray = true;
+    }
+
     char conf_path[256];
-    if (generate_proxy_config_file(wan, (int)wan_idx, conf_path, sizeof(conf_path)) != 0) {
+    int gen_rc = use_xray ? generate_xray_config_file(wan, (int)wan_idx, conf_path, sizeof(conf_path))
+                          : generate_proxy_config_file(wan, (int)wan_idx, conf_path, sizeof(conf_path));
+    if (gen_rc != 0) {
         return -1;
     }
 
@@ -499,16 +724,17 @@ int proxy_manager_start_wan(proxy_manager_ctx_t *ctx, uint32_t wan_idx) {
     char pid_file[128];
     snprintf(pid_file, sizeof(pid_file), "/var/run/fluxwan_proxy_wan_%u.pid", wan_idx);
 
-    /* Launch sing-box (or xray fallback) daemon in background with zero-disk-bloat output and compatibility flags */
+    /* Launch selected daemon (Xray or Sing-box) in background with zero-disk-bloat output */
     char cmd[2048];
-    snprintf(cmd, sizeof(cmd),
-             "sh -c 'export ENABLE_DEPRECATED_TUN_ADDRESS_X=true; if which sing-box >/dev/null 2>&1; then "
-             "  sing-box run -c %s >/dev/null 2>&1 & echo $! > %s; "
-             "elif which xray >/dev/null 2>&1; then "
-             "  xray run -c %s >/dev/null 2>&1 & echo $! > %s; "
-             "fi' &",
-             conf_path, pid_file,
-             conf_path, pid_file);
+    if (use_xray) {
+        snprintf(cmd, sizeof(cmd),
+                 "sh -c 'xray run -c %s >/dev/null 2>&1 & echo $! > %s' &",
+                 conf_path, pid_file);
+    } else {
+        snprintf(cmd, sizeof(cmd),
+                 "sh -c 'export ENABLE_DEPRECATED_TUN_ADDRESS_X=true; sing-box run -c %s >/dev/null 2>&1 & echo $! > %s' &",
+                 conf_path, pid_file);
+    }
 
     int rc = system(cmd);
     (void)rc;

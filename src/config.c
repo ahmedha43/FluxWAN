@@ -539,6 +539,7 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
                     if (extract_json_string(obj_str, "proxy_path", val, sizeof(val))) safe_str_copy(w->proxy.path, val, sizeof(w->proxy.path));
                     if (extract_json_string(obj_str, "proxy_transport", val, sizeof(val))) safe_str_copy(w->proxy.transport, val, sizeof(w->proxy.transport));
                     if (extract_json_string(obj_str, "proxy_security", val, sizeof(val))) safe_str_copy(w->proxy.security, val, sizeof(w->proxy.security));
+                    if (extract_json_string(obj_str, "proxy_encryption", val, sizeof(val))) safe_str_copy(w->proxy.encryption, val, sizeof(w->proxy.encryption));
                     if (extract_json_string(obj_str, "proxy_raw_uri", val_uri, sizeof(val_uri))) safe_str_copy(w->proxy.raw_uri, val_uri, sizeof(w->proxy.raw_uri));
                     if (extract_json_string(obj_str, "proxy_tun_dev", val, sizeof(val))) safe_str_copy(w->proxy.tun_dev, val, sizeof(w->proxy.tun_dev));
                     safe_str_copy(w->proxy.bind_interface, w->name, sizeof(w->proxy.bind_interface));
@@ -1539,6 +1540,9 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
                 fprintf(f, "      \"proxy_path\": \"%s\",\n", w->proxy.path);
                 fprintf(f, "      \"proxy_transport\": \"%s\",\n", w->proxy.transport[0] ? w->proxy.transport : "ws");
                 fprintf(f, "      \"proxy_security\": \"%s\",\n", w->proxy.security[0] ? w->proxy.security : "tls");
+                if (w->proxy.encryption[0]) {
+                    fprintf(f, "      \"proxy_encryption\": \"%s\",\n", w->proxy.encryption);
+                }
                 fprintf(f, "      \"proxy_raw_uri\": \"%s\",\n", w->proxy.raw_uri);
                 fprintf(f, "      \"proxy_tun_dev\": \"%s\"\n", w->proxy.tun_dev);
             } else {

@@ -2063,9 +2063,9 @@
                                 <div x-show="wan.proxy_enabled" class="space-y-2.5 pt-1">
                                     <!-- 1-Click Import URI -->
                                     <div class="bg-indigo-950/30 p-2 rounded-lg border border-indigo-500/20 space-y-1">
-                                        <label class="text-4xs text-indigo-300 font-semibold block" x-text="currentLang==='ar' ? '⚡ استيراد رابط مباشر (vless://, vmess://, trojan://, ss://):' : '⚡ 1-Click Quick Import Link:'"></label>
+                                        <label class="text-4xs text-indigo-300 font-semibold block" x-text="currentLang==='ar' ? '⚡ استيراد رابط مباشر (v2box://, vless://, vmess://, trojan://, ss://):' : '⚡ 1-Click Quick Import Link (v2box, vless, vmess, trojan):'"></label>
                                         <div class="flex items-center space-x-1.5">
-                                            <input type="text" x-model="wan.proxy_raw_uri" @input="if (wan.proxy_raw_uri && (wan.proxy_raw_uri.includes('://'))) { parseProxyUri(wan); }" @paste="$nextTick(() => parseProxyUri(wan))" class="flex-1 bg-slate-950 border border-slate-700 rounded-md px-2 py-1 text-white font-mono text-3xs" placeholder="vless://uuid@server:443?type=ws&security=tls&sni=...">
+                                            <input type="text" x-model="wan.proxy_raw_uri" @input="if (wan.proxy_raw_uri && (wan.proxy_raw_uri.includes('://'))) { parseProxyUri(wan); }" @paste="$nextTick(() => parseProxyUri(wan))" class="flex-1 bg-slate-950 border border-slate-700 rounded-md px-2 py-1 text-white font-mono text-3xs" placeholder="vless://... or v2box://locked=...">
                                             <button type="button" @click="parseProxyUri(wan)" class="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-md text-3xs font-bold transition flex items-center space-x-1">
                                                 <span>📥</span>
                                                 <span x-text="currentLang==='ar' ? 'استيراد' : 'Import'"></span>
@@ -6682,13 +6682,25 @@
 
                 parseProxyUri(wan) {
                     if (!wan.proxy_raw_uri || !wan.proxy_raw_uri.trim()) return;
-                    const uri = wan.proxy_raw_uri.trim();
+                    let uri = wan.proxy_raw_uri.trim();
+
+                    // If V2Box locked link, decode Base64 for instant client-side preview
+                    let cleanUri = uri;
+                    if (cleanUri.startsWith('v2box://locked=')) {
+                        try {
+                            cleanUri = atob(cleanUri.substring(15));
+                        } catch(e) {}
+                    } else if (cleanUri.startsWith('v2box://')) {
+                        try {
+                            cleanUri = atob(cleanUri.substring(8));
+                        } catch(e) {}
+                    }
 
                     /* 1. Instant Client-Side Parser for VLESS, Trojan, and Shadowsocks */
                     try {
-                        if (uri.startsWith('vless://') || uri.startsWith('trojan://')) {
-                            const proto = uri.startsWith('vless://') ? 'vless' : 'trojan';
-                            const clean = uri.replace(/^(vless|trojan):\/\//, '');
+                        if (cleanUri.startsWith('vless://') || cleanUri.startsWith('trojan://')) {
+                            const proto = cleanUri.startsWith('vless://') ? 'vless' : 'trojan';
+                            const clean = cleanUri.replace(/^(vless|trojan):\/\//, '');
                             const atIdx = clean.indexOf('@');
                             if (atIdx > 0) {
                                 wan.proxy_uuid = decodeURIComponent(clean.substring(0, atIdx));
@@ -6716,6 +6728,7 @@
                                     wan.proxy_path = params.get('path') || '/';
                                     wan.proxy_transport = params.get('type') || 'ws';
                                     wan.proxy_security = params.get('security') || (wan.proxy_port === 80 ? 'none' : 'tls');
+                                    wan.proxy_encryption = params.get('encryption') || 'none';
                                     if (wan.proxy_port === 80 && !params.get('security')) wan.proxy_security = 'none';
                                 }
                                 this.isEditing = true;
@@ -6744,6 +6757,7 @@
                             wan.proxy_path = d.proxy.path || wan.proxy_path || '/';
                             wan.proxy_transport = d.proxy.transport || wan.proxy_transport || 'ws';
                             wan.proxy_security = d.proxy.security || wan.proxy_security || 'tls';
+                            wan.proxy_encryption = d.proxy.encryption || wan.proxy_encryption || 'none';
                             wan.proxy_enabled = true;
                             this.isEditing = true;
                             this.showToast(this.currentLang === 'ar' ? 'تم استيراد إعدادات النفق بنجاح!' : 'Proxy configuration imported successfully!');
