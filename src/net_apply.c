@@ -238,11 +238,13 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
                          "ip rule del fwmark 0x%x 2>/dev/null || true; "
                          "ip rule add fwmark 0x%x table %u pref 40 2>/dev/null || true; "
                          "ip link set %s up 2>/dev/null || true; "
+                         "ip addr replace 198.18.%u.1/24 dev %s 2>/dev/null || true; "
                          "ip route replace default dev %s table %u proto static 2>/dev/null || true",
                          w->name,
                          wan_gw, w->name, phys_table,
                          fwmark, fwmark, phys_table,
                          w->proxy.tun_dev,
+                         (unsigned int)((i + 10) % 250), w->proxy.tun_dev,
                          w->proxy.tun_dev, w->table_id);
                 safe_system(px_cmd);
 #endif
@@ -1070,14 +1072,25 @@ int net_apply_wan_shield(const fluxwan_config_t *config) {
         safe_system("iptables -A OUTPUT -p icmp --icmp-type destination-unreachable -j DROP 2>/dev/null || true");
     }
 
-    /* 5. Restrict Web Management Port 80 -> 8080 Redirection strictly to LAN */
-    safe_system("iptables -t nat -D PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 8080 2>/dev/null || true");
+    /* 5. Restrict Web Management Port 80 -> 8080 Redirection strictly to Router's own IP */
+    safe_system("iptables -t nat -D PREROUTING -p tcp --dport 80 -j REDIRECT --to-ports 8080 2>/dev/null || true");
     if (config->lan.name[0]) {
-        char redir_cmd[512];
-        snprintf(redir_cmd, sizeof(redir_cmd),
-                 "iptables -t nat -C PREROUTING -i %s -p tcp --dport 80 -j REDIRECT --to-port 8080 2>/dev/null || "
-                 "iptables -t nat -A PREROUTING -i %s -p tcp --dport 80 -j REDIRECT --to-port 8080 2>/dev/null || true",
-                 config->lan.name, config->lan.name);
+        char lan_ip_str[32] = {0};
+        ip_to_str(config->lan.ip_addr, lan_ip_str, sizeof(lan_ip_str));
+        char redir_cmd[1024];
+        if (lan_ip_str[0] && strcmp(lan_ip_str, "0.0.0.0") != 0) {
+            snprintf(redir_cmd, sizeof(redir_cmd),
+                     "iptables -t nat -D PREROUTING -i %s -p tcp --dport 80 -j REDIRECT --to-ports 8080 2>/dev/null || true; "
+                     "iptables -t nat -C PREROUTING -i %s -d %s -p tcp --dport 80 -j REDIRECT --to-ports 8080 2>/dev/null || "
+                     "iptables -t nat -A PREROUTING -i %s -d %s -p tcp --dport 80 -j REDIRECT --to-ports 8080 2>/dev/null || true",
+                     config->lan.name, config->lan.name, lan_ip_str, config->lan.name, lan_ip_str);
+        } else {
+            snprintf(redir_cmd, sizeof(redir_cmd),
+                     "iptables -t nat -D PREROUTING -i %s -p tcp --dport 80 -j REDIRECT --to-ports 8080 2>/dev/null || true; "
+                     "iptables -t nat -C PREROUTING -i %s -m addrtype --dst-type LOCAL -p tcp --dport 80 -j REDIRECT --to-ports 8080 2>/dev/null || "
+                     "iptables -t nat -A PREROUTING -i %s -m addrtype --dst-type LOCAL -p tcp --dport 80 -j REDIRECT --to-ports 8080 2>/dev/null || true",
+                     config->lan.name, config->lan.name, config->lan.name);
+        }
         safe_system(redir_cmd);
     }
 

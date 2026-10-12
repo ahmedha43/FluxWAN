@@ -376,7 +376,14 @@ int dhcp_server_process(dhcp_server_ctx_t *ctx) {
         opt_offset = append_option(reply.options, opt_offset, sizeof(reply.options), DHCP_OPT_MSG_TYPE, 1, &offer_type);
         opt_offset = append_option(reply.options, opt_offset, sizeof(reply.options), DHCP_OPT_SUBNET_MASK, 4, &ctx->config.lan.netmask);
         opt_offset = append_option(reply.options, opt_offset, sizeof(reply.options), DHCP_OPT_ROUTER, 4, &ctx->config.lan.ip_addr);
-        opt_offset = append_option(reply.options, opt_offset, sizeof(reply.options), DHCP_OPT_DNS, 4, &ctx->config.lan.ip_addr);
+        uint32_t dns_servers[2];
+        dns_servers[0] = ctx->config.lan.dns.primary_dns[0] ?
+                         str_to_ip(ctx->config.lan.dns.primary_dns) : str_to_ip("1.1.1.1");
+        if (dns_servers[0] == 0) dns_servers[0] = str_to_ip("1.1.1.1");
+        dns_servers[1] = ctx->config.lan.dns.secondary_dns[0] ?
+                         str_to_ip(ctx->config.lan.dns.secondary_dns) : str_to_ip("8.8.8.8");
+        if (dns_servers[1] == 0) dns_servers[1] = str_to_ip("8.8.8.8");
+        opt_offset = append_option(reply.options, opt_offset, sizeof(reply.options), DHCP_OPT_DNS, (uint8_t)sizeof(dns_servers), dns_servers);
 
         uint32_t lease_sec = htonl(ctx->config.lan.dhcp_lease_time);
         opt_offset = append_option(reply.options, opt_offset, sizeof(reply.options), DHCP_OPT_LEASE_TIME, 4, &lease_sec);
@@ -434,7 +441,14 @@ int dhcp_server_process(dhcp_server_ctx_t *ctx) {
         opt_offset = append_option(reply.options, opt_offset, sizeof(reply.options), DHCP_OPT_MSG_TYPE, 1, &ack_type);
         opt_offset = append_option(reply.options, opt_offset, sizeof(reply.options), DHCP_OPT_SUBNET_MASK, 4, &ctx->config.lan.netmask);
         opt_offset = append_option(reply.options, opt_offset, sizeof(reply.options), DHCP_OPT_ROUTER, 4, &ctx->config.lan.ip_addr);
-        opt_offset = append_option(reply.options, opt_offset, sizeof(reply.options), DHCP_OPT_DNS, 4, &ctx->config.lan.ip_addr);
+        uint32_t dns_ack[2];
+        dns_ack[0] = ctx->config.lan.dns.primary_dns[0] ?
+                     str_to_ip(ctx->config.lan.dns.primary_dns) : str_to_ip("1.1.1.1");
+        if (dns_ack[0] == 0) dns_ack[0] = str_to_ip("1.1.1.1");
+        dns_ack[1] = ctx->config.lan.dns.secondary_dns[0] ?
+                     str_to_ip(ctx->config.lan.dns.secondary_dns) : str_to_ip("8.8.8.8");
+        if (dns_ack[1] == 0) dns_ack[1] = str_to_ip("8.8.8.8");
+        opt_offset = append_option(reply.options, opt_offset, sizeof(reply.options), DHCP_OPT_DNS, (uint8_t)sizeof(dns_ack), dns_ack);
 
         uint32_t lease_sec = htonl(ctx->config.lan.dhcp_lease_time);
         opt_offset = append_option(reply.options, opt_offset, sizeof(reply.options), DHCP_OPT_LEASE_TIME, 4, &lease_sec);

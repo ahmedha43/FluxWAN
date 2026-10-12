@@ -663,7 +663,7 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
     /* Parse NAT46 block */
     const char *nat46_pos = strstr(json, "\"nat46\"");
     if (nat46_pos) {
-        out_config->nat46.enabled = extract_json_bool(nat46_pos, "enabled", true);
+        out_config->nat46.enabled = extract_json_bool(nat46_pos, "enabled", false);
         char val[64];
         if (extract_json_string(nat46_pos, "synthetic_prefix", val, sizeof(val))) {
             safe_str_copy(out_config->nat46.synthetic_prefix, val, sizeof(out_config->nat46.synthetic_prefix));
@@ -681,7 +681,7 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
             safe_str_copy(out_config->nat46.starlink_wan_name, "veth_wan2", sizeof(out_config->nat46.starlink_wan_name));
         }
     } else {
-        out_config->nat46.enabled = true;
+        out_config->nat46.enabled = false;
         safe_str_copy(out_config->nat46.synthetic_prefix, "198.18.0.0/15", sizeof(out_config->nat46.synthetic_prefix));
         safe_str_copy(out_config->nat46.upstream_dns, "1.1.1.1", sizeof(out_config->nat46.upstream_dns));
         safe_str_copy(out_config->nat46.starlink_wan_name, "veth_wan2", sizeof(out_config->nat46.starlink_wan_name));
@@ -2112,7 +2112,7 @@ int config_reset_to_defaults(fluxwan_config_t *out_config) {
     safe_str_copy(out_config->auth.session_token, "flux_token_admin_default", sizeof(out_config->auth.session_token));
 
     /* NAT46 */
-    out_config->nat46.enabled = true;
+    out_config->nat46.enabled = false;
     safe_str_copy(out_config->nat46.synthetic_prefix, "198.18.0.0/15", sizeof(out_config->nat46.synthetic_prefix));
     safe_str_copy(out_config->nat46.upstream_dns, "1.1.1.1", sizeof(out_config->nat46.upstream_dns));
     safe_str_copy(out_config->nat46.starlink_wan_name, "veth_wan2", sizeof(out_config->nat46.starlink_wan_name));
