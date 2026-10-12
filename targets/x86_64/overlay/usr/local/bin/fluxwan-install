@@ -343,6 +343,13 @@ cp -a /bin/* "$MOUNT_DIR/bin/" 2>/dev/null || true
 cp -a /sbin/* "$MOUNT_DIR/sbin/" 2>/dev/null || true
 cp -a /lib/* "$MOUNT_DIR/lib/" 2>/dev/null || true
 cp -a /etc/* "$MOUNT_DIR/etc/" 2>/dev/null || true
+mkdir -p "$MOUNT_DIR/etc/apk"
+cat > "$MOUNT_DIR/etc/apk/repositories" << 'APK_EOF'
+https://dl-cdn.alpinelinux.org/alpine/v3.19/main
+https://dl-cdn.alpinelinux.org/alpine/v3.19/community
+https://dl-cdn.alpinelinux.org/alpine/v3.17/main
+https://dl-cdn.alpinelinux.org/alpine/v3.17/community
+APK_EOF
 cp -a /usr/bin/* "$MOUNT_DIR/usr/bin/" 2>/dev/null || true
 cp -a /usr/sbin/* "$MOUNT_DIR/usr/sbin/" 2>/dev/null || true
 cp -a /usr/lib/* "$MOUNT_DIR/usr/lib/" 2>/dev/null || true
