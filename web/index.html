@@ -554,7 +554,7 @@
                                         </tr>
                                     </thead>
                                     <tbody class="divide-y divide-slate-800/60">
-                                        <template x-for="wan in config.wans" :key="wan.id">
+                                        <template x-for="(wan, index) in config.wans" :key="(wan.id || index) + '_' + (wan.name || '') + '_' + index">
                                             <tr class="hover:bg-slate-800/30">
                                                 <td class="py-1.5 text-slate-300" x-text="'WAN' + wan.id + ' (' + wan.name + ')'"></td>
                                                 <td class="py-1.5">
@@ -1121,7 +1121,7 @@
                                     </template>
                                 </optgroup>
                                 <optgroup label="Single WAN Links">
-                                    <template x-for="w in (config.wans || [])" :key="'wan_' + w.id">
+                                    <template x-for="(w, idx) in (config.wans || [])" :key="'wan_' + (w.id || idx) + '_' + (w.name || '') + '_' + idx">
                                         <option :value="'wan:' + w.id + ':' + (w.label || w.name)" x-text="'WAN ' + w.id + ': ' + (w.label || w.name)"></option>
                                     </template>
                                 </optgroup>
@@ -1865,7 +1865,7 @@
                     </div>
                 </template>
 
-                <template x-for="(wan, index) in config.wans" :key="wan.id">
+                <template x-for="(wan, index) in config.wans" :key="(wan.id || index) + '_' + (wan.name || '') + '_' + index">
                     <div class="glass-card p-6 rounded-2xl border border-slate-700 space-y-4 relative transition-all"
                          :class="{'opacity-60 grayscale-[30%]': wan.enabled === false}">
                         <!-- Top WAN Card Header -->
@@ -2542,7 +2542,7 @@
                                                 </template>
                                             </optgroup>
                                             <optgroup label="Single WAN Links">
-                                                <template x-for="w in (config.wans || [])" :key="'w_' + w.id">
+                                                <template x-for="(w, idx) in (config.wans || [])" :key="'w_' + (w.id || idx) + '_' + (w.name || '') + '_' + idx">
                                                     <option :value="'wan:' + w.id + ':' + (w.label || w.name)" x-text="'WAN ' + w.id + ' (' + (w.label || w.name) + ')'" :selected="list.target_type === 'wan' && (list.target_name === (w.label || w.name) || list.target_id === w.id)"></option>
                                                 </template>
                                             </optgroup>
@@ -6604,8 +6604,26 @@
                     this.showToast(this.currentLang === 'ar' ? `تم اختيار شبكة: ${net.ssid}` : `Selected: ${net.ssid}`);
                 },
 
+                normalizeWanIds() {
+                    if (!this.config.wans) return;
+                    const usedIds = new Set();
+                    this.config.wans.forEach((w, i) => {
+                        let curId = parseInt(w.id) || 0;
+                        if (curId <= 0 || usedIds.has(curId)) {
+                            curId = i + 1;
+                            while (usedIds.has(curId)) curId++;
+                            w.id = curId;
+                        }
+                        usedIds.add(w.id);
+                        if (!w.label || /^WAN_\d+$/i.test(w.label)) {
+                            w.label = 'WAN_' + w.id;
+                        }
+                    });
+                },
+
                 addWanUplink() {
                     this.isEditing = true;
+                    if (!this.config.wans) this.config.wans = [];
                     const lanName = this.config.lan.interface;
                     // Find an unused physical port (never pick LAN)
                     const usedExclusivePorts = this.config.wans.filter(w => w.type !== 'pppoe').map(w => w.name);
@@ -6613,10 +6631,17 @@
                     const nonLanFallback = this.interfaces.find(i => i.name !== lanName);
                     const newPort = avail ? avail.name : (nonLanFallback ? nonLanFallback.name : 'eth1');
 
+                    // Compute guaranteed unique monotonic ID
+                    const existingIds = this.config.wans.map(w => parseInt(w.id) || 0);
+                    let nextId = 1;
+                    while (existingIds.includes(nextId)) {
+                        nextId++;
+                    }
+
                     this.config.wans.push({
-                        id: this.config.wans.length + 1,
+                        id: nextId,
                         name: newPort,
-                        label: 'WAN_' + (this.config.wans.length + 1),
+                        label: 'WAN_' + nextId,
                         type: 'dhcp',
                         ip: '',
                         netmask: '255.255.255.0',
@@ -6652,6 +6677,7 @@
                 removeWanUplink(idx) {
                     this.isEditing = true;
                     this.config.wans.splice(idx, 1);
+                    this.normalizeWanIds();
                 },
 
                 parseProxyUri(wan) {
@@ -7286,54 +7312,63 @@
                                 this.stealthConfig = d.stealth;
                             }
                             if (d.wans) {
-                                this.config.wans = d.wans.map((w, idx) => ({
-                                    id: w.id || (idx + 1),
-                                    name: w.name || '',
-                                    label: w.label || w.name,
-                                    type: w.type || 'dhcp',
-                                    username: w.username || w.ppp_username || '',
-                                    ppp_username: w.ppp_username || w.username || '',
-                                    password: w.password || w.ppp_password || '',
-                                    ppp_password: w.ppp_password || w.password || '',
-                                    mac: w.mac || w.custom_mac || '',
-                                    showPassword: false,
-                                    ip: w.ip || '',
-                                    ip6: w.ip6 || '',
-                                    netmask: w.netmask || '',
-                                    gateway: w.gateway || '',
-                                    dns: w.dns || '',
-                                    session_status: w.session_status || '',
-                                    uptime_sec: w.uptime_sec !== undefined ? w.uptime_sec : 0,
-                                    ac_name: w.ac_name || '',
-                                    lease_remaining_sec: w.lease_remaining_sec !== undefined ? w.lease_remaining_sec : 0,
-                                    mtu: w.mtu || 1500,
-                                    weight: w.config_weight !== undefined ? w.config_weight : (w.weight !== undefined ? w.weight : 100),
-                                    dynamic_weight: w.dynamic_weight !== undefined ? w.dynamic_weight : 100,
-                                    bandwidth_down_mbps: w.bandwidth_down_mbps !== undefined ? w.bandwidth_down_mbps : 100,
-                                    bandwidth_up_mbps: w.bandwidth_up_mbps !== undefined ? w.bandwidth_up_mbps : 20,
-                                    enabled: w.enabled !== undefined ? w.enabled : true,
-                                    state: w.state || 'HEALTHY',
-                                    rtt_ms: w.rtt_ms !== undefined ? w.rtt_ms : 0,
-                                    jitter_ms: w.jitter_ms !== undefined ? w.jitter_ms : 0,
-                                    packet_loss: w.packet_loss !== undefined ? w.packet_loss : 0,
-                                    probe_target: w.probe_target || '8.8.8.8',
-                                    proxy_enabled: w.proxy_enabled !== undefined ? !!w.proxy_enabled : false,
-                                    proxy_proto: w.proxy_proto || 'vless',
-                                    proxy_server: w.proxy_server || '',
-                                    proxy_port: w.proxy_port || 443,
-                                    proxy_uuid: w.proxy_uuid || '',
-                                    proxy_sni: w.proxy_sni || '',
-                                    proxy_host: w.proxy_host || '',
-                                    proxy_path: w.proxy_path || '/',
-                                    proxy_transport: w.proxy_transport || 'ws',
-                                    proxy_security: w.proxy_security || 'tls',
-                                    proxy_raw_uri: w.proxy_raw_uri || '',
-                                    proxy_tun_dev: w.proxy_tun_dev || '',
-                                    proxy_connected: !!w.proxy_connected,
-                                    proxy_latency_ms: w.proxy_latency_ms || 0,
-                                    proxyTesting: false,
-                                    proxyTestResult: ''
-                                }));
+                                const seenIds = new Set();
+                                this.config.wans = d.wans.map((w, idx) => {
+                                    let assignedId = parseInt(w.id) || (idx + 1);
+                                    if (seenIds.has(assignedId)) {
+                                        assignedId = idx + 1;
+                                        while (seenIds.has(assignedId)) assignedId++;
+                                    }
+                                    seenIds.add(assignedId);
+                                    return {
+                                        id: assignedId,
+                                        name: w.name || '',
+                                        label: w.label || ('WAN_' + assignedId),
+                                        type: w.type || 'dhcp',
+                                        username: w.username || w.ppp_username || '',
+                                        ppp_username: w.ppp_username || w.username || '',
+                                        password: w.password || w.ppp_password || '',
+                                        ppp_password: w.ppp_password || w.password || '',
+                                        mac: w.mac || w.custom_mac || '',
+                                        showPassword: false,
+                                        ip: w.ip || '',
+                                        ip6: w.ip6 || '',
+                                        netmask: w.netmask || '',
+                                        gateway: w.gateway || '',
+                                        dns: w.dns || '',
+                                        session_status: w.session_status || '',
+                                        uptime_sec: w.uptime_sec !== undefined ? w.uptime_sec : 0,
+                                        ac_name: w.ac_name || '',
+                                        lease_remaining_sec: w.lease_remaining_sec !== undefined ? w.lease_remaining_sec : 0,
+                                        mtu: w.mtu || 1500,
+                                        weight: w.config_weight !== undefined ? w.config_weight : (w.weight !== undefined ? w.weight : 100),
+                                        dynamic_weight: w.dynamic_weight !== undefined ? w.dynamic_weight : 100,
+                                        bandwidth_down_mbps: w.bandwidth_down_mbps !== undefined ? w.bandwidth_down_mbps : 100,
+                                        bandwidth_up_mbps: w.bandwidth_up_mbps !== undefined ? w.bandwidth_up_mbps : 20,
+                                        enabled: w.enabled !== undefined ? w.enabled : true,
+                                        state: w.state || 'HEALTHY',
+                                        rtt_ms: w.rtt_ms !== undefined ? w.rtt_ms : 0,
+                                        jitter_ms: w.jitter_ms !== undefined ? w.jitter_ms : 0,
+                                        packet_loss: w.packet_loss !== undefined ? w.packet_loss : 0,
+                                        probe_target: w.probe_target || '8.8.8.8',
+                                        proxy_enabled: w.proxy_enabled !== undefined ? !!w.proxy_enabled : false,
+                                        proxy_proto: w.proxy_proto || 'vless',
+                                        proxy_server: w.proxy_server || '',
+                                        proxy_port: w.proxy_port || 443,
+                                        proxy_uuid: w.proxy_uuid || '',
+                                        proxy_sni: w.proxy_sni || '',
+                                        proxy_host: w.proxy_host || '',
+                                        proxy_path: w.proxy_path || '/',
+                                        proxy_transport: w.proxy_transport || 'ws',
+                                        proxy_security: w.proxy_security || 'tls',
+                                        proxy_raw_uri: w.proxy_raw_uri || '',
+                                        proxy_tun_dev: w.proxy_tun_dev || '',
+                                        proxy_connected: !!w.proxy_connected,
+                                        proxy_latency_ms: w.proxy_latency_ms || 0,
+                                        proxyTesting: false,
+                                        proxyTestResult: ''
+                                    };
+                                });
                             }
                             this.hasLoadedInitialConfig = true;
                             this.isEditing = false;
@@ -7341,8 +7376,10 @@
                             /* Periodic telemetry update: ONLY update dynamic metrics in-place!
                                NEVER overwrite form inputs or recreate arrays! */
                             if (d.wans && this.config.wans) {
-                                d.wans.forEach(liveWan => {
-                                    const w = this.config.wans.find(item => item.id === liveWan.id || item.name === liveWan.name);
+                                d.wans.forEach((liveWan, liveIdx) => {
+                                    const w = this.config.wans.find(item => item.name && liveWan.name && item.name === liveWan.name)
+                                           || this.config.wans.find(item => item.id === liveWan.id)
+                                           || this.config.wans[liveIdx];
                                     if (w) {
                                         w.rtt_ms = liveWan.rtt_ms !== undefined ? liveWan.rtt_ms : 0;
                                         w.jitter_ms = liveWan.jitter_ms !== undefined ? liveWan.jitter_ms : 0;

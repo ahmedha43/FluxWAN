@@ -565,6 +565,26 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
                 p = obj_end + 1;
             }
             out_config->wan_count = idx;
+
+            /* Ensure unique WAN IDs and routing table IDs */
+            for (uint32_t i = 0; i < out_config->wan_count; i++) {
+                wan_config_t *wi = &out_config->wans[i];
+                bool id_dup = false;
+                bool table_dup = false;
+                for (uint32_t j = 0; j < i; j++) {
+                    if (out_config->wans[j].id == wi->id) id_dup = true;
+                    if (out_config->wans[j].table_id == wi->table_id) table_dup = true;
+                }
+                if (id_dup || wi->id == 0) {
+                    wi->id = i + 1;
+                }
+                if (table_dup || wi->table_id == 0) {
+                    wi->table_id = 100 + i + 1;
+                }
+                if (wi->label[0] == '\0') {
+                    snprintf(wi->label, sizeof(wi->label), "WAN_%u", wi->id);
+                }
+            }
     }
 
     /* Parse Prober block */
