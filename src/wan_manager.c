@@ -313,10 +313,11 @@ static void on_pppoe_connected_cb(int wan_idx, const char *ppp_ifname, uint32_t 
              "iptables -A FLUXWAN_WAN_SHIELD -i %s -j DROP 2>/dev/null || true",
              ppp_ifname, ppp_ifname);
     safe_system(ppp_shield_cmd);
+    uint32_t ttl_val = (ctx && ctx->config && ctx->config->stealth.ttl_value > 0) ? ctx->config->stealth.ttl_value : 65;
     snprintf(ppp_shield_cmd, sizeof(ppp_shield_cmd),
-             "iptables -t mangle -C FLUXWAN_STEALTH_TTL -o %s -j TTL --ttl-set 64 2>/dev/null || "
-             "iptables -t mangle -A FLUXWAN_STEALTH_TTL -o %s -j TTL --ttl-set 64 2>/dev/null || true",
-             ppp_ifname, ppp_ifname);
+             "iptables -t mangle -C FLUXWAN_STEALTH_TTL -o %s -j TTL --ttl-set %u 2>/dev/null || "
+             "iptables -t mangle -A FLUXWAN_STEALTH_TTL -o %s -j TTL --ttl-set %u 2>/dev/null || true",
+             ppp_ifname, ttl_val, ppp_ifname, ttl_val);
     safe_system(ppp_shield_cmd);
 
     wan_manager_rebalance(ctx);
@@ -591,17 +592,24 @@ static void ensure_dhcp_hook_script(void) {
         "        grep -q \"nameserver 1.1.1.1\" /etc/resolv.conf 2>/dev/null || echo \"nameserver 1.1.1.1\" >> /etc/resolv.conf\n"
         "        TABLE_ID=$(cat \"/run/fluxwan_table_${interface}\" 2>/dev/null)\n"
         "        [ -z \"$TABLE_ID\" ] && TABLE_ID=101\n"
+        "        PHYS_TABLE=$((1000 + TABLE_ID))\n"
         "        if [ -n \"$router\" ]; then\n"
         "            [ -n \"$subnet\" ] && ip route replace \"$subnet\" dev \"$interface\" scope link src \"$ip\" table \"$TABLE_ID\" 2>/dev/null || true\n"
-        "            ip route replace default via \"$router\" dev \"$interface\" table \"$TABLE_ID\" proto static 2>/dev/null || true\n"
-        "            ip rule del oif \"$interface\" table \"$TABLE_ID\" 2>/dev/null || true\n"
-        "            ip rule add oif \"$interface\" table \"$TABLE_ID\" pref 100 2>/dev/null || true\n"
-        "            ip rule del from \"$ip\" table \"$TABLE_ID\" 2>/dev/null || true\n"
-        "            ip rule add from \"$ip\" table \"$TABLE_ID\" pref 100 2>/dev/null || true\n"
+        "            [ -n \"$subnet\" ] && ip route replace \"$subnet\" dev \"$interface\" scope link src \"$ip\" table \"$PHYS_TABLE\" 2>/dev/null || true\n"
+        "            ip route replace default via \"$router\" dev \"$interface\" table \"$PHYS_TABLE\" proto static 2>/dev/null || true\n"
+        "            if [ ! -f \"/run/fluxwan_proxy_${interface}\" ]; then\n"
+        "                ip route replace default via \"$router\" dev \"$interface\" table \"$TABLE_ID\" proto static 2>/dev/null || true\n"
+        "            fi\n"
+        "            ip rule del oif \"$interface\" table \"$PHYS_TABLE\" 2>/dev/null || true\n"
+        "            ip rule add oif \"$interface\" table \"$PHYS_TABLE\" pref 100 2>/dev/null || true\n"
+        "            ip rule del from \"$ip\" table \"$PHYS_TABLE\" 2>/dev/null || true\n"
+        "            ip rule add from \"$ip\" table \"$PHYS_TABLE\" pref 100 2>/dev/null || true\n"
         "            ip route replace default via \"$router\" dev \"$interface\" metric \"$TABLE_ID\" 2>/dev/null || true\n"
         "            iptables -t nat -C POSTROUTING -o \"$interface\" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o \"$interface\" -j MASQUERADE 2>/dev/null || iptables-legacy -t nat -A POSTROUTING -o \"$interface\" -j MASQUERADE 2>/dev/null || true\n"
         "            iptables -C FLUXWAN_WAN_SHIELD -i \"$interface\" -j DROP 2>/dev/null || iptables -A FLUXWAN_WAN_SHIELD -i \"$interface\" -j DROP 2>/dev/null || true\n"
-        "            iptables -t mangle -C FLUXWAN_STEALTH_TTL -o \"$interface\" -j TTL --ttl-set 64 2>/dev/null || iptables -t mangle -A FLUXWAN_STEALTH_TTL -o \"$interface\" -j TTL --ttl-set 64 2>/dev/null || true\n"
+        "            TTL_VAL=$(cat /run/fluxwan_stealth_ttl 2>/dev/null)\n"
+        "            [ -z \"$TTL_VAL\" ] && TTL_VAL=65\n"
+        "            iptables -t mangle -C FLUXWAN_STEALTH_TTL -o \"$interface\" -j TTL --ttl-set $TTL_VAL 2>/dev/null || iptables -t mangle -A FLUXWAN_STEALTH_TTL -o \"$interface\" -j TTL --ttl-set $TTL_VAL 2>/dev/null || true\n"
         "        fi\n"
         "        sysctl -w net.ipv4.conf.${interface}.rp_filter=2 >/dev/null 2>&1 || true\n"
         "        sysctl -w net.ipv4.conf.${interface}.send_redirects=0 >/dev/null 2>&1 || true\n"

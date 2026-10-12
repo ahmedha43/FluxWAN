@@ -522,6 +522,13 @@ int proxy_manager_start_wan(proxy_manager_ctx_t *ctx, uint32_t wan_idx) {
             ctx->pids[wan_idx] = pid;
             wan->proxy.pid = pid;
             wan->proxy.is_connected = true;
+            /* Ensure the tun interface route is set in the WAN table */
+            char tun_route_cmd[256];
+            snprintf(tun_route_cmd, sizeof(tun_route_cmd),
+                     "ip link set %s up 2>/dev/null || true; "
+                     "ip route replace default dev %s table %u proto static 2>/dev/null || true",
+                     wan->proxy.tun_dev, wan->proxy.tun_dev, wan->table_id);
+            safe_system(tun_route_cmd);
             LOG_INFO("[Proxy] Successfully launched proxy daemon for WAN '%s' (PID: %d, Device: %s)",
                      wan->label, pid, wan->proxy.tun_dev);
         }
@@ -701,6 +708,12 @@ static void proxy_manager_supervise_tick(proxy_manager_ctx_t *ctx) {
             wan->metrics.packet_loss_pct = 0.0f;
             wan->state = WAN_STATE_HEALTHY;
             ctx->fail_counts[i] = 0;
+
+            char chk_route[256];
+            snprintf(chk_route, sizeof(chk_route),
+                     "ip route replace default dev %s table %u proto static 2>/dev/null || true",
+                     wan->proxy.tun_dev, wan->table_id);
+            safe_system(chk_route);
         } else {
             wan->metrics.packet_loss_pct = 100.0f;
             wan->proxy.latency_ms = 0;

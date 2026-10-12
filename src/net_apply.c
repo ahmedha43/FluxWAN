@@ -229,14 +229,19 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
             if (w->proxy.enabled && w->proxy.tun_dev[0]) {
 #if defined(__linux__)
                 uint32_t fwmark = 0x1000 + i;
+                uint32_t phys_table = 1000 + w->table_id;
                 char px_cmd[512];
                 /* 1. Direct proxy daemon's outer encrypted egress packets strictly out through physical WAN table */
                 snprintf(px_cmd, sizeof(px_cmd),
+                         "touch /run/fluxwan_proxy_%s; "
+                         "ip route replace default via %s dev %s table %u proto static 2>/dev/null || true; "
                          "ip rule del fwmark 0x%x 2>/dev/null || true; "
-                         "ip rule add fwmark 0x%x table %u pref 50 2>/dev/null || true; "
+                         "ip rule add fwmark 0x%x table %u pref 40 2>/dev/null || true; "
                          "ip link set %s up 2>/dev/null || true; "
-                         "ip route replace default dev %s table %u proto static metric 10 2>/dev/null || true",
-                         fwmark, fwmark, w->table_id,
+                         "ip route replace default dev %s table %u proto static 2>/dev/null || true",
+                         w->name,
+                         wan_gw, w->name, phys_table,
+                         fwmark, fwmark, phys_table,
                          w->proxy.tun_dev,
                          w->proxy.tun_dev, w->table_id);
                 safe_system(px_cmd);
@@ -257,9 +262,10 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
                 char px_del[256];
                 uint32_t fwmark = 0x1000 + i;
                 snprintf(px_del, sizeof(px_del),
+                         "rm -f /run/fluxwan_proxy_%s; "
                          "ip rule del fwmark 0x%x 2>/dev/null || true; "
                          "ip link delete %s 2>/dev/null || true",
-                         fwmark, w->proxy.tun_dev);
+                         w->name, fwmark, w->proxy.tun_dev);
                 safe_system(px_del);
 #endif
                 net_apply_wan_nat(w->proxy.tun_dev, false);
@@ -1029,7 +1035,10 @@ int net_apply_wan_shield(const fluxwan_config_t *config) {
     if (config->stealth.enabled) {
         safe_system("iptables -t mangle -A POSTROUTING -j FLUXWAN_STEALTH_TTL 2>/dev/null || iptables-legacy -t mangle -A POSTROUTING -j FLUXWAN_STEALTH_TTL 2>/dev/null || true");
 
-        uint8_t ttl = config->stealth.ttl_value > 0 ? config->stealth.ttl_value : 64;
+        uint8_t ttl = config->stealth.ttl_value > 0 ? config->stealth.ttl_value : 65;
+        char ttl_file_cmd[64];
+        snprintf(ttl_file_cmd, sizeof(ttl_file_cmd), "echo %u > /run/fluxwan_stealth_ttl 2>/dev/null || true", ttl);
+        safe_system(ttl_file_cmd);
 
         /* Clamp outgoing IPv4 TTL so upstream ISP sees identical single-host TTL for all client traffic */
         for (uint32_t i = 0; i < config->wan_count; i++) {
