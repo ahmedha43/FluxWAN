@@ -46,7 +46,7 @@ static uint64_t get_time_ns(void) {
 static double measure_ping_socket(const char *ifname, const char *target_ip) {
     char cmd[256];
     snprintf(cmd, sizeof(cmd),
-             "ping -I %s -c 1 -W 1 %s 2>/dev/null | awk -F'/' 'END {print $5}'",
+             "ping -I %s -c 1 -W 2 %s 2>/dev/null | grep 'time=' | sed 's/.*time=//; s/ .*//'",
              ifname, target_ip);
     FILE *p = popen(cmd, "r");
     if (!p) return 999.0;
@@ -122,23 +122,25 @@ static int diagnostics_run_speedtest_internal(const char *ifname, const struct s
             return -1;
         }
 
-        struct timeval tv = { .tv_sec = 4, .tv_usec = 0 };
+        int bufsize = 1048576;
+        setsockopt(dl_sock, SOL_SOCKET, SO_RCVBUF, &bufsize, sizeof(bufsize));
+        struct timeval tv = { .tv_sec = 5, .tv_usec = 0 };
         setsockopt(dl_sock, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(tv));
         setsockopt(dl_sock, SOL_SOCKET, SO_SNDTIMEO, (const char *)&tv, sizeof(tv));
 
         if (connect(dl_sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == 0) {
-            /* Request 5MB stream from Cloudflare speed endpoint (within Cloudflare unauthenticated rate limits) */
+            /* Request 25MB stream from Cloudflare speed endpoint */
             const char *http_req = 
-                "GET /__down?bytes=5000000 HTTP/1.1\r\n"
+                "GET /__down?bytes=25000000 HTTP/1.1\r\n"
                 "Host: speed.cloudflare.com\r\n"
                 "User-Agent: FluxWAN-Speedtest/1.2.5\r\n"
                 "Connection: close\r\n\r\n";
             send(dl_sock, http_req, strlen(http_req), 0);
 
-            char rx_buf[32768];
+            char rx_buf[65536];
             uint64_t total_rx = 0;
             uint64_t dl_start = get_time_ns();
-            uint64_t max_dur_ns = 3500000000ULL; /* 3.5 seconds sampling window */
+            uint64_t max_dur_ns = 4000000000ULL; /* 4.0 seconds sampling window */
             bool is_200_ok = false;
             bool first_chunk = true;
 
@@ -149,6 +151,7 @@ static int diagnostics_run_speedtest_internal(const char *ifname, const struct s
                     first_chunk = false;
                     if (n >= 12 && strncmp(rx_buf, "HTTP/1.1 200", 12) == 0) {
                         is_200_ok = true;
+                        dl_start = get_time_ns(); /* Start timer when first bytes arrive! */
                     }
                 }
                 if (is_200_ok) {
@@ -161,7 +164,7 @@ static int diagnostics_run_speedtest_internal(const char *ifname, const struct s
             close(dl_sock);
 
             double dur_sec = (double)(dl_end - dl_start) / 1000000000.0;
-            if (is_200_ok && dur_sec > 0.2 && total_rx > 1000) {
+            if (is_200_ok && dur_sec > 0.1 && total_rx > 1000) {
                 out->download_mbps = (double)(total_rx * 8) / (dur_sec * 1000000.0);
             } else if (!is_200_ok) {
                 /* Fallback to CacheFly Global CDN if Cloudflare rate limits */
@@ -341,7 +344,9 @@ int diagnostics_run_multiwan_speedtest(const fluxwan_config_t *config, multiwan_
         if (!w->enabled) continue;
 
         char dev[MAX_IFNAME_LEN] = {0};
-        if (w->type == WAN_TYPE_PPPOE) {
+        if (w->proxy.enabled && w->proxy.tun_dev[0]) {
+            snprintf(dev, sizeof(dev), "%s", w->proxy.tun_dev);
+        } else if (w->type == WAN_TYPE_PPPOE) {
             snprintf(dev, sizeof(dev), "ppp%u", i);
         } else {
             snprintf(dev, sizeof(dev), "%s", w->name);
