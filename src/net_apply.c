@@ -192,15 +192,25 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
 #if defined(__linux__)
             if (w->gateway != 0) {
                 char route_cmd[512];
-                snprintf(route_cmd, sizeof(route_cmd),
-                         "ip route replace default via %s dev %s table %u proto static 2>/dev/null || true; "
-                         "ip rule del oif %s table %u 2>/dev/null || true; "
-                         "ip rule add oif %s table %u pref 100 2>/dev/null || true; "
-                         "ip route replace default via %s dev %s metric %u 2>/dev/null || true",
-                         wan_gw, w->name, w->table_id,
-                         w->name, w->table_id,
-                         w->name, w->table_id,
-                         wan_gw, w->name, 100 + i + 1);
+                if (!w->proxy.enabled) {
+                    snprintf(route_cmd, sizeof(route_cmd),
+                             "ip route replace default via %s dev %s table %u proto static 2>/dev/null || true; "
+                             "ip rule del oif %s table %u 2>/dev/null || true; "
+                             "ip rule add oif %s table %u pref 100 2>/dev/null || true; "
+                             "ip route replace default via %s dev %s metric %u 2>/dev/null || true",
+                             wan_gw, w->name, w->table_id,
+                             w->name, w->table_id,
+                             w->name, w->table_id,
+                             wan_gw, w->name, 100 + i + 1);
+                } else {
+                    snprintf(route_cmd, sizeof(route_cmd),
+                             "ip route replace default via %s dev %s table %u proto static 2>/dev/null || true; "
+                             "ip rule del oif %s table %u 2>/dev/null || true; "
+                             "ip rule add oif %s table %u pref 100 2>/dev/null || true",
+                             wan_gw, w->name, w->table_id,
+                             w->name, w->table_id,
+                             w->name, w->table_id);
+                }
                 safe_system(route_cmd);
 
                 char proc_path[128];
@@ -239,13 +249,15 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
                          "ip rule add fwmark 0x%x table %u pref 40 2>/dev/null || true; "
                          "ip link set %s up 2>/dev/null || true; "
                          "ip addr replace 198.18.%u.1/24 dev %s 2>/dev/null || true; "
-                         "ip route replace default dev %s table %u proto static 2>/dev/null || true",
+                         "ip route replace default dev %s table %u proto static 2>/dev/null || true; "
+                         "ip route replace default dev %s metric %u 2>/dev/null || true",
                          w->name,
                          wan_gw, w->name, phys_table,
                          fwmark, fwmark, phys_table,
                          w->proxy.tun_dev,
                          (unsigned int)((i + 10) % 250), w->proxy.tun_dev,
-                         w->proxy.tun_dev, w->table_id);
+                         w->proxy.tun_dev, w->table_id,
+                         w->proxy.tun_dev, 100 + i + 1);
                 safe_system(px_cmd);
 #endif
                 net_apply_wan_nat(w->proxy.tun_dev, true);
@@ -355,6 +367,16 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
         }
     }
     safe_system("iptables -t mangle -A PREROUTING -j CONNMARK --save-mark --mask 0x0000ffff 2>/dev/null || iptables-legacy -t mangle -A PREROUTING -j CONNMARK --save-mark --mask 0x0000ffff 2>/dev/null || true");
+
+    /* Ensure virtual tun interfaces receive filled TCP/UDP checksums (gVisor userspace drops partial checksums) */
+    safe_system("iptables -t mangle -A POSTROUTING -p udp -j CHECKSUM --checksum-fill 2>/dev/null || true");
+    safe_system("iptables -t mangle -A POSTROUTING -p tcp -j CHECKSUM --checksum-fill 2>/dev/null || true");
+    safe_system("iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true");
+    if (config->lan.name[0]) {
+        char eth_cmd[128];
+        snprintf(eth_cmd, sizeof(eth_cmd), "ethtool -K %s rx off tx off 2>/dev/null || true", config->lan.name);
+        safe_system(eth_cmd);
+    }
 #endif
 
     /* 5. Apply QoS, Rate Limits, Application Steering, DPI, and DNS Redirection */
@@ -588,29 +610,15 @@ int net_apply_dns_features(const fluxwan_config_t *config) {
     safe_system("iptables -t nat -D PREROUTING -j FLUXWAN_DNS 2>/dev/null || true");
     safe_system("iptables -t nat -I PREROUTING 1 -j FLUXWAN_DNS 2>/dev/null || true");
 
-    const dns_features_t *dns = &config->lan.dns;
     const char *lan = config->lan.name[0] ? config->lan.name : "eth0";
 
-    const char *target_dns = "1.1.1.1";
-    if (dns->adblock_enabled) {
-        target_dns = "94.140.14.14"; /* AdGuard DNS */
-    } else if (dns->fast_dns_enabled && dns->primary_dns[0]) {
-        target_dns = dns->primary_dns;
-    }
-
-    if (dns->adblock_enabled || dns->fast_dns_enabled) {
-        char cmd[512];
-        snprintf(cmd, sizeof(cmd),
-                 "iptables -t nat -A FLUXWAN_DNS -i %s -p udp --dport 53 -j DNAT --to-destination %s:53 2>/dev/null || true",
-                 lan, target_dns);
-        safe_system(cmd);
-        snprintf(cmd, sizeof(cmd),
-                 "iptables -t nat -A FLUXWAN_DNS -i %s -p tcp --dport 53 -j DNAT --to-destination %s:53 2>/dev/null || true",
-                 lan, target_dns);
-        safe_system(cmd);
-        LOG_INFO("[DNS Engine] Intercepting port 53 -> %s (%s)",
-                 target_dns, dns->adblock_enabled ? "Ad-Blocking Active" : "Fast DNS Active");
-    }
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd),
+             "iptables -t nat -A FLUXWAN_DNS -i %s -p udp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true; "
+             "iptables -t nat -A FLUXWAN_DNS -i %s -p tcp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true",
+             lan, lan);
+    safe_system(cmd);
+    LOG_INFO("[DNS Engine] Transparently redirecting port 53 to FluxWAN Embedded DNS Forwarder (0.0.0.0:53)");
 #endif
     return 0;
 }

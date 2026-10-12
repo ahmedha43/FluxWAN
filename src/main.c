@@ -190,11 +190,8 @@ int main(int argc, char *argv[]) {
     /* 9. Initialize Dynamic Health Prober */
     prober_ctx_t *prober = prober_init(&config, wan_manager_on_health_update, wan_mgr);
 
-    /* 10. Initialize Embedded DNS64 / NAT46 Starlink Bypass Engine */
-    dns64_ctx_t *dns64 = NULL;
-    if (config.nat46.enabled) {
-        dns64 = dns64_init(&config, -1, -1, -1);
-    }
+    /* 10. Initialize Embedded High-Performance DNS Forwarder & Engine */
+    dns64_ctx_t *dns64 = dns64_init(&config, -1, -1, -1);
 
     /* 11. Initialize Broadband PPPoE Server (BRAS) */
     pppoe_server_ctx_t *pppoe_srv = pppoe_server_init(&config);

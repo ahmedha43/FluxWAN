@@ -772,15 +772,17 @@ int proxy_manager_start_wan(proxy_manager_ctx_t *ctx, uint32_t wan_idx) {
             ctx->pids[wan_idx] = pid;
             wan->proxy.pid = pid;
             wan->proxy.is_connected = true;
-            /* Ensure the tun interface route is set in the WAN table */
-            char tun_route_cmd[384];
+            /* Ensure the tun interface route is set in the WAN table and table main */
+            char tun_route_cmd[512];
             snprintf(tun_route_cmd, sizeof(tun_route_cmd),
                      "ip link set %s up 2>/dev/null || true; "
                      "ip addr replace 198.18.%u.1/24 dev %s 2>/dev/null || true; "
-                     "ip route replace default dev %s table %u proto static 2>/dev/null || true",
+                     "ip route replace default dev %s table %u proto static 2>/dev/null || true; "
+                     "ip route replace default dev %s metric %u 2>/dev/null || true",
                      wan->proxy.tun_dev,
                      (unsigned int)((wan_idx + 10) % 250), wan->proxy.tun_dev,
-                     wan->proxy.tun_dev, wan->table_id);
+                     wan->proxy.tun_dev, wan->table_id,
+                     wan->proxy.tun_dev, 100 + (unsigned int)wan_idx + 1);
             safe_system(tun_route_cmd);
             LOG_INFO("[Proxy] Successfully launched proxy daemon for WAN '%s' (PID: %d, Device: %s)",
                      wan->label, pid, wan->proxy.tun_dev);

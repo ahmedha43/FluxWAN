@@ -31,6 +31,11 @@ struct dns_header {
     uint16_t arcount;
 };
 
+typedef struct {
+    struct sockaddr_in client_addr;
+    time_t timestamp;
+} pending_dns_entry_t;
+
 struct dns64_ctx {
     socket_t server_fd;
     socket_t upstream_fd;
@@ -43,6 +48,7 @@ struct dns64_ctx {
     dns64_stats_t stats;
     pthread_t thread;
     bool running;
+    pending_dns_entry_t *pending_queries;
 };
 
 static uint32_t allocate_synthetic_ip(dns64_ctx_t *ctx) {
@@ -89,71 +95,101 @@ static void *dns64_worker(void *arg) {
     unsigned char buf[2048];
     struct sockaddr_in client_addr;
 
-    LOG_INFO("DNS64 Daemon listening on 0.0.0.0:53 (Synthetic Pool: 198.18.0.0/15)...");
+    LOG_INFO("FluxWAN Embedded DNS Forwarder & Engine listening on 0.0.0.0:53...");
 
     while (ctx->running) {
-        socklen_t addr_len = sizeof(client_addr);
-        ssize_t n = recvfrom(ctx->server_fd, (char *)buf, sizeof(buf), 0,
-                             (struct sockaddr *)&client_addr, &addr_len);
-        if (n < (ssize_t)sizeof(struct dns_header)) {
+        fd_set rset;
+        FD_ZERO(&rset);
+        FD_SET(ctx->server_fd, &rset);
+        FD_SET(ctx->upstream_fd, &rset);
+
+        int max_fd = (int)(ctx->server_fd > ctx->upstream_fd ? ctx->server_fd : ctx->upstream_fd) + 1;
+        struct timeval tv;
+        tv.tv_sec = 1;
+        tv.tv_usec = 0;
+
+        int sel = select(max_fd, &rset, NULL, NULL, &tv);
+        if (sel <= 0) {
             continue;
         }
 
-        ctx->stats.total_queries++;
-        struct dns_header *hdr = (struct dns_header *)buf;
+        /* 1. Client query received on server_fd */
+        if (FD_ISSET(ctx->server_fd, &rset)) {
+            socklen_t addr_len = sizeof(client_addr);
+            ssize_t n = recvfrom(ctx->server_fd, (char *)buf, sizeof(buf), 0,
+                                 (struct sockaddr *)&client_addr, &addr_len);
+            if (n >= (ssize_t)sizeof(struct dns_header)) {
+                ctx->stats.total_queries++;
+                struct dns_header *hdr = (struct dns_header *)buf;
+                uint16_t qid = ntohs(hdr->id);
 
-        /* Parse Query Type */
-        unsigned char *qptr = buf + sizeof(struct dns_header);
-        while (qptr < buf + n && *qptr != 0) {
-            qptr += (*qptr + 1);
-        }
-        if (qptr < buf + n && *qptr == 0) qptr++; /* Skip null terminator */
+                /* If NAT46 is explicitly enabled and Type A Query (IPv4 Request) */
+                if (ctx->config && ctx->config->nat46.enabled) {
+                    unsigned char *qptr = buf + sizeof(struct dns_header);
+                    while (qptr < buf + n && *qptr != 0) {
+                        qptr += (*qptr + 1);
+                    }
+                    if (qptr < buf + n && *qptr == 0) qptr++;
 
-        if (qptr + 4 <= buf + n) {
-            uint16_t qtype = (qptr[0] << 8) | qptr[1];
-            
-            /* If Type A Query (IPv4 Request) */
-            if (qtype == 0x0001) {
-                /* Allocate Synthetic IPv4 */
-                uint32_t synth_v4 = allocate_synthetic_ip(ctx);
+                    if (qptr + 4 <= buf + n) {
+                        uint16_t qtype = (qptr[0] << 8) | qptr[1];
+                        if (qtype == 0x0001) {
+                            uint32_t synth_v4 = allocate_synthetic_ip(ctx);
+                            struct in6_addr target_v6;
+                            inet_pton(AF_INET6, "2001:4860:4860::8888", &target_v6);
 
-                /* Default Target IPv6 (e.g. Google/CDN IPv6 Anycast or Upstream resolved) */
-                struct in6_addr target_v6;
-                inet_pton(AF_INET6, "2001:4860:4860::8888", &target_v6);
+                            dns64_register_mapping(ctx, synth_v4, target_v6);
 
-                dns64_register_mapping(ctx, synth_v4, target_v6);
+                            hdr->flags = htons(0x8180);
+                            hdr->ancount = htons(1);
 
-                /* Construct Synthesized DNS A Reply */
-                hdr->flags = htons(0x8180); /* Standard Query Response, No error */
-                hdr->ancount = htons(1);
+                            unsigned char *ans = buf + n;
+                            ans[0] = 0xc0; ans[1] = 0x0c;
+                            ans[2] = 0x00; ans[3] = 0x01;
+                            ans[4] = 0x00; ans[5] = 0x01;
+                            ans[6] = 0x00; ans[7] = 0x00; ans[8] = 0x00; ans[9] = 0x3c;
+                            ans[10] = 0x00; ans[11] = 0x04;
+                            memcpy(ans + 12, &synth_v4, 4);
 
-                unsigned char *ans = buf + n;
-                ans[0] = 0xc0; /* Name Pointer */
-                ans[1] = 0x0c; /* Offset to QNAME */
-                ans[2] = 0x00; ans[3] = 0x01; /* Type A */
-                ans[4] = 0x00; ans[5] = 0x01; /* Class IN */
-                ans[6] = 0x00; ans[7] = 0x00; ans[8] = 0x00; ans[9] = 0x3c; /* TTL: 60s */
-                ans[10] = 0x00; ans[11] = 0x04; /* Data length: 4 bytes */
-                memcpy(ans + 12, &synth_v4, 4);
+                            sendto(ctx->server_fd, (const char *)buf, n + 16, 0,
+                                   (struct sockaddr *)&client_addr, addr_len);
 
-                sendto(ctx->server_fd, (const char *)buf, n + 16, 0,
-                       (struct sockaddr *)&client_addr, addr_len);
+                            ctx->stats.synthesized_a_records++;
+                            continue;
+                        }
+                    }
+                }
 
-                ctx->stats.synthesized_a_records++;
-                continue;
+                /* Record client mapping by DNS Query ID */
+                if (ctx->pending_queries) {
+                    ctx->pending_queries[qid].client_addr = client_addr;
+                    ctx->pending_queries[qid].timestamp = time(NULL);
+                }
+
+                /* Forward query to Upstream DNS (1.1.1.1 / Primary DNS) */
+                sendto(ctx->upstream_fd, (const char *)buf, n, 0,
+                       (struct sockaddr *)&ctx->upstream_addr, sizeof(ctx->upstream_addr));
             }
         }
 
-        /* Passthrough other queries to Upstream DNS */
-        sendto(ctx->upstream_fd, (const char *)buf, n, 0,
-               (struct sockaddr *)&ctx->upstream_addr, sizeof(ctx->upstream_addr));
+        /* 2. Response from Upstream DNS on upstream_fd */
+        if (FD_ISSET(ctx->upstream_fd, &rset)) {
+            struct sockaddr_in up_addr;
+            socklen_t up_len = sizeof(up_addr);
+            ssize_t n = recvfrom(ctx->upstream_fd, (char *)buf, sizeof(buf), 0,
+                                 (struct sockaddr *)&up_addr, &up_len);
+            if (n >= (ssize_t)sizeof(struct dns_header)) {
+                struct dns_header *hdr = (struct dns_header *)buf;
+                uint16_t qid = ntohs(hdr->id);
 
-        unsigned char up_buf[2048];
-        ssize_t up_len = recv(ctx->upstream_fd, (char *)up_buf, sizeof(up_buf), 0);
-        if (up_len > 0) {
-            sendto(ctx->server_fd, (const char *)up_buf, up_len, 0,
-                   (struct sockaddr *)&client_addr, addr_len);
-            ctx->stats.passthrough_queries++;
+                if (ctx->pending_queries && ctx->pending_queries[qid].client_addr.sin_family == AF_INET) {
+                    sendto(ctx->server_fd, (const char *)buf, n, 0,
+                           (struct sockaddr *)&ctx->pending_queries[qid].client_addr,
+                           sizeof(ctx->pending_queries[qid].client_addr));
+                    ctx->pending_queries[qid].client_addr.sin_family = 0; /* Clear entry */
+                    ctx->stats.passthrough_queries++;
+                }
+            }
         }
     }
 
@@ -166,6 +202,12 @@ dns64_ctx_t *dns64_init(fluxwan_config_t *config, int v4_map_fd, int v6_map_fd, 
     dns64_ctx_t *ctx = calloc(1, sizeof(dns64_ctx_t));
     if (!ctx) return NULL;
 
+    ctx->pending_queries = calloc(65536, sizeof(pending_dns_entry_t));
+    if (!ctx->pending_queries) {
+        free(ctx);
+        return NULL;
+    }
+
     ctx->config = config;
     ctx->v4_map_fd = v4_map_fd;
     ctx->v6_map_fd = v6_map_fd;
@@ -175,7 +217,8 @@ dns64_ctx_t *dns64_init(fluxwan_config_t *config, int v4_map_fd, int v6_map_fd, 
 
     ctx->server_fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (!IS_VALID_SOCK(ctx->server_fd)) {
-        LOG_WARN("Could not open DNS64 UDP socket (port 53 may require root)");
+        LOG_WARN("Could not open DNS UDP socket (port 53 may require root)");
+        free(ctx->pending_queries);
         free(ctx);
         return NULL;
     }
@@ -193,7 +236,7 @@ dns64_ctx_t *dns64_init(fluxwan_config_t *config, int v4_map_fd, int v6_map_fd, 
     bind_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
     if (bind(ctx->server_fd, (struct sockaddr *)&bind_addr, sizeof(bind_addr)) < 0) {
-        LOG_WARN("DNS64 could not bind to port 53: %s (will run in simulated mode)", strerror(errno));
+        LOG_WARN("DNS could not bind to port 53: %s (will run in simulated mode)", strerror(errno));
     }
 
     ctx->upstream_fd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -205,15 +248,13 @@ dns64_ctx_t *dns64_init(fluxwan_config_t *config, int v4_map_fd, int v6_map_fd, 
     memset(&ctx->upstream_addr, 0, sizeof(ctx->upstream_addr));
     ctx->upstream_addr.sin_family = AF_INET;
     ctx->upstream_addr.sin_port = htons(53);
-    ctx->upstream_addr.sin_addr.s_addr = inet_addr("1.1.1.1");
-
-    struct timeval tv = { .tv_sec = 0, .tv_usec = 500000 };
-#if defined(_WIN32) || defined(_WIN64)
-    DWORD timeout_ms = 500;
-    setsockopt(ctx->server_fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout_ms, sizeof(timeout_ms));
-#else
-    setsockopt(ctx->server_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-#endif
+    const char *target_dns = "1.1.1.1";
+    if (config->lan.dns.adblock_enabled) {
+        target_dns = "94.140.14.14";
+    } else if (config->lan.dns.primary_dns[0]) {
+        target_dns = config->lan.dns.primary_dns;
+    }
+    ctx->upstream_addr.sin_addr.s_addr = inet_addr(target_dns);
 
     pthread_create(&ctx->thread, NULL, dns64_worker, ctx);
     return ctx;
@@ -237,6 +278,9 @@ void dns64_destroy(dns64_ctx_t *ctx) {
         CLOSE_SOCK(ctx->upstream_fd);
     }
     pthread_join(ctx->thread, NULL);
+    if (ctx->pending_queries) {
+        free(ctx->pending_queries);
+    }
     free(ctx);
 }
 
