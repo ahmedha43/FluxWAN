@@ -7375,6 +7375,7 @@
                                         proxy_path: w.proxy_path || '/',
                                         proxy_transport: w.proxy_transport || 'ws',
                                         proxy_security: w.proxy_security || 'tls',
+                                        proxy_encryption: w.proxy_encryption || 'none',
                                         proxy_raw_uri: w.proxy_raw_uri || '',
                                         proxy_tun_dev: w.proxy_tun_dev || '',
                                         proxy_connected: !!w.proxy_connected,
@@ -7422,6 +7423,7 @@
                                             if (liveWan.proxy_path) w.proxy_path = liveWan.proxy_path;
                                             if (liveWan.proxy_transport) w.proxy_transport = liveWan.proxy_transport;
                                             if (liveWan.proxy_security) w.proxy_security = liveWan.proxy_security;
+                                            if (liveWan.proxy_encryption) w.proxy_encryption = liveWan.proxy_encryption;
                                             if (liveWan.proxy_raw_uri) w.proxy_raw_uri = liveWan.proxy_raw_uri;
                                         }
                                     }

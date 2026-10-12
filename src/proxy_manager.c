@@ -457,7 +457,13 @@ static bool check_binary_available(const char *name) {
 
 /* Returns true if the proxy configuration strictly requires Xray-core (e.g. ML-KEM post-quantum) */
 static bool is_xray_required(const wan_proxy_config_t *p) {
-    if (p && p->encryption[0] && strcmp(p->encryption, "none") != 0) {
+    if (!p) return false;
+    if (p->encryption[0] && strcmp(p->encryption, "none") != 0) {
+        return true;
+    }
+    if (strstr(p->raw_uri, "v2box://") != NULL ||
+        strstr(p->raw_uri, "mlkem") != NULL ||
+        strstr(p->raw_uri, "x25519plus") != NULL) {
         return true;
     }
     return false;
@@ -686,8 +692,26 @@ void proxy_manager_close(proxy_manager_ctx_t *ctx) {
 int proxy_manager_start_wan(proxy_manager_ctx_t *ctx, uint32_t wan_idx) {
     if (!ctx || !ctx->config || wan_idx >= ctx->config->wan_count) return -1;
     wan_config_t *wan = &ctx->config->wans[wan_idx];
-    if (wan->enabled && wan->proxy.enabled && !wan->proxy.server[0] && wan->proxy.raw_uri[0]) {
-        proxy_manager_parse_uri(wan->proxy.raw_uri, &wan->proxy);
+    /* If raw_uri is present, ensure all fields including post-quantum encryption are fully extracted */
+    if (wan->enabled && wan->proxy.enabled && wan->proxy.raw_uri[0]) {
+        wan_proxy_config_t tmp_proxy;
+        if (proxy_manager_parse_uri(wan->proxy.raw_uri, &tmp_proxy) == 0) {
+            if (tmp_proxy.encryption[0] && strcmp(tmp_proxy.encryption, "none") != 0) {
+                safe_str_copy(wan->proxy.encryption, tmp_proxy.encryption, sizeof(wan->proxy.encryption));
+            }
+            if (!wan->proxy.server[0]) {
+                safe_str_copy(wan->proxy.server, tmp_proxy.server, sizeof(wan->proxy.server));
+                wan->proxy.port = tmp_proxy.port;
+                safe_str_copy(wan->proxy.uuid, tmp_proxy.uuid, sizeof(wan->proxy.uuid));
+                safe_str_copy(wan->proxy.sni, tmp_proxy.sni, sizeof(wan->proxy.sni));
+                safe_str_copy(wan->proxy.host, tmp_proxy.host, sizeof(wan->proxy.host));
+                safe_str_copy(wan->proxy.path, tmp_proxy.path, sizeof(wan->proxy.path));
+                safe_str_copy(wan->proxy.transport, tmp_proxy.transport, sizeof(wan->proxy.transport));
+                safe_str_copy(wan->proxy.security, tmp_proxy.security, sizeof(wan->proxy.security));
+                safe_str_copy(wan->proxy.proto_str, tmp_proxy.proto_str, sizeof(wan->proxy.proto_str));
+                wan->proxy.proto = tmp_proxy.proto;
+            }
+        }
     }
     if (!wan->enabled || !wan->proxy.enabled || !wan->proxy.server[0]) {
         return proxy_manager_stop_wan(ctx, wan_idx);
