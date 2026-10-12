@@ -317,11 +317,29 @@ static int generate_proxy_config_file(const wan_config_t *wan, int wan_idx, char
         tun_name = tun_buf;
     }
 
+    /* Resolve server domain to IPv4 if needed to avoid DNS loops on Zero-Rating SIMs */
+    char resolved_server[128];
+    safe_str_copy(resolved_server, p->server, sizeof(resolved_server));
+    struct in_addr test_addr;
+    if (inet_pton(AF_INET, p->server, &test_addr) <= 0) {
+        struct hostent *he = gethostbyname(p->server);
+        if (he && he->h_addr_list && he->h_addr_list[0]) {
+            inet_ntop(AF_INET, he->h_addr_list[0], resolved_server, sizeof(resolved_server));
+            LOG_INFO("[Proxy] Resolved server domain '%s' -> IP '%s' for zero-rating offline robustness",
+                     p->server, resolved_server);
+        }
+    }
+
     uint32_t fwmark = 0x1000 + wan_idx;
 
     /* Build Sing-box Universal JSON Configuration */
     fprintf(f, "{\n");
     fprintf(f, "  \"log\": {\n    \"level\": \"warn\"\n  },\n");
+    fprintf(f, "  \"dns\": {\n");
+    fprintf(f, "    \"servers\": [\n");
+    fprintf(f, "      {\"tag\": \"local-dns\", \"address\": \"local\", \"detour\": \"direct\"}\n");
+    fprintf(f, "    ]\n");
+    fprintf(f, "  },\n");
     fprintf(f, "  \"inbounds\": [\n");
     fprintf(f, "    {\n");
     fprintf(f, "      \"type\": \"tun\",\n");
@@ -342,7 +360,7 @@ static int generate_proxy_config_file(const wan_config_t *wan, int wan_idx, char
     const char *proto_type = p->proto_str[0] ? p->proto_str : "vless";
     fprintf(f, "      \"type\": \"%s\",\n", proto_type);
     fprintf(f, "      \"tag\": \"proxy-out\",\n");
-    fprintf(f, "      \"server\": \"%s\",\n", p->server);
+    fprintf(f, "      \"server\": \"%s\",\n", resolved_server);
     fprintf(f, "      \"server_port\": %u,\n", p->port > 0 ? p->port : 443);
     fprintf(f, "      \"uuid\": \"%s\",\n", p->uuid);
 
@@ -381,6 +399,12 @@ static int generate_proxy_config_file(const wan_config_t *wan, int wan_idx, char
 
     /* STRICT PHYSICAL EGRESS PINNING:
      * Forces the proxy daemon to send outer encrypted packets ONLY through this physical WAN interface! */
+    fprintf(f, "      \"routing_mark\": %u,\n", fwmark);
+    fprintf(f, "      \"bind_interface\": \"%s\"\n", wan->name);
+    fprintf(f, "    },\n");
+    fprintf(f, "    {\n");
+    fprintf(f, "      \"type\": \"direct\",\n");
+    fprintf(f, "      \"tag\": \"direct\",\n");
     fprintf(f, "      \"routing_mark\": %u,\n", fwmark);
     fprintf(f, "      \"bind_interface\": \"%s\"\n", wan->name);
     fprintf(f, "    }\n");
@@ -565,29 +589,38 @@ int proxy_manager_test_tunnel(const wan_proxy_config_t *proxy, uint32_t *out_lat
     *out_latency_ms = 0;
 
 #if defined(__linux__)
-    /* Quick TCP connect test to proxy endpoint */
-    if (!proxy->server[0] || proxy->port == 0) return -1;
-
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
 
     int s = socket(AF_INET, SOCK_STREAM, 0);
     if (s < 0) return -1;
 
-#ifdef SO_BINDTODEVICE
-    if (proxy->bind_interface[0]) {
-        setsockopt(s, SOL_SOCKET, SO_BINDTODEVICE, proxy->bind_interface, strlen(proxy->bind_interface));
-    }
-#endif
-
-    struct hostent *he = gethostbyname(proxy->server);
-    if (!he) { close(s); return -1; }
-
     struct sockaddr_in saddr;
     memset(&saddr, 0, sizeof(saddr));
     saddr.sin_family = AF_INET;
-    saddr.sin_port = htons(proxy->port);
-    memcpy(&saddr.sin_addr, he->h_addr_list[0], sizeof(saddr.sin_addr));
+
+    /* If the TUN interface is active and proxy daemon is running,
+     * perform an end-to-end tunnel probe through the TUN interface. */
+    if (proxy->is_connected && proxy->tun_dev[0] != '\0') {
+#ifdef SO_BINDTODEVICE
+        setsockopt(s, SOL_SOCKET, SO_BINDTODEVICE, proxy->tun_dev, strlen(proxy->tun_dev));
+#endif
+        saddr.sin_port = htons(80);
+        inet_pton(AF_INET, "1.0.0.1", &saddr.sin_addr);
+    } else {
+        if (!proxy->server[0] || proxy->port == 0) { close(s); return -1; }
+#ifdef SO_BINDTODEVICE
+        if (proxy->bind_interface[0]) {
+            setsockopt(s, SOL_SOCKET, SO_BINDTODEVICE, proxy->bind_interface, strlen(proxy->bind_interface));
+        }
+#endif
+        if (inet_pton(AF_INET, proxy->server, &saddr.sin_addr) <= 0) {
+            struct hostent *he = gethostbyname(proxy->server);
+            if (!he || !he->h_addr_list[0]) { close(s); return -1; }
+            memcpy(&saddr.sin_addr, he->h_addr_list[0], sizeof(saddr.sin_addr));
+        }
+        saddr.sin_port = htons(proxy->port);
+    }
 
     /* Non-blocking connect with strict 1.5s timeout to prevent thread stalling */
     int flags = fcntl(s, F_GETFL, 0);
