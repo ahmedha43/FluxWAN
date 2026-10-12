@@ -580,10 +580,29 @@ typedef struct {
     uint32_t network_count;
 } zerotier_config_t;
 
+/* Tailscale Node Configuration */
+typedef struct {
+    bool enabled;                   /* Master Tailscale toggle */
+    char auth_key[128];             /* Reusable or one-off Auth Key (tskey-auth-...) */
+    char hostname[64];              /* Node hostname, e.g. "FluxWAN" */
+    char login_server[128];         /* Coordination server (e.g. Headscale URL or empty for official) */
+    char advertise_routes[128];     /* Subnet routing, e.g. "192.168.90.0/24" */
+    bool accept_routes;             /* Accept subnet routes advertised by other nodes */
+    bool is_exit_node;              /* Advertise router as an Exit Node */
+    bool allow_remote_mgmt;         /* Permit Web Dashboard (8080/80) & SSH (22) from tailscale0 */
+    /* Real-time status / telemetry */
+    char status[32];                /* "Running", "NeedsLogin", "Stopped", "Starting", etc. */
+    char ipv4[32];                  /* Assigned Tailscale IPv4, e.g. "100.85.12.34" */
+    char ipv6[64];                  /* Assigned Tailscale IPv6 */
+    char magic_dns_name[128];       /* FQDN, e.g. "fluxwan.tailnet.ts.net" */
+    char login_url[256];            /* Interactive web authentication URL if no auth key provided */
+} tailscale_config_t;
+
 /* Combined VPN & Remote Management Configuration */
 typedef struct {
     wireguard_config_t wireguard;
     zerotier_config_t zerotier;
+    tailscale_config_t tailscale;
 } vpn_config_t;
 
 /* Global App Configuration Structure */

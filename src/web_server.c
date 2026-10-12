@@ -5407,6 +5407,117 @@ static int web_server_process_client_impl(web_server_ctx_t *ctx, socket_t client
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
             strlen(rb), rb);
         send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "POST /api/v1/vpn/tailscale/toggle") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        bool enable = true;
+        if (body) {
+            body += 4;
+            enable = extract_json_bool(body, "enabled", true);
+        }
+        ctx->config->vpn.tailscale.enabled = enable;
+        if (enable) {
+            vpn_manager_apply_tailscale(&ctx->config->vpn.tailscale);
+        } else {
+            vpn_manager_tailscale_down(&ctx->config->vpn.tailscale);
+        }
+        config_save(get_config_target_path(ctx), ctx->config);
+        wan_manager_add_log("INFO", "Tailscale VPN %s via Web UI", enable ? "ENABLED" : "DISABLED");
+
+        char resp_body[256];
+        snprintf(resp_body, sizeof(resp_body), "{\"status\":\"ok\",\"enabled\":%s,\"message\":\"Tailscale state updated\"}", enable ? "true" : "false");
+        char resp[512];
+        int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(resp_body), resp_body);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "POST /api/v1/vpn/tailscale/up") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        tailscale_config_t *ts = &ctx->config->vpn.tailscale;
+        char auth_key[128] = {0}, hostname[64] = {0}, login_server[128] = {0}, adv_routes[128] = {0};
+        bool accept_routes = ts->accept_routes;
+        bool is_exit_node = ts->is_exit_node;
+
+        if (body) {
+            body += 4;
+            extract_json_string(body, "auth_key", auth_key, sizeof(auth_key));
+            extract_json_string(body, "hostname", hostname, sizeof(hostname));
+            extract_json_string(body, "login_server", login_server, sizeof(login_server));
+            extract_json_string(body, "advertise_routes", adv_routes, sizeof(adv_routes));
+            accept_routes = extract_json_bool(body, "accept_routes", ts->accept_routes);
+            is_exit_node = extract_json_bool(body, "is_exit_node", ts->is_exit_node);
+            ts->allow_remote_mgmt = extract_json_bool(body, "allow_remote_mgmt", ts->allow_remote_mgmt);
+        }
+
+        vpn_manager_tailscale_up(ts, auth_key, hostname, login_server, adv_routes, accept_routes, is_exit_node);
+        config_save(get_config_target_path(ctx), ctx->config);
+
+        char resp_body[512];
+        snprintf(resp_body, sizeof(resp_body),
+            "{\"status\":\"ok\",\"message\":\"Tailscale connected\",\"node_status\":\"%s\",\"ipv4\":\"%s\",\"login_url\":\"%s\"}",
+            ts->status, ts->ipv4, ts->login_url);
+        char resp[1024];
+        int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(resp_body), resp_body);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "POST /api/v1/vpn/tailscale/down") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        vpn_manager_tailscale_down(&ctx->config->vpn.tailscale);
+        config_save(get_config_target_path(ctx), ctx->config);
+        const char *rb = "{\"status\":\"ok\",\"message\":\"Tailscale disconnected successfully\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+    } else if (strstr(req, "POST /api/v1/vpn/tailscale/config") != NULL) {
+        if (!is_request_authorized(ctx->config, req)) {
+            const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";
+            char resp[256]; int len = snprintf(resp, sizeof(resp),
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                strlen(rb), rb);
+            send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
+        }
+        const char *body = strstr(req, "\r\n\r\n");
+        tailscale_config_t *ts = &ctx->config->vpn.tailscale;
+        if (body) {
+            body += 4;
+            char sval[128];
+            if (extract_json_string(body, "auth_key", sval, sizeof(sval))) safe_str_copy(ts->auth_key, sval, sizeof(ts->auth_key));
+            if (extract_json_string(body, "hostname", sval, sizeof(sval))) safe_str_copy(ts->hostname, sval, sizeof(ts->hostname));
+            if (extract_json_string(body, "login_server", sval, sizeof(sval))) safe_str_copy(ts->login_server, sval, sizeof(ts->login_server));
+            if (extract_json_string(body, "advertise_routes", sval, sizeof(sval))) safe_str_copy(ts->advertise_routes, sval, sizeof(ts->advertise_routes));
+            ts->accept_routes = extract_json_bool(body, "accept_routes", ts->accept_routes);
+            ts->is_exit_node = extract_json_bool(body, "is_exit_node", ts->is_exit_node);
+            ts->allow_remote_mgmt = extract_json_bool(body, "allow_remote_mgmt", ts->allow_remote_mgmt);
+            vpn_manager_apply_tailscale(ts);
+            config_save(get_config_target_path(ctx), ctx->config);
+            wan_manager_add_log("INFO", "Tailscale configuration updated");
+        }
+        const char *rb = "{\"status\":\"ok\",\"message\":\"Tailscale settings saved successfully\"}";
+        char resp[256]; int len = snprintf(resp, sizeof(resp),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(rb), rb);
+        send(client_fd, resp, len, 0); close_client_socket(client_fd); return 0;
     } else if (strstr(req, "GET /api/v1/broadband/export.csv") != NULL) {
         if (!is_request_authorized(ctx->config, req)) {
             const char *rb = "{\"status\":\"error\",\"message\":\"Unauthorized\"}";

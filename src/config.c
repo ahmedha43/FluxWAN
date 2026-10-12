@@ -999,6 +999,11 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
     vpn->zerotier.enabled = false;
     vpn->zerotier.allow_remote_mgmt = true;
     vpn->zerotier.network_count = 0;
+    vpn->tailscale.enabled = false;
+    safe_str_copy(vpn->tailscale.hostname, "FluxWAN", sizeof(vpn->tailscale.hostname));
+    vpn->tailscale.allow_remote_mgmt = true;
+    vpn->tailscale.accept_routes = false;
+    vpn->tailscale.is_exit_node = false;
 
     const char *vpn_pos = strstr(json, "\"vpn\"");
     if (vpn_pos) {
@@ -1136,6 +1141,34 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
                             }
 
                             free(zt_str);
+                        }
+                    }
+                }
+
+                /* Parse Tailscale */
+                const char *ts_pos = strstr(vpn_str, "\"tailscale\"");
+                if (ts_pos) {
+                    const char *ts_start = strchr(ts_pos, '{');
+                    const char *ts_end = find_matching_brace(ts_start);
+                    if (ts_start && ts_end) {
+                        size_t ts_len = ts_end - ts_start + 1;
+                        char *ts_str = malloc(ts_len + 1);
+                        if (ts_str) {
+                            strncpy(ts_str, ts_start, ts_len);
+                            ts_str[ts_len] = '\0';
+
+                            vpn->tailscale.enabled = extract_json_bool(ts_str, "enabled", false);
+                            vpn->tailscale.allow_remote_mgmt = extract_json_bool(ts_str, "allow_remote_mgmt", true);
+                            vpn->tailscale.accept_routes = extract_json_bool(ts_str, "accept_routes", false);
+                            vpn->tailscale.is_exit_node = extract_json_bool(ts_str, "is_exit_node", false);
+
+                            char sval[128];
+                            if (extract_json_string(ts_str, "auth_key", sval, sizeof(sval))) safe_str_copy(vpn->tailscale.auth_key, sval, sizeof(vpn->tailscale.auth_key));
+                            if (extract_json_string(ts_str, "hostname", sval, sizeof(sval))) safe_str_copy(vpn->tailscale.hostname, sval, sizeof(vpn->tailscale.hostname));
+                            if (extract_json_string(ts_str, "login_server", sval, sizeof(sval))) safe_str_copy(vpn->tailscale.login_server, sval, sizeof(vpn->tailscale.login_server));
+                            if (extract_json_string(ts_str, "advertise_routes", sval, sizeof(sval))) safe_str_copy(vpn->tailscale.advertise_routes, sval, sizeof(vpn->tailscale.advertise_routes));
+
+                            free(ts_str);
                         }
                     }
                 }
@@ -1728,6 +1761,16 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
         fprintf(f, "        }%s\n", (n == config->vpn.zerotier.network_count - 1) ? "" : ",");
     }
     fprintf(f, "      ]\n");
+    fprintf(f, "    },\n");
+    fprintf(f, "    \"tailscale\": {\n");
+    fprintf(f, "      \"enabled\": %s,\n", config->vpn.tailscale.enabled ? "true" : "false");
+    fprintf(f, "      \"auth_key\": \"%s\",\n", config->vpn.tailscale.auth_key);
+    fprintf(f, "      \"hostname\": \"%s\",\n", config->vpn.tailscale.hostname[0] ? config->vpn.tailscale.hostname : "FluxWAN");
+    fprintf(f, "      \"login_server\": \"%s\",\n", config->vpn.tailscale.login_server);
+    fprintf(f, "      \"advertise_routes\": \"%s\",\n", config->vpn.tailscale.advertise_routes);
+    fprintf(f, "      \"accept_routes\": %s,\n", config->vpn.tailscale.accept_routes ? "true" : "false");
+    fprintf(f, "      \"is_exit_node\": %s,\n", config->vpn.tailscale.is_exit_node ? "true" : "false");
+    fprintf(f, "      \"allow_remote_mgmt\": %s\n", config->vpn.tailscale.allow_remote_mgmt ? "true" : "false");
     fprintf(f, "    }\n");
     fprintf(f, "  }");
 
@@ -2202,6 +2245,12 @@ int config_reset_to_defaults(fluxwan_config_t *out_config) {
     v_def->zerotier.enabled = false;
     v_def->zerotier.allow_remote_mgmt = true;
     v_def->zerotier.network_count = 0;
+
+    v_def->tailscale.enabled = false;
+    safe_str_copy(v_def->tailscale.hostname, "FluxWAN", sizeof(v_def->tailscale.hostname));
+    v_def->tailscale.allow_remote_mgmt = true;
+    v_def->tailscale.accept_routes = false;
+    v_def->tailscale.is_exit_node = false;
 
     return 0;
 }

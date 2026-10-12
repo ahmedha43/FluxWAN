@@ -37,6 +37,14 @@ int vpn_manager_zt_join(zerotier_config_t *zt, const char *nwid, const char *nam
 int vpn_manager_zt_leave(zerotier_config_t *zt, const char *nwid);
 int vpn_manager_zt_refresh_node_id(zerotier_config_t *zt);
 
+/* Tailscale operations */
+int vpn_manager_apply_tailscale(tailscale_config_t *ts);
+int vpn_manager_tailscale_up(tailscale_config_t *ts, const char *auth_key, const char *hostname,
+                             const char *login_server, const char *adv_routes,
+                             bool accept_routes, bool is_exit_node);
+int vpn_manager_tailscale_down(tailscale_config_t *ts);
+int vpn_manager_tailscale_sync_status(tailscale_config_t *ts);
+
 /* Real-time status sync & JSON telemetry */
 int vpn_manager_sync_status(vpn_config_t *vpn);
 int vpn_manager_build_json_status(const vpn_config_t *vpn, char *out_json, size_t max_len);

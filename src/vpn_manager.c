@@ -110,6 +110,7 @@ int vpn_manager_init(vpn_config_t *vpn) {
 #if defined(__linux__)
     safe_system("mkdir -p /etc/wireguard");
     safe_system("mkdir -p /var/lib/zerotier-one");
+    safe_system("mkdir -p /var/lib/tailscale /run/tailscale");
 #endif
 
     /* Check if WireGuard keys need initialization or repair invalid keys */
@@ -138,6 +139,12 @@ int vpn_manager_init(vpn_config_t *vpn) {
 
     /* Refresh ZeroTier Node ID */
     vpn_manager_zt_refresh_node_id(&vpn->zerotier);
+
+    /* Initialize Tailscale defaults and status */
+    if (vpn->tailscale.hostname[0] == '\0') {
+        safe_str_copy(vpn->tailscale.hostname, "FluxWAN", sizeof(vpn->tailscale.hostname));
+    }
+    vpn_manager_tailscale_sync_status(&vpn->tailscale);
 
     return 0;
 }
@@ -553,9 +560,224 @@ int vpn_manager_zt_leave(zerotier_config_t *zt, const char *nwid) {
     return 0;
 }
 
-#if defined(__linux__)
+static bool json_get_str(const char *json, const char *key, char *out, size_t max_len) {
+    if (!json || !key || !out || max_len == 0) return false;
+    out[0] = '\0';
+    char pattern[128];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char *p = strstr(json, pattern);
+    if (!p) return false;
+    p += strlen(pattern);
+    while (*p && (*p == ' ' || *p == ':' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
+    if (*p == '"') {
+        p++;
+        const char *end = strchr(p, '"');
+        if (!end) return false;
+        size_t len = (size_t)(end - p);
+        if (len >= max_len) len = max_len - 1;
+        memcpy(out, p, len);
+        out[len] = '\0';
+        return true;
+    }
+    return false;
+}
 
+int vpn_manager_tailscale_sync_status(tailscale_config_t *ts) {
+    if (!ts) return -1;
+#if defined(__linux__)
+    if (system("pgrep tailscaled >/dev/null 2>&1") != 0) {
+        if (ts->enabled) {
+            safe_str_copy(ts->status, "Starting", sizeof(ts->status));
+        } else {
+            safe_str_copy(ts->status, "Stopped", sizeof(ts->status));
+        }
+        return 0;
+    }
+
+    /* Fast fetch IPv4 via `tailscale ip -4` */
+    FILE *fp = popen("tailscale --socket=/run/tailscale/tailscaled.sock ip -4 2>/dev/null", "r");
+    if (fp) {
+        char ip_buf[64] = {0};
+        if (fgets(ip_buf, sizeof(ip_buf), fp)) {
+            char *nl = strchr(ip_buf, '\n'); if (nl) *nl = '\0';
+            nl = strchr(ip_buf, '\r'); if (nl) *nl = '\0';
+            while (strlen(ip_buf) > 0 && isspace((unsigned char)ip_buf[strlen(ip_buf) - 1])) {
+                ip_buf[strlen(ip_buf) - 1] = '\0';
+            }
+            if (ip_buf[0] >= '0' && ip_buf[0] <= '9') {
+                safe_str_copy(ts->ipv4, ip_buf, sizeof(ts->ipv4));
+            }
+        }
+        pclose(fp);
+    }
+
+    /* Fetch detailed JSON status via `tailscale status --json` */
+    fp = popen("tailscale --socket=/run/tailscale/tailscaled.sock status --json 2>/dev/null", "r");
+    if (fp) {
+        char json_buf[4096] = {0};
+        size_t rd = fread(json_buf, 1, sizeof(json_buf) - 1, fp);
+        pclose(fp);
+        if (rd > 0) {
+            json_buf[rd] = '\0';
+
+            char state[64] = {0};
+            if (json_get_str(json_buf, "BackendState", state, sizeof(state)) && state[0]) {
+                safe_str_copy(ts->status, state, sizeof(ts->status));
+            }
+
+            char auth_url[256] = {0};
+            if (json_get_str(json_buf, "AuthURL", auth_url, sizeof(auth_url)) && auth_url[0]) {
+                safe_str_copy(ts->login_url, auth_url, sizeof(ts->login_url));
+            } else if (strcmp(ts->status, "Running") == 0) {
+                ts->login_url[0] = '\0';
+            }
+
+            const char *self_pos = strstr(json_buf, "\"Self\"");
+            if (self_pos) {
+                char dns[128] = {0};
+                if (json_get_str(self_pos, "DNSName", dns, sizeof(dns)) && dns[0]) {
+                    size_t dlen = strlen(dns);
+                    if (dlen > 0 && dns[dlen - 1] == '.') dns[dlen - 1] = '\0';
+                    safe_str_copy(ts->magic_dns_name, dns, sizeof(ts->magic_dns_name));
+                }
+            }
+        }
+    }
 #endif
+    return 0;
+}
+
+int vpn_manager_apply_tailscale(tailscale_config_t *ts) {
+    if (!ts) return -1;
+#if defined(__linux__)
+    if (!ts->enabled) {
+        safe_system("tailscale --socket=/run/tailscale/tailscaled.sock down 2>/dev/null; "
+                    "killall tailscaled 2>/dev/null || rc-service tailscale stop 2>/dev/null || true");
+        safe_str_copy(ts->status, "Stopped", sizeof(ts->status));
+        return 0;
+    }
+
+    /* Auto-install tailscale package in background if missing on host (never block web reactor) */
+    if (system("which tailscaled >/dev/null 2>&1") != 0 && system("which tailscale >/dev/null 2>&1") != 0) {
+        LOG_WARN("[Tailscale] tailscale daemon not detected on host.");
+        wan_manager_add_log("WARN", "Tailscale daemon not installed. Triggering non-blocking background installer.");
+        safe_system("(apk add tailscale 2>/dev/null || apk add --allow-untrusted tailscale 2>/dev/null) >/dev/null 2>&1 &");
+        safe_str_copy(ts->status, "Installing", sizeof(ts->status));
+        return -1;
+    }
+
+    /* Ensure tailscaled is actively running */
+    safe_system("mkdir -p /var/lib/tailscale /run/tailscale 2>/dev/null");
+    if (system("pgrep tailscaled >/dev/null 2>&1") != 0) {
+        safe_system("systemctl enable --now tailscale 2>/dev/null || rc-service tailscale start 2>/dev/null || "
+                    "(nohup tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/run/tailscale/tailscaled.sock --port=41641 </dev/null >/var/log/tailscaled.log 2>&1 &)");
+        for (int retry = 0; retry < 3; retry++) {
+            usleep(200000);
+            if (access("/run/tailscale/tailscaled.sock", F_OK) == 0) break;
+        }
+    }
+
+    /* Configure firewall rules for Tailscale virtual interfaces */
+    if (ts->allow_remote_mgmt) {
+        safe_system("iptables -C INPUT -i tailscale+ -p tcp --dport 8080 -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -i tailscale+ -p tcp --dport 8080 -j ACCEPT");
+        safe_system("iptables -C INPUT -i tailscale+ -p tcp --dport 80 -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -i tailscale+ -p tcp --dport 80 -j ACCEPT");
+        safe_system("iptables -C INPUT -i tailscale+ -p tcp --dport 22 -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -i tailscale+ -p tcp --dport 22 -j ACCEPT");
+        safe_system("iptables -C INPUT -i tailscale+ -p icmp -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -i tailscale+ -p icmp -j ACCEPT");
+        safe_system("iptables -C FLUXWAN_WAN_SHIELD -i tailscale+ -j ACCEPT 2>/dev/null || iptables -I FLUXWAN_WAN_SHIELD 1 -i tailscale+ -j ACCEPT");
+    }
+
+    safe_system("iptables -C FORWARD -i tailscale+ -j ACCEPT 2>/dev/null || iptables -A FORWARD -i tailscale+ -j ACCEPT");
+    safe_system("iptables -C FORWARD -o tailscale+ -j ACCEPT 2>/dev/null || iptables -A FORWARD -o tailscale+ -j ACCEPT");
+
+    vpn_manager_tailscale_sync_status(ts);
+#endif
+    return 0;
+}
+
+int vpn_manager_tailscale_up(tailscale_config_t *ts, const char *auth_key, const char *hostname,
+                             const char *login_server, const char *adv_routes,
+                             bool accept_routes, bool is_exit_node) {
+    if (!ts) return -1;
+
+    ts->enabled = true;
+    if (auth_key && auth_key[0]) safe_str_copy(ts->auth_key, auth_key, sizeof(ts->auth_key));
+    if (hostname && hostname[0]) safe_str_copy(ts->hostname, hostname, sizeof(ts->hostname));
+    if (login_server && login_server[0]) safe_str_copy(ts->login_server, login_server, sizeof(ts->login_server));
+    if (adv_routes && adv_routes[0]) safe_str_copy(ts->advertise_routes, adv_routes, sizeof(ts->advertise_routes));
+    ts->accept_routes = accept_routes;
+    ts->is_exit_node = is_exit_node;
+
+#if defined(__linux__)
+    vpn_manager_apply_tailscale(ts);
+
+    /* Build tailscale up command */
+    char cmd[1024];
+    size_t off = 0;
+    off += snprintf(cmd + off, sizeof(cmd) - off, "tailscale --socket=/run/tailscale/tailscaled.sock up --reset");
+
+    if (ts->auth_key[0]) {
+        off += snprintf(cmd + off, sizeof(cmd) - off, " --authkey='%s'", ts->auth_key);
+    }
+    if (ts->hostname[0]) {
+        off += snprintf(cmd + off, sizeof(cmd) - off, " --hostname='%s'", ts->hostname);
+    }
+    if (ts->login_server[0]) {
+        off += snprintf(cmd + off, sizeof(cmd) - off, " --login-server='%s'", ts->login_server);
+    }
+    if (ts->advertise_routes[0]) {
+        off += snprintf(cmd + off, sizeof(cmd) - off, " --advertise-routes='%s'", ts->advertise_routes);
+    }
+    if (ts->accept_routes) {
+        off += snprintf(cmd + off, sizeof(cmd) - off, " --accept-routes=true");
+    } else {
+        off += snprintf(cmd + off, sizeof(cmd) - off, " --accept-routes=false");
+    }
+    if (ts->is_exit_node) {
+        off += snprintf(cmd + off, sizeof(cmd) - off, " --advertise-exit-node");
+    }
+
+    off += snprintf(cmd + off, sizeof(cmd) - off, " 2>&1");
+
+    LOG_INFO("[Tailscale] Executing tailscale up...");
+    FILE *fp = popen(cmd, "r");
+    if (fp) {
+        char line[512];
+        while (fgets(line, sizeof(line), fp)) {
+            char *nl = strchr(line, '\n'); if (nl) *nl = '\0';
+            nl = strchr(line, '\r'); if (nl) *nl = '\0';
+            char *url_pos = strstr(line, "https://");
+            if (url_pos) {
+                char *end = url_pos;
+                while (*end && !isspace((unsigned char)*end)) end++;
+                char saved = *end;
+                *end = '\0';
+                safe_str_copy(ts->login_url, url_pos, sizeof(ts->login_url));
+                safe_str_copy(ts->status, "NeedsLogin", sizeof(ts->status));
+                *end = saved;
+            }
+        }
+        pclose(fp);
+    }
+
+    vpn_manager_tailscale_sync_status(ts);
+    wan_manager_add_log("INFO", "Tailscale up executed. Status: %s, IP: %s", ts->status, ts->ipv4[0] ? ts->ipv4 : "Pending");
+#endif
+    return 0;
+}
+
+int vpn_manager_tailscale_down(tailscale_config_t *ts) {
+    if (!ts) return -1;
+    ts->enabled = false;
+#if defined(__linux__)
+    safe_system("tailscale --socket=/run/tailscale/tailscaled.sock down 2>/dev/null");
+#endif
+    safe_str_copy(ts->status, "Stopped", sizeof(ts->status));
+    ts->ipv4[0] = '\0';
+    ts->ipv6[0] = '\0';
+    ts->login_url[0] = '\0';
+    wan_manager_add_log("INFO", "Tailscale disconnected");
+    return 0;
+}
 
 int vpn_manager_sync_status(vpn_config_t *vpn) {
     if (!vpn) return -1;
@@ -666,6 +888,9 @@ int vpn_manager_sync_status(vpn_config_t *vpn) {
     }
 #endif
 
+    /* 3. Tailscale Telemetry Sync */
+    vpn_manager_tailscale_sync_status(&vpn->tailscale);
+
     return 0;
 }
 
@@ -673,6 +898,7 @@ int vpn_manager_apply(const vpn_config_t *vpn) {
     if (!vpn) return -1;
     vpn_manager_apply_wireguard(&vpn->wireguard);
     vpn_manager_apply_zerotier(&vpn->zerotier);
+    vpn_manager_apply_tailscale((tailscale_config_t *)&vpn->tailscale);
     return 0;
 }
 
@@ -778,8 +1004,34 @@ int vpn_manager_build_json_status(const vpn_config_t *vpn, char *out_json, size_
 
     w = snprintf(out_json + off, max_len - off,
         "    ]\n"
+        "  },\n"
+        "  \"tailscale\": {\n"
+        "    \"enabled\": %s,\n"
+        "    \"status\": \"%s\",\n"
+        "    \"ipv4\": \"%s\",\n"
+        "    \"ipv6\": \"%s\",\n"
+        "    \"magic_dns_name\": \"%s\",\n"
+        "    \"login_url\": \"%s\",\n"
+        "    \"hostname\": \"%s\",\n"
+        "    \"login_server\": \"%s\",\n"
+        "    \"advertise_routes\": \"%s\",\n"
+        "    \"accept_routes\": %s,\n"
+        "    \"is_exit_node\": %s,\n"
+        "    \"allow_remote_mgmt\": %s\n"
         "  }\n"
-        "}\n"
+        "}\n",
+        vpn->tailscale.enabled ? "true" : "false",
+        vpn->tailscale.status[0] ? vpn->tailscale.status : (vpn->tailscale.enabled ? "Starting" : "Stopped"),
+        vpn->tailscale.ipv4,
+        vpn->tailscale.ipv6,
+        vpn->tailscale.magic_dns_name,
+        vpn->tailscale.login_url,
+        vpn->tailscale.hostname,
+        vpn->tailscale.login_server,
+        vpn->tailscale.advertise_routes,
+        vpn->tailscale.accept_routes ? "true" : "false",
+        vpn->tailscale.is_exit_node ? "true" : "false",
+        vpn->tailscale.allow_remote_mgmt ? "true" : "false"
     );
     if (w < 0 || (size_t)w >= max_len - off) return -1;
     off += (size_t)w;

@@ -968,11 +968,13 @@ int net_apply_wan_shield(const fluxwan_config_t *config) {
         safe_system(lan_cmd);
     }
 
-    /* 2.2b. Allow VPN Tunnels (WireGuard wg+ and ZeroTier zt+) for Web UI, SSH & Management */
+    /* 2.2b. Allow VPN Tunnels (WireGuard wg+, ZeroTier zt+, and Tailscale tailscale+) for Web UI, SSH & Management */
     safe_system("iptables -A FLUXWAN_WAN_SHIELD -i wg+ -j ACCEPT 2>/dev/null || "
                 "iptables-legacy -A FLUXWAN_WAN_SHIELD -i wg+ -j ACCEPT 2>/dev/null || true");
     safe_system("iptables -A FLUXWAN_WAN_SHIELD -i zt+ -j ACCEPT 2>/dev/null || "
                 "iptables-legacy -A FLUXWAN_WAN_SHIELD -i zt+ -j ACCEPT 2>/dev/null || true");
+    safe_system("iptables -A FLUXWAN_WAN_SHIELD -i tailscale+ -j ACCEPT 2>/dev/null || "
+                "iptables-legacy -A FLUXWAN_WAN_SHIELD -i tailscale+ -j ACCEPT 2>/dev/null || true");
 
     /* 2.3. If Broadband PPPoE Server is active, allow authenticated LAN PPPoE client subnets */
     if (config->pppoe_server.enabled && config->pppoe_server.local_ip[0]) {
