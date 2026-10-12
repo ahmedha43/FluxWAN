@@ -1,9 +1,12 @@
 {
-  "latest_version": "1.5.5",
+  "latest_version": "1.5.6",
   "channel": "stable",
-  "release_date": "2026-10-11",
+  "release_date": "2026-10-12",
   "min_compatible_version": "1.2.0",
   "changelog": [
+    "Multi-Threaded Web Server Architecture: Client HTTP requests are now dispatched across concurrent detached worker threads with per-request buffers, completely eliminating browser API timeouts and UI freezes under heavy load",
+    "Non-Blocking ZeroTier Subsystem: Converted background installer and daemon initialization to non-blocking tasks with strict 4s timeouts, preventing web server stalling when WAN is down",
+    "Embedded C++ Runtime Libraries: Packaged libstdc++ and libgcc_s into appliance rootfs and ISO repository, enabling immediate ZeroTier execution without manual apk installation",
     "Fix BusyBox Init Inittab Boot Error (/dev/flx): Removed invalid flx::respawn device directive from inittab and cleanly detached the 24/7 supervisor into rcS, eliminating the infinite terminal crash loop and restoring clean console menu boot on Mini PCs and bare-metal appliances",
     "Dedicated Asynchronous Proxy Supervisor Worker Thread: Completely decoupled proxy process supervision and TCP/DNS health testing from the main router reactor loop, eliminating all userspace queuing delays and stabilizing ping across all physical WAN interfaces (eth1, eth2, eth3)",
     "Native gVisor Stack & Sing-Box 1.11+ Address Compatibility: Upgraded inbounds to unified 'address': ['198.18.X.1/24'] and 'stack': 'gvisor', eliminating Go netpoller CPU spinning and startup crash loops",
@@ -86,7 +89,7 @@
   "packages": {
     "core": {
       "url": "https://raw.githubusercontent.com/ahmedha43/FluxWAN/main/dist/fluxwan",
-      "sha256": "48aa19b6e3cd3bb91aaa228dd818db9aa6588236301176c47e83bed3a8cefb2f",
+      "sha256": "db71f65a39ceb1434a38774cff1e46b49ca8ad43313d8454b359b6ad2f5a64dc",
       "size_bytes": 523728
     },
     "full_iso": {
