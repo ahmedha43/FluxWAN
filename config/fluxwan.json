@@ -32,6 +32,12 @@
     "password": "admin",
     "session_token": "flux_token_abc123"
   },
+  "stealth": {
+    "enabled": true,
+    "ttl_value": 65,
+    "cloak_traceroute": true,
+    "block_wan_probes": true
+  },
   "pppoe_server": {
     "enabled": false,
     "lan_mode": "dual",

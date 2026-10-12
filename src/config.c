@@ -735,12 +735,12 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
     const char *stealth_pos = strstr(json, "\"stealth\"");
     if (stealth_pos) {
         out_config->stealth.enabled = extract_json_bool(stealth_pos, "enabled", true);
-        out_config->stealth.ttl_value = (uint8_t)extract_json_int(stealth_pos, "ttl_value", 64);
+        out_config->stealth.ttl_value = (uint8_t)extract_json_int(stealth_pos, "ttl_value", 65);
         out_config->stealth.cloak_traceroute = extract_json_bool(stealth_pos, "cloak_traceroute", true);
         out_config->stealth.block_wan_probes = extract_json_bool(stealth_pos, "block_wan_probes", true);
     } else {
         out_config->stealth.enabled = true;
-        out_config->stealth.ttl_value = 64;
+        out_config->stealth.ttl_value = 65;
         out_config->stealth.cloak_traceroute = true;
         out_config->stealth.block_wan_probes = true;
     }
@@ -1611,7 +1611,7 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
     /* Serialize Carrier Stealth Shield */
     fprintf(f, "  \"stealth\": {\n");
     fprintf(f, "    \"enabled\": %s,\n", config->stealth.enabled ? "true" : "false");
-    fprintf(f, "    \"ttl_value\": %u,\n", config->stealth.ttl_value > 0 ? config->stealth.ttl_value : 64);
+    fprintf(f, "    \"ttl_value\": %u,\n", config->stealth.ttl_value > 0 ? config->stealth.ttl_value : 65);
     fprintf(f, "    \"cloak_traceroute\": %s,\n", config->stealth.cloak_traceroute ? "true" : "false");
     fprintf(f, "    \"block_wan_probes\": %s\n", config->stealth.block_wan_probes ? "true" : "false");
     fprintf(f, "  },\n");
@@ -2123,7 +2123,7 @@ int config_reset_to_defaults(fluxwan_config_t *out_config) {
 
     /* Stealth Defaults */
     out_config->stealth.enabled = true;
-    out_config->stealth.ttl_value = 64;
+    out_config->stealth.ttl_value = 65;
     out_config->stealth.cloak_traceroute = true;
     out_config->stealth.block_wan_probes = true;
 
