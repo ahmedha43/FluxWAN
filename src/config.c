@@ -690,28 +690,28 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
     /* Parse Application-Based Smart Steering block */
     const char *as_pos = strstr(json, "\"app_steering\"");
     if (as_pos) {
-        out_config->app_steering.gaming_steering_enabled = extract_json_bool(as_pos, "gaming_steering_enabled", true);
-        out_config->app_steering.voip_steering_enabled = extract_json_bool(as_pos, "voip_steering_enabled", true);
+        out_config->app_steering.gaming_steering_enabled = extract_json_bool(as_pos, "gaming_steering_enabled", false);
+        out_config->app_steering.voip_steering_enabled = extract_json_bool(as_pos, "voip_steering_enabled", false);
         out_config->app_steering.bulk_balancing_enabled = extract_json_bool(as_pos, "bulk_balancing_enabled", true);
         out_config->app_steering.primary_gaming_wan_id = (uint32_t)extract_json_int(as_pos, "primary_gaming_wan_id", 0);
         out_config->app_steering.primary_voip_wan_id = (uint32_t)extract_json_int(as_pos, "primary_voip_wan_id", 0);
     } else {
-        out_config->app_steering.gaming_steering_enabled = true;
-        out_config->app_steering.voip_steering_enabled = true;
+        out_config->app_steering.gaming_steering_enabled = false;
+        out_config->app_steering.voip_steering_enabled = false;
         out_config->app_steering.bulk_balancing_enabled = true;
     }
 
     /* Parse L7 Deep Packet Inspection (DPI) block */
     const char *dpi_pos = strstr(json, "\"dpi\"");
     if (dpi_pos) {
-        out_config->dpi.enabled = extract_json_bool(dpi_pos, "enabled", true);
+        out_config->dpi.enabled = extract_json_bool(dpi_pos, "enabled", false);
         out_config->dpi.p2p_throttle_enabled = extract_json_bool(dpi_pos, "p2p_throttle_enabled", false);
         out_config->dpi.p2p_throttle_rate_kbps = (uint32_t)extract_json_int(dpi_pos, "p2p_throttle_rate_kbps", 512);
         out_config->dpi.voip_priority_enabled = extract_json_bool(dpi_pos, "voip_priority_enabled", true);
         out_config->dpi.gaming_priority_enabled = extract_json_bool(dpi_pos, "gaming_priority_enabled", true);
         out_config->dpi.streaming_balance_enabled = extract_json_bool(dpi_pos, "streaming_balance_enabled", true);
     } else {
-        out_config->dpi.enabled = true;
+        out_config->dpi.enabled = false;
         out_config->dpi.p2p_throttle_enabled = false;
         out_config->dpi.p2p_throttle_rate_kbps = 512;
         out_config->dpi.voip_priority_enabled = true;

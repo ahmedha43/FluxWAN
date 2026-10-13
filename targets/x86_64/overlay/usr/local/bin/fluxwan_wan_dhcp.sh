@@ -34,8 +34,7 @@ case "$1" in
             esac
         fi
 
-        ip addr flush dev "$interface" 2>/dev/null || true
-        ip addr add "$ip/$PREFIX" dev "$interface" 2>/dev/null || ip addr replace "$ip/$PREFIX" dev "$interface" 2>/dev/null || true
+        ip addr replace "$ip/$PREFIX" dev "$interface" 2>/dev/null || ip addr add "$ip/$PREFIX" dev "$interface" 2>/dev/null || true
         ip link set "$interface" up 2>/dev/null || true
 
         cat > "/run/fluxwan_wan_${interface}.lease" << EOF
@@ -49,8 +48,12 @@ EOF
         TABLE_ID=$(cat "/run/fluxwan_table_${interface}" 2>/dev/null)
         [ -z "$TABLE_ID" ] && TABLE_ID=101
         if [ -n "$router" ]; then
-            ip route replace default via "$router" dev "$interface" table "$TABLE_ID" proto static 2>/dev/null || true
-            ip route replace default via "$router" dev "$interface" metric "$TABLE_ID" 2>/dev/null || true
+            PHYS_TABLE=$((1000 + TABLE_ID))
+            ip route replace default via "$router" dev "$interface" table "$PHYS_TABLE" proto static 2>/dev/null || true
+            if ! grep -q "\"$interface\"" /etc/fluxwan/proxy_wan_*.json 2>/dev/null; then
+                ip route replace default via "$router" dev "$interface" table "$TABLE_ID" proto static 2>/dev/null || true
+                ip route replace default via "$router" dev "$interface" metric "$TABLE_ID" 2>/dev/null || true
+            fi
         fi
 
         sysctl -w net.ipv4.conf.${interface}.rp_filter=2 >/dev/null 2>&1 || true
