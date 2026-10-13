@@ -585,7 +585,7 @@ static bool json_get_str(const char *json, const char *key, char *out, size_t ma
 int vpn_manager_tailscale_sync_status(tailscale_config_t *ts) {
     if (!ts) return -1;
 #if defined(__linux__)
-    if (system("pgrep tailscaled >/dev/null 2>&1") != 0) {
+    if (access("/run/tailscale/tailscaled.sock", F_OK) != 0 && system("pidof tailscaled >/dev/null 2>&1") != 0) {
         if (ts->enabled) {
             safe_str_copy(ts->status, "Starting", sizeof(ts->status));
         } else {
@@ -668,7 +668,7 @@ int vpn_manager_apply_tailscale(tailscale_config_t *ts) {
 
     /* Ensure tailscaled is actively running */
     safe_system("mkdir -p /var/lib/tailscale /run/tailscale 2>/dev/null");
-    if (system("pgrep tailscaled >/dev/null 2>&1") != 0) {
+    if (access("/run/tailscale/tailscaled.sock", F_OK) != 0 && system("pidof tailscaled >/dev/null 2>&1") != 0) {
         safe_system("systemctl enable --now tailscale 2>/dev/null || rc-service tailscale start 2>/dev/null || "
                     "(nohup tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/run/tailscale/tailscaled.sock --port=41641 </dev/null >/var/log/tailscaled.log 2>&1 &)");
         for (int retry = 0; retry < 3; retry++) {

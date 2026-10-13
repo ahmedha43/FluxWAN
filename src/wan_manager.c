@@ -360,7 +360,7 @@ wan_manager_ctx_t *wan_manager_init(fluxwan_config_t *config, netlink_ctx_t *nl,
             /* Create IP Rule: mark (0x100 + i) -> table_id */
             netlink_add_ip_rule(ctx->nl, 0x100 + i + 1, w->table_id, 1000 + i);
             /* Add Default Route inside Table */
-            if (w->gateway != 0) {
+            if (w->gateway != 0 && !w->proxy.enabled) {
                 netlink_add_default_route(ctx->nl, w->table_id, w->gateway, w->ifindex);
             }
         }
@@ -536,8 +536,9 @@ int wan_manager_rebalance(wan_manager_ctx_t *ctx) {
 
 static void ensure_dhcp_hook_script(void) {
 #if defined(__linux__)
+    static bool s_hook_installed = false;
+    if (s_hook_installed) return;
     const char *path = "/run/fluxwan_wan_dhcp.sh";
-    if (access(path, X_OK) == 0) return;
 
     FILE *f = fopen(path, "w");
     if (!f) return;
@@ -574,8 +575,7 @@ static void ensure_dhcp_hook_script(void) {
         "                *)               PREFIX=24 ;;\n"
         "            esac\n"
         "        fi\n"
-        "        ip addr flush dev \"$interface\" 2>/dev/null || true\n"
-        "        ip addr add \"$ip/$PREFIX\" dev \"$interface\" 2>/dev/null || ip addr replace \"$ip/$PREFIX\" dev \"$interface\" 2>/dev/null || true\n"
+        "        ip addr replace \"$ip/$PREFIX\" dev \"$interface\" 2>/dev/null || ip addr add \"$ip/$PREFIX\" dev \"$interface\" 2>/dev/null || true\n"
         "        ip link set \"$interface\" up 2>/dev/null || true\n"
         "        cat > \"/run/fluxwan_wan_${interface}.lease\" << EOF\n"
         "IP=$ip\n"
@@ -600,6 +600,8 @@ static void ensure_dhcp_hook_script(void) {
         "            if [ ! -f \"/run/fluxwan_proxy_${interface}\" ]; then\n"
         "                ip route replace default via \"$router\" dev \"$interface\" table \"$TABLE_ID\" proto static 2>/dev/null || true\n"
         "                ip route replace default via \"$router\" dev \"$interface\" metric \"$TABLE_ID\" 2>/dev/null || true\n"
+        "            else\n"
+        "                ip route del default dev \"$interface\" 2>/dev/null || true\n"
         "            fi\n"
         "            ip rule del oif \"$interface\" table \"$PHYS_TABLE\" 2>/dev/null || true\n"
         "            ip rule add oif \"$interface\" table \"$PHYS_TABLE\" pref 100 2>/dev/null || true\n"
@@ -620,6 +622,8 @@ static void ensure_dhcp_hook_script(void) {
     );
     fclose(f);
     chmod(path, 0755);
+    safe_system("cp -f /run/fluxwan_wan_dhcp.sh /usr/local/bin/fluxwan_wan_dhcp.sh 2>/dev/null && chmod +x /usr/local/bin/fluxwan_wan_dhcp.sh 2>/dev/null");
+    s_hook_installed = true;
 #endif
 }
 
@@ -687,7 +691,7 @@ void wan_manager_periodic_tick(wan_manager_ctx_t *ctx, uint64_t now_ms) {
              * If an interface is in WAN_STATE_DOWN or packet loss >= 99% for 15 consecutive checks (~30s),
              * and at least 60s elapsed since last rebind, the network environment likely changed (e.g. router moved).
              * Automatically trigger a rebind to discover the new gateway. */
-            if (w->state == WAN_STATE_DOWN || w->metrics.packet_loss_pct >= 99.0f) {
+            if (!w->proxy.enabled && (w->state == WAN_STATE_DOWN || w->metrics.packet_loss_pct >= 99.0f)) {
                 ctx->dhcp_dead_cycles[i]++;
                 if (ctx->dhcp_dead_cycles[i] >= 15 && (now_ms - ctx->last_dhcp_rebind_ms[i] >= 60000)) {
                     ctx->last_dhcp_rebind_ms[i] = now_ms;
@@ -792,19 +796,36 @@ void wan_manager_periodic_tick(wan_manager_ctx_t *ctx, uint64_t now_ms) {
 
                         if (new_gw != 0) {
                             char rc[512];
-                            snprintf(rc, sizeof(rc),
-                                     "ip route replace default via %s dev %s table %u proto static 2>/dev/null || true; "
-                                     "ip rule del oif %s table %u 2>/dev/null || true; "
-                                     "ip rule add oif %s table %u pref 100 2>/dev/null || true; "
-                                     "ip rule del from %s table %u 2>/dev/null || true; "
-                                     "ip rule add from %s table %u pref 100 2>/dev/null || true; "
-                                     "ip route replace default via %s dev %s 2>/dev/null || true",
-                                     gw_str, w->name, w->table_id,
-                                     w->name, w->table_id,
-                                     w->name, w->table_id,
-                                     ip_str, w->table_id,
-                                     ip_str, w->table_id,
-                                     gw_str, w->name);
+                            uint32_t phys_table = 1000 + w->table_id;
+                            if (!w->proxy.enabled) {
+                                snprintf(rc, sizeof(rc),
+                                         "ip route replace default via %s dev %s table %u proto static 2>/dev/null || true; "
+                                         "ip rule del oif %s table %u 2>/dev/null || true; "
+                                         "ip rule add oif %s table %u pref 100 2>/dev/null || true; "
+                                         "ip rule del from %s table %u 2>/dev/null || true; "
+                                         "ip rule add from %s table %u pref 100 2>/dev/null || true; "
+                                         "ip route replace default via %s dev %s metric %u 2>/dev/null || true",
+                                         gw_str, w->name, w->table_id,
+                                         w->name, w->table_id,
+                                         w->name, w->table_id,
+                                         ip_str, w->table_id,
+                                         ip_str, w->table_id,
+                                         gw_str, w->name, w->table_id);
+                            } else {
+                                snprintf(rc, sizeof(rc),
+                                         "ip route del default dev %s 2>/dev/null || true; "
+                                         "ip route replace default via %s dev %s table %u proto static 2>/dev/null || true; "
+                                         "ip rule del oif %s table %u 2>/dev/null || true; "
+                                         "ip rule add oif %s table %u pref 100 2>/dev/null || true; "
+                                         "ip rule del from %s table %u 2>/dev/null || true; "
+                                         "ip rule add from %s table %u pref 100 2>/dev/null || true",
+                                         w->name,
+                                         gw_str, w->name, phys_table,
+                                         w->name, phys_table,
+                                         w->name, phys_table,
+                                         ip_str, phys_table,
+                                         ip_str, phys_table);
+                            }
                             safe_system(rc);
                         }
 

@@ -184,7 +184,7 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
                 /* Create Policy Route Table & Rule */
                 uint32_t fwmark = 0x100 + i + 1;
                 netlink_add_ip_rule(nl, fwmark, w->table_id, 1000 + i);
-                if (w->gateway != 0) {
+                if (w->gateway != 0 && !w->proxy.enabled) {
                     netlink_add_default_route(nl, w->table_id, w->gateway, w_ifidx);
                 }
             }
@@ -203,13 +203,12 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
                              w->name, w->table_id,
                              wan_gw, w->name, 100 + i + 1);
                 } else {
+                    uint32_t phys_table = 1000 + w->table_id;
                     snprintf(route_cmd, sizeof(route_cmd),
-                             "ip route replace default via %s dev %s table %u proto static 2>/dev/null || true; "
                              "ip rule del oif %s table %u 2>/dev/null || true; "
-                             "ip rule add oif %s table %u pref 100 2>/dev/null || true",
-                             wan_gw, w->name, w->table_id,
+                             "ip route replace default via %s dev %s table %u proto static 2>/dev/null || true",
                              w->name, w->table_id,
-                             w->name, w->table_id);
+                             wan_gw, w->name, phys_table);
                 }
                 safe_system(route_cmd);
 
@@ -240,24 +239,30 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
 #if defined(__linux__)
                 uint32_t fwmark = 0x1000 + i;
                 uint32_t phys_table = 1000 + w->table_id;
-                char px_cmd[512];
+                char px_cmd[768];
                 /* 1. Direct proxy daemon's outer encrypted egress packets strictly out through physical WAN table */
                 snprintf(px_cmd, sizeof(px_cmd),
                          "touch /run/fluxwan_proxy_%s; "
+                         "ip route del default dev %s 2>/dev/null || true; "
                          "ip route replace default via %s dev %s table %u proto static 2>/dev/null || true; "
                          "ip rule del fwmark 0x%x 2>/dev/null || true; "
                          "ip rule add fwmark 0x%x table %u pref 40 2>/dev/null || true; "
+                         "ip rule del oif %s table %u 2>/dev/null || true; "
+                         "ip rule add oif %s table %u pref 90 2>/dev/null || true; "
                          "ip link set %s up 2>/dev/null || true; "
                          "ip addr replace 198.18.%u.1/24 dev %s 2>/dev/null || true; "
                          "ip route replace default dev %s table %u proto static 2>/dev/null || true; "
-                         "ip route replace default dev %s metric %u 2>/dev/null || true",
+                         "ip route add default dev %s metric %u 2>/dev/null || ip route replace default dev %s metric %u 2>/dev/null || true",
+                         w->name,
                          w->name,
                          wan_gw, w->name, phys_table,
                          fwmark, fwmark, phys_table,
+                         w->proxy.tun_dev, w->table_id,
+                         w->proxy.tun_dev, w->table_id,
                          w->proxy.tun_dev,
                          (unsigned int)((i + 10) % 250), w->proxy.tun_dev,
                          w->proxy.tun_dev, w->table_id,
-                         w->proxy.tun_dev, 100 + i + 1);
+                         w->proxy.tun_dev, 50 + (i * 5), w->proxy.tun_dev, 50 + (i * 5));
                 safe_system(px_cmd);
 #endif
                 net_apply_wan_nat(w->proxy.tun_dev, true);
@@ -314,7 +319,7 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
     safe_write_proc("/proc/sys/net/ipv4/ip_forward", "1\n");
     safe_write_proc("/proc/sys/net/ipv4/conf/all/forwarding", "1\n");
     safe_system("iptables -P FORWARD ACCEPT 2>/dev/null || iptables-legacy -P FORWARD ACCEPT 2>/dev/null || true");
-    safe_system("iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables-legacy -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true");
+    safe_system("iptables -C FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true");
 
     safe_system("iptables -t mangle -F PREROUTING 2>/dev/null || iptables-legacy -t mangle -F PREROUTING 2>/dev/null || true");
     safe_system("iptables -t mangle -A PREROUTING -j CONNMARK --restore-mark --mask 0x0000ffff 2>/dev/null || iptables-legacy -t mangle -A PREROUTING -j CONNMARK --restore-mark --mask 0x0000ffff 2>/dev/null || true");
@@ -328,7 +333,7 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
     /* Address Lists Steering (evaluated before default load balancing) */
     safe_system("iptables -t mangle -N FLUXWAN_ADDRLIST 2>/dev/null || iptables-legacy -t mangle -N FLUXWAN_ADDRLIST 2>/dev/null || true");
     safe_system("iptables -t mangle -A PREROUTING -j FLUXWAN_ADDRLIST 2>/dev/null || iptables-legacy -t mangle -A PREROUTING -j FLUXWAN_ADDRLIST 2>/dev/null || true");
-    safe_system("iptables -t mangle -A OUTPUT -j FLUXWAN_ADDRLIST 2>/dev/null || iptables-legacy -t mangle -A OUTPUT -j FLUXWAN_ADDRLIST 2>/dev/null || true");
+    safe_system("iptables -t mangle -C OUTPUT -j FLUXWAN_ADDRLIST 2>/dev/null || iptables -t mangle -A OUTPUT -j FLUXWAN_ADDRLIST 2>/dev/null || true");
 
     /* Calculate total active dynamic weight (strictly exclude disabled WANs) */
     uint32_t total_active_weight = 0;
@@ -367,15 +372,13 @@ int net_apply_configuration(const fluxwan_config_t *config, netlink_ctx_t *nl) {
         }
     }
     safe_system("iptables -t mangle -A PREROUTING -j CONNMARK --save-mark --mask 0x0000ffff 2>/dev/null || iptables-legacy -t mangle -A PREROUTING -j CONNMARK --save-mark --mask 0x0000ffff 2>/dev/null || true");
-
-    /* Ensure virtual tun interfaces receive filled TCP/UDP checksums (gVisor userspace drops partial checksums) */
-    safe_system("iptables -t mangle -A POSTROUTING -p udp -j CHECKSUM --checksum-fill 2>/dev/null || true");
-    safe_system("iptables -t mangle -A POSTROUTING -p tcp -j CHECKSUM --checksum-fill 2>/dev/null || true");
-    safe_system("iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true");
+    safe_system("iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true");
+    safe_system("iptables -t mangle -C POSTROUTING -p udp -j CHECKSUM --checksum-fill 2>/dev/null || iptables -t mangle -A POSTROUTING -p udp -j CHECKSUM --checksum-fill 2>/dev/null || true");
+    safe_system("iptables -t mangle -C POSTROUTING -p tcp -j CHECKSUM --checksum-fill 2>/dev/null || iptables -t mangle -A POSTROUTING -p tcp -j CHECKSUM --checksum-fill 2>/dev/null || true");
     if (config->lan.name[0]) {
-        char eth_cmd[128];
-        snprintf(eth_cmd, sizeof(eth_cmd), "ethtool -K %s rx off tx off 2>/dev/null || true", config->lan.name);
-        safe_system(eth_cmd);
+        char offload_cmd[256];
+        snprintf(offload_cmd, sizeof(offload_cmd), "ethtool -K %s rx off tx off 2>/dev/null || true", config->lan.name);
+        safe_system(offload_cmd);
     }
 #endif
 

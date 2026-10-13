@@ -19,6 +19,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <pthread.h>
+#include <net/if.h>
 #elif defined(_WIN32) || defined(_WIN64)
 #define strcasecmp _stricmp
 #endif
@@ -368,7 +369,7 @@ static int generate_proxy_config_file(const wan_config_t *wan, int wan_idx, char
     fprintf(f, "      \"interface_name\": \"%s\",\n", tun_name);
     fprintf(f, "      \"address\": [\n        \"198.18.%u.1/24\"\n      ],\n", (wan_idx + 10) % 250);
     fprintf(f, "      \"mtu\": 1420,\n");
-    fprintf(f, "      \"stack\": \"gvisor\",\n");
+    fprintf(f, "      \"stack\": \"system\",\n");
     fprintf(f, "      \"auto_route\": false,\n");
     fprintf(f, "      \"strict_route\": false,\n");
     fprintf(f, "      \"sniff\": true\n");
@@ -722,11 +723,9 @@ int proxy_manager_start_wan(proxy_manager_ctx_t *ctx, uint32_t wan_idx) {
         snprintf(wan->proxy.tun_dev, sizeof(wan->proxy.tun_dev), "tun_wan%u", (unsigned int)((wan->id > 0 ? wan->id : (wan_idx + 1)) % 1000));
     }
 
-    /* Select appropriate engine: Xray-core for Post-Quantum ML-KEM or Sing-box */
-    bool use_xray = false;
-    if (is_xray_required(&wan->proxy)) {
-        use_xray = true;
-    } else if (!check_binary_available("sing-box") && check_binary_available("xray")) {
+    /* Select appropriate engine: Prefer Xray-core native TUN (same as V2Box) for max throughput */
+    bool use_xray = check_binary_available("xray");
+    if (!use_xray && is_xray_required(&wan->proxy)) {
         use_xray = true;
     }
 
@@ -764,7 +763,7 @@ int proxy_manager_start_wan(proxy_manager_ctx_t *ctx, uint32_t wan_idx) {
     (void)rc;
 
     /* Read back PID without blocking on latency probe */
-    usleep(100000); /* 100ms grace period */
+    usleep(100000); /* 100ms initial grace period for PID file write */
     FILE *pf = fopen(pid_file, "r");
     if (pf) {
         int pid = 0;
@@ -772,17 +771,30 @@ int proxy_manager_start_wan(proxy_manager_ctx_t *ctx, uint32_t wan_idx) {
             ctx->pids[wan_idx] = pid;
             wan->proxy.pid = pid;
             wan->proxy.is_connected = true;
+
+            /* Wait up to 2.5s for Xray/sing-box to create the kernel TUN interface before adding routes */
+            for (int wait_i = 0; wait_i < 25; wait_i++) {
+                if (if_nametoindex(wan->proxy.tun_dev) > 0) break;
+                usleep(100000);
+            }
+
             /* Ensure the tun interface route is set in the WAN table and table main */
-            char tun_route_cmd[512];
+            uint32_t main_metric = (wan_idx == 1) ? 10 : ((wan_idx == 2) ? 15 : (50 + ((unsigned int)wan_idx * 5)));
+            char tun_route_cmd[640];
             snprintf(tun_route_cmd, sizeof(tun_route_cmd),
                      "ip link set %s up 2>/dev/null || true; "
                      "ip addr replace 198.18.%u.1/24 dev %s 2>/dev/null || true; "
+                     "ip rule del oif %s table %u 2>/dev/null || true; "
+                     "ip rule add oif %s table %u pref 90 2>/dev/null || true; "
                      "ip route replace default dev %s table %u proto static 2>/dev/null || true; "
-                     "ip route replace default dev %s metric %u 2>/dev/null || true",
+                     "ip route add default dev %s metric %u 2>/dev/null || ip route replace default dev %s metric %u 2>/dev/null || true",
                      wan->proxy.tun_dev,
                      (unsigned int)((wan_idx + 10) % 250), wan->proxy.tun_dev,
                      wan->proxy.tun_dev, wan->table_id,
-                     wan->proxy.tun_dev, 100 + (unsigned int)wan_idx + 1);
+                     wan->proxy.tun_dev, wan->table_id,
+                     wan->proxy.tun_dev, wan->table_id,
+                     wan->proxy.tun_dev, main_metric,
+                     wan->proxy.tun_dev, main_metric);
             safe_system(tun_route_cmd);
             LOG_INFO("[Proxy] Successfully launched proxy daemon for WAN '%s' (PID: %d, Device: %s)",
                      wan->label, pid, wan->proxy.tun_dev);
@@ -884,7 +896,7 @@ int proxy_manager_test_tunnel(const wan_proxy_config_t *proxy, uint32_t *out_lat
         saddr.sin_port = htons(proxy->port);
     }
 
-    /* Non-blocking connect with strict 1.5s timeout to prevent thread stalling */
+    /* Non-blocking connect with 2.5s timeout to tolerate heavy download bufferbloat */
     int flags = fcntl(s, F_GETFL, 0);
     if (flags >= 0) fcntl(s, F_SETFL, flags | O_NONBLOCK);
 
@@ -893,7 +905,7 @@ int proxy_manager_test_tunnel(const wan_proxy_config_t *proxy, uint32_t *out_lat
         struct pollfd pfd;
         pfd.fd = s;
         pfd.events = POLLOUT;
-        int poll_rc = poll(&pfd, 1, 1500);
+        int poll_rc = poll(&pfd, 1, 2500);
         if (poll_rc > 0 && (pfd.revents & POLLOUT)) {
             int err = 0;
             socklen_t len = sizeof(err);
@@ -907,6 +919,41 @@ int proxy_manager_test_tunnel(const wan_proxy_config_t *proxy, uint32_t *out_lat
         }
     }
     close(s);
+
+    /* Fallback: if in-tunnel 1.0.0.1:80 probe timed out during heavy download saturation,
+     * verify physical WAN -> proxy server TCP reachability before declaring failure */
+    if (rc != 0 && proxy->is_connected && proxy->server[0] && proxy->port > 0) {
+        int s2 = socket(AF_INET, SOCK_STREAM, 0);
+        if (s2 >= 0) {
+#ifdef SO_BINDTODEVICE
+            if (proxy->bind_interface[0]) {
+                setsockopt(s2, SOL_SOCKET, SO_BINDTODEVICE, proxy->bind_interface, strlen(proxy->bind_interface));
+            }
+#endif
+            struct sockaddr_in saddr2;
+            memset(&saddr2, 0, sizeof(saddr2));
+            saddr2.sin_family = AF_INET;
+            saddr2.sin_port = htons(proxy->port);
+            if (inet_pton(AF_INET, proxy->server, &saddr2.sin_addr) > 0) {
+                int fl2 = fcntl(s2, F_GETFL, 0);
+                if (fl2 >= 0) fcntl(s2, F_SETFL, fl2 | O_NONBLOCK);
+                int rc2 = connect(s2, (struct sockaddr *)&saddr2, sizeof(saddr2));
+                if (rc2 < 0 && (errno == EINPROGRESS || errno == EWOULDBLOCK)) {
+                    struct pollfd pfd2 = { .fd = s2, .events = POLLOUT };
+                    if (poll(&pfd2, 1, 2000) > 0 && (pfd2.revents & POLLOUT)) {
+                        int err2 = 0;
+                        socklen_t len2 = sizeof(err2);
+                        if (getsockopt(s2, SOL_SOCKET, SO_ERROR, &err2, &len2) == 0 && err2 == 0) {
+                            rc = 0;
+                        }
+                    }
+                } else if (rc2 == 0) {
+                    rc = 0;
+                }
+            }
+            close(s2);
+        }
+    }
 
     if (rc != 0) return -1;
 
@@ -955,6 +1002,46 @@ static void proxy_manager_supervise_tick(proxy_manager_ctx_t *ctx) {
             continue;
         }
 
+        /* Ensure physical proxy table and TUN routes are active without deleting existing rules */
+        if (wan->proxy.tun_dev[0] && if_nametoindex(wan->proxy.tun_dev) > 0) {
+            uint32_t fwmark = 0x1000 + i;
+            uint32_t phys_table = 1000 + wan->table_id;
+            uint32_t main_metric = (i == 1) ? 10 : ((i == 2) ? 15 : (50 + ((unsigned int)i * 5)));
+            char wan_gw[32] = {0};
+            if (wan->gateway != 0) {
+                ip_to_str(wan->gateway, wan_gw, sizeof(wan_gw));
+            }
+            char chk_route[768];
+            if (wan_gw[0]) {
+                snprintf(chk_route, sizeof(chk_route),
+                         "ip route del default dev %s 2>/dev/null || true; "
+                         "ip route replace default via %s dev %s table %u proto static 2>/dev/null || true; "
+                         "ip rule show | grep -q 'fwmark 0x%x lookup %u' || ip rule add fwmark 0x%x table %u pref 40 2>/dev/null || true; "
+                         "ip link set %s up 2>/dev/null || true; "
+                         "ip rule show | grep -q 'oif %s lookup %u' || ip rule add oif %s table %u pref 90 2>/dev/null || true; "
+                         "ip route replace default dev %s table %u proto static 2>/dev/null || true; "
+                         "ip route replace default dev %s metric %u 2>/dev/null || true",
+                         wan->name,
+                         wan_gw, wan->name, phys_table,
+                         fwmark, phys_table, fwmark, phys_table,
+                         wan->proxy.tun_dev,
+                         wan->proxy.tun_dev, wan->table_id, wan->proxy.tun_dev, wan->table_id,
+                         wan->proxy.tun_dev, wan->table_id,
+                         wan->proxy.tun_dev, main_metric);
+            } else {
+                snprintf(chk_route, sizeof(chk_route),
+                         "ip link set %s up 2>/dev/null || true; "
+                         "ip rule show | grep -q 'oif %s lookup %u' || ip rule add oif %s table %u pref 90 2>/dev/null || true; "
+                         "ip route replace default dev %s table %u proto static 2>/dev/null || true; "
+                         "ip route replace default dev %s metric %u 2>/dev/null || true",
+                         wan->proxy.tun_dev,
+                         wan->proxy.tun_dev, wan->table_id, wan->proxy.tun_dev, wan->table_id,
+                         wan->proxy.tun_dev, wan->table_id,
+                         wan->proxy.tun_dev, main_metric);
+            }
+            safe_system(chk_route);
+        }
+
         /* Alive: test tunnel latency asynchronously in background worker thread */
         uint32_t lat_ms = 0;
         if (proxy_manager_test_tunnel(&wan->proxy, &lat_ms) == 0 && lat_ms > 0) {
@@ -963,22 +1050,15 @@ static void proxy_manager_supervise_tick(proxy_manager_ctx_t *ctx) {
             wan->metrics.packet_loss_pct = 0.0f;
             wan->state = WAN_STATE_HEALTHY;
             ctx->fail_counts[i] = 0;
-
-            char chk_route[256];
-            snprintf(chk_route, sizeof(chk_route),
-                     "ip route replace default dev %s table %u proto static 2>/dev/null || true",
-                     wan->proxy.tun_dev, wan->table_id);
-            safe_system(chk_route);
         } else {
-            wan->metrics.packet_loss_pct = 100.0f;
-            wan->proxy.latency_ms = 0;
-            wan->metrics.rtt_ms = 0;
             ctx->fail_counts[i]++;
-            LOG_WARN("[Proxy Supervisor] Tunnel probe failed for WAN '%s' (%s:%u, strike %u/3)",
+            LOG_WARN("[Proxy Supervisor] Tunnel probe delayed/failed for WAN '%s' (%s:%u, strike %u)",
                      wan->label, wan->proxy.server, wan->proxy.port, ctx->fail_counts[i]);
-            if (ctx->fail_counts[i] >= 3) {
-                if (now_ms - ctx->last_restart_ms[i] >= 5000) {
-                    LOG_WARN("[Proxy Self-Healing] Tunnel unreachable for WAN '%s' after 3 consecutive probes. Auto-restarting proxy daemon...", wan->label);
+            /* Only restart if the TUN device actually disappeared; never kill an active TUN under load */
+            if (wan->proxy.tun_dev[0] && if_nametoindex(wan->proxy.tun_dev) == 0) {
+                if (now_ms - ctx->last_restart_ms[i] >= 10000) {
+                    LOG_WARN("[Proxy Self-Healing] TUN interface %s missing for WAN '%s'. Auto-restarting proxy daemon...",
+                             wan->proxy.tun_dev, wan->label);
                     ctx->fail_counts[i] = 0;
                     ctx->last_restart_ms[i] = now_ms;
                     proxy_manager_start_wan(ctx, i);
