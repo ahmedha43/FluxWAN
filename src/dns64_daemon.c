@@ -1,6 +1,7 @@
 #include "dns64_daemon.h"
 #include <pthread.h>
 #include <fcntl.h>
+#include <ctype.h>
 
 #if defined(__linux__)
 #include <sys/select.h>
@@ -21,6 +22,8 @@ static inline int sys_bpf_map_update_elem(int fd, const void *key, const void *v
 
 #define SYNTH_START_IP_HOST 0xC6120001 /* 198.18.0.1 */
 #define SYNTH_END_IP_HOST   0xC613FFFE /* 198.19.255.254 */
+#define DNS_CACHE_SIZE      4096
+#define DNS_CACHE_TTL_SEC   7200 /* 2 Hours RAM Cache */
 
 struct dns_header {
     uint16_t id;
@@ -32,14 +35,25 @@ struct dns_header {
 };
 
 typedef struct {
+    uint32_t hash;
+    time_t expires_at;
+    uint16_t len;
+    bool valid;
+    unsigned char data[512];
+} dns_cache_entry_t;
+
+typedef struct {
     struct sockaddr_in client_addr;
     time_t timestamp;
+    uint32_t qhash;
 } pending_dns_entry_t;
 
 struct dns64_ctx {
     socket_t server_fd;
     socket_t upstream_fd;
+    socket_t upstream_fd2;
     struct sockaddr_in upstream_addr;
+    struct sockaddr_in upstream_addr2;
     fluxwan_config_t *config;
     int v4_map_fd;
     int v6_map_fd;
@@ -49,7 +63,31 @@ struct dns64_ctx {
     pthread_t thread;
     bool running;
     pending_dns_entry_t *pending_queries;
+    dns_cache_entry_t cache[DNS_CACHE_SIZE];
+    pthread_mutex_t cache_lock;
 };
+
+uint32_t dns_compute_question_hash(const unsigned char *buf, size_t len) {
+    if (len <= sizeof(struct dns_header)) return 0;
+    const unsigned char *p = buf + sizeof(struct dns_header);
+    const unsigned char *end = buf + len;
+    uint32_t hash = 2166136261u;
+    while (p < end && *p != 0) {
+        uint8_t labellen = *p++;
+        for (uint8_t i = 0; i < labellen && p < end; i++) {
+            uint8_t c = (uint8_t)tolower(*p++);
+            hash ^= c;
+            hash *= 16777619u;
+        }
+    }
+    if (p < end && *p == 0) p++; /* Skip trailing zero */
+    /* Add QTYPE and QCLASS */
+    for (int i = 0; i < 4 && p < end; i++) {
+        hash ^= *p++;
+        hash *= 16777619u;
+    }
+    return hash;
+}
 
 static uint32_t allocate_synthetic_ip(dns64_ctx_t *ctx) {
     uint32_t ip = ctx->current_synth_ip_host++;
@@ -95,15 +133,22 @@ static void *dns64_worker(void *arg) {
     unsigned char buf[2048];
     struct sockaddr_in client_addr;
 
-    LOG_INFO("FluxWAN Embedded DNS Forwarder & Engine listening on 0.0.0.0:53...");
+    LOG_INFO("FluxWAN Fast In-Memory DNS Cache & Forwarder listening on 0.0.0.0:53...");
 
     while (ctx->running) {
         fd_set rset;
         FD_ZERO(&rset);
         FD_SET(ctx->server_fd, &rset);
         FD_SET(ctx->upstream_fd, &rset);
+        if (IS_VALID_SOCK(ctx->upstream_fd2)) {
+            FD_SET(ctx->upstream_fd2, &rset);
+        }
 
-        int max_fd = (int)(ctx->server_fd > ctx->upstream_fd ? ctx->server_fd : ctx->upstream_fd) + 1;
+        int max_fd = (int)ctx->server_fd;
+        if ((int)ctx->upstream_fd > max_fd) max_fd = (int)ctx->upstream_fd;
+        if (IS_VALID_SOCK(ctx->upstream_fd2) && (int)ctx->upstream_fd2 > max_fd) max_fd = (int)ctx->upstream_fd2;
+        max_fd += 1;
+
         struct timeval tv;
         tv.tv_sec = 1;
         tv.tv_usec = 0;
@@ -122,6 +167,7 @@ static void *dns64_worker(void *arg) {
                 ctx->stats.total_queries++;
                 struct dns_header *hdr = (struct dns_header *)buf;
                 uint16_t qid = ntohs(hdr->id);
+                time_t now = time(NULL);
 
                 /* If NAT46 is explicitly enabled and Type A Query (IPv4 Request) */
                 if (ctx->config && ctx->config->nat46.enabled) {
@@ -160,23 +206,57 @@ static void *dns64_worker(void *arg) {
                     }
                 }
 
-                /* Record client mapping by DNS Query ID */
-                if (ctx->pending_queries) {
-                    ctx->pending_queries[qid].client_addr = client_addr;
-                    ctx->pending_queries[qid].timestamp = time(NULL);
+                /* FAST RAM DNS CACHE LOOKUP (<0.05ms Instant Resolution) */
+                uint32_t qhash = dns_compute_question_hash(buf, n);
+                if (qhash != 0) {
+                    uint32_t idx = qhash % DNS_CACHE_SIZE;
+                    pthread_mutex_lock(&ctx->cache_lock);
+                    if (ctx->cache[idx].valid && ctx->cache[idx].hash == qhash && ctx->cache[idx].expires_at > now) {
+                        unsigned char resp_buf[512];
+                        uint16_t resp_len = ctx->cache[idx].len;
+                        if (resp_len <= sizeof(resp_buf)) {
+                            memcpy(resp_buf, ctx->cache[idx].data, resp_len);
+                            pthread_mutex_unlock(&ctx->cache_lock);
+
+                            /* Rewrite Query ID to match client's query */
+                            struct dns_header *r_hdr = (struct dns_header *)resp_buf;
+                            r_hdr->id = hdr->id;
+
+                            sendto(ctx->server_fd, (const char *)resp_buf, resp_len, 0,
+                                   (struct sockaddr *)&client_addr, addr_len);
+                            ctx->stats.cache_hits++;
+                            continue;
+                        }
+                    }
+                    pthread_mutex_unlock(&ctx->cache_lock);
                 }
 
-                /* Forward query to Upstream DNS (1.1.1.1 / Primary DNS) */
+                /* Record client mapping by DNS Query ID for upstream response matching */
+                if (ctx->pending_queries) {
+                    ctx->pending_queries[qid].client_addr = client_addr;
+                    ctx->pending_queries[qid].timestamp = now;
+                    ctx->pending_queries[qid].qhash = qhash;
+                }
+
+                /* Parallel upstream query racing: 1.1.1.1 + 8.8.8.8 */
                 sendto(ctx->upstream_fd, (const char *)buf, n, 0,
                        (struct sockaddr *)&ctx->upstream_addr, sizeof(ctx->upstream_addr));
+                if (IS_VALID_SOCK(ctx->upstream_fd2)) {
+                    sendto(ctx->upstream_fd2, (const char *)buf, n, 0,
+                           (struct sockaddr *)&ctx->upstream_addr2, sizeof(ctx->upstream_addr2));
+                }
             }
         }
 
-        /* 2. Response from Upstream DNS on upstream_fd */
-        if (FD_ISSET(ctx->upstream_fd, &rset)) {
+        /* 2. Response from Upstream DNS (Primary or Secondary) */
+        socket_t ready_up_fds[2] = { ctx->upstream_fd, ctx->upstream_fd2 };
+        for (int u = 0; u < 2; u++) {
+            socket_t ufd = ready_up_fds[u];
+            if (!IS_VALID_SOCK(ufd) || !FD_ISSET(ufd, &rset)) continue;
+
             struct sockaddr_in up_addr;
             socklen_t up_len = sizeof(up_addr);
-            ssize_t n = recvfrom(ctx->upstream_fd, (char *)buf, sizeof(buf), 0,
+            ssize_t n = recvfrom(ufd, (char *)buf, sizeof(buf), 0,
                                  (struct sockaddr *)&up_addr, &up_len);
             if (n >= (ssize_t)sizeof(struct dns_header)) {
                 struct dns_header *hdr = (struct dns_header *)buf;
@@ -186,8 +266,27 @@ static void *dns64_worker(void *arg) {
                     sendto(ctx->server_fd, (const char *)buf, n, 0,
                            (struct sockaddr *)&ctx->pending_queries[qid].client_addr,
                            sizeof(ctx->pending_queries[qid].client_addr));
-                    ctx->pending_queries[qid].client_addr.sin_family = 0; /* Clear entry */
+
+                    uint32_t qhash = ctx->pending_queries[qid].qhash;
+                    ctx->pending_queries[qid].client_addr.sin_family = 0; /* Clear pending query */
                     ctx->stats.passthrough_queries++;
+
+                    /* Populate Fast In-Memory RAM Cache if response is valid (NoError with Answers) */
+                    uint16_t flags = ntohs(hdr->flags);
+                    uint16_t ancount = ntohs(hdr->ancount);
+                    if ((flags & 0x000F) == 0 && ancount > 0 && n <= 512 && qhash != 0) {
+                        uint32_t idx = qhash % DNS_CACHE_SIZE;
+                        pthread_mutex_lock(&ctx->cache_lock);
+                        if (!ctx->cache[idx].valid) {
+                            ctx->stats.cached_entries++;
+                        }
+                        ctx->cache[idx].hash = qhash;
+                        ctx->cache[idx].expires_at = time(NULL) + DNS_CACHE_TTL_SEC;
+                        ctx->cache[idx].len = (uint16_t)n;
+                        memcpy(ctx->cache[idx].data, buf, n);
+                        ctx->cache[idx].valid = true;
+                        pthread_mutex_unlock(&ctx->cache_lock);
+                    }
                 }
             }
         }
@@ -208,6 +307,7 @@ dns64_ctx_t *dns64_init(fluxwan_config_t *config, int v4_map_fd, int v6_map_fd, 
         return NULL;
     }
 
+    pthread_mutex_init(&ctx->cache_lock, NULL);
     ctx->config = config;
     ctx->v4_map_fd = v4_map_fd;
     ctx->v6_map_fd = v6_map_fd;
@@ -239,6 +339,7 @@ dns64_ctx_t *dns64_init(fluxwan_config_t *config, int v4_map_fd, int v6_map_fd, 
         LOG_WARN("DNS could not bind to port 53: %s (will run in simulated mode)", strerror(errno));
     }
 
+    /* Primary Upstream DNS */
     ctx->upstream_fd = socket(AF_INET, SOCK_DGRAM, 0);
 #if defined(__linux__)
     if (IS_VALID_SOCK(ctx->upstream_fd)) {
@@ -256,6 +357,22 @@ dns64_ctx_t *dns64_init(fluxwan_config_t *config, int v4_map_fd, int v6_map_fd, 
     }
     ctx->upstream_addr.sin_addr.s_addr = inet_addr(target_dns);
 
+    /* Secondary Upstream DNS for dual racing */
+    ctx->upstream_fd2 = socket(AF_INET, SOCK_DGRAM, 0);
+#if defined(__linux__)
+    if (IS_VALID_SOCK(ctx->upstream_fd2)) {
+        fcntl(ctx->upstream_fd2, F_SETFD, FD_CLOEXEC);
+    }
+#endif
+    memset(&ctx->upstream_addr2, 0, sizeof(ctx->upstream_addr2));
+    ctx->upstream_addr2.sin_family = AF_INET;
+    ctx->upstream_addr2.sin_port = htons(53);
+    const char *target_dns2 = "8.8.8.8";
+    if (config->lan.dns.secondary_dns[0]) {
+        target_dns2 = config->lan.dns.secondary_dns;
+    }
+    ctx->upstream_addr2.sin_addr.s_addr = inet_addr(target_dns2);
+
     pthread_create(&ctx->thread, NULL, dns64_worker, ctx);
     return ctx;
 }
@@ -270,6 +387,9 @@ void dns64_destroy(dns64_ctx_t *ctx) {
     if (IS_VALID_SOCK(ctx->upstream_fd)) {
         shutdown(ctx->upstream_fd, SHUT_RDWR);
     }
+    if (IS_VALID_SOCK(ctx->upstream_fd2)) {
+        shutdown(ctx->upstream_fd2, SHUT_RDWR);
+    }
 #endif
     if (IS_VALID_SOCK(ctx->server_fd)) {
         CLOSE_SOCK(ctx->server_fd);
@@ -277,7 +397,11 @@ void dns64_destroy(dns64_ctx_t *ctx) {
     if (IS_VALID_SOCK(ctx->upstream_fd)) {
         CLOSE_SOCK(ctx->upstream_fd);
     }
+    if (IS_VALID_SOCK(ctx->upstream_fd2)) {
+        CLOSE_SOCK(ctx->upstream_fd2);
+    }
     pthread_join(ctx->thread, NULL);
+    pthread_mutex_destroy(&ctx->cache_lock);
     if (ctx->pending_queries) {
         free(ctx->pending_queries);
     }

@@ -727,7 +727,12 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
             "      \"proxy_transport\": \"%s\",\n"
             "      \"proxy_security\": \"%s\",\n"
             "      \"proxy_encryption\": \"%s\",\n"
+            "      \"proxy_strategy\": %d,\n"
+            "      \"proxy_strategy_str\": \"%s\",\n"
+            "      \"proxy_server_count\": %u,\n"
             "      \"proxy_raw_uri\": \"%s\",\n"
+            "      \"proxy_raw_uri_2\": \"%s\",\n"
+            "      \"proxy_raw_uri_3\": \"%s\",\n"
             "      \"proxy_tun_dev\": \"%s\",\n"
             "      \"proxy_connected\": %s,\n"
             "      \"proxy_latency_ms\": %u\n"
@@ -767,7 +772,12 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
             w->proxy.transport[0] ? w->proxy.transport : "ws",
             w->proxy.security[0] ? w->proxy.security : "tls",
             w->proxy.encryption[0] ? w->proxy.encryption : "none",
-            w->proxy.raw_uri,
+            (int)w->proxy.strategy,
+            (w->proxy.strategy == PROXY_STRATEGY_ROUND_ROBIN) ? "roundRobin" : "leastPing",
+            w->proxy.server_count,
+            w->proxy.servers[0].raw_uri[0] ? w->proxy.servers[0].raw_uri : w->proxy.raw_uri,
+            w->proxy.servers[1].raw_uri,
+            w->proxy.servers[2].raw_uri,
             w->proxy.tun_dev,
             w->proxy.is_connected ? "true" : "false",
             w->proxy.latency_ms,
@@ -3140,8 +3150,13 @@ static int web_server_process_client_impl(web_server_ctx_t *ctx, socket_t client
         wan_proxy_config_t test_p;
         memset(&test_p, 0, sizeof(test_p));
         if (body) {
-            extract_json_string(body, "server", test_p.server, sizeof(test_p.server));
-            test_p.port = (uint16_t)extract_json_int(body, "port", 443);
+            char uri[2048] = {0};
+            if (extract_json_string(body, "uri", uri, sizeof(uri)) && uri[0]) {
+                proxy_manager_parse_uri(uri, &test_p);
+            }
+            if (extract_json_string(body, "server", test_p.server, sizeof(test_p.server))) {
+                test_p.port = (uint16_t)extract_json_int(body, "port", 443);
+            }
         }
 
         uint32_t lat_ms = 0;

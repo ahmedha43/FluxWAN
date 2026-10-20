@@ -170,9 +170,39 @@ typedef enum {
     PROXY_PROTO_SHADOWSOCKS
 } proxy_proto_t;
 
+#define MAX_PROXY_SERVERS 3
+
+typedef enum {
+    PROXY_STRATEGY_FAILOVER = 0,    /* Least-Ping & Instant Failover */
+    PROXY_STRATEGY_ROUND_ROBIN = 1  /* Multi-Server Active Load Balancing */
+} proxy_balancer_strategy_t;
+
+/* Single Proxy Endpoint Definition */
+typedef struct {
+    proxy_proto_t proto;          /* PROXY_PROTO_VLESS, etc. */
+    char proto_str[16];           /* "vless", "vmess", "trojan", "shadowsocks" */
+    char server[128];             /* Remote server IP or domain */
+    uint16_t port;                /* Remote server port (e.g. 443, 80) */
+    char uuid[64];                /* Client UUID / Password */
+    char sni[128];                /* Target SNI (e.g. zero-rated host portal.oodi.iq) */
+    char host[128];               /* HTTP/WS Host header */
+    char path[128];               /* WebSocket path e.g. /ws */
+    char transport[16];           /* "ws", "tcp", "grpc", "http" */
+    char security[16];            /* "tls", "none", "reality" */
+    char encryption[256];         /* VLESS post-quantum encryption e.g. "mlkem768x25519plus..." */
+    char raw_uri[2048];           /* Full URI for quick 1-click import */
+    bool is_connected;
+    uint32_t latency_ms;
+} proxy_endpoint_t;
+
 /* Outbound Proxy Tunnel Configuration (Zero-Rating / Xray / Sing-box) */
 typedef struct {
     bool enabled;
+    proxy_balancer_strategy_t strategy; /* 0 = failover/leastPing, 1 = roundRobin */
+    proxy_endpoint_t servers[MAX_PROXY_SERVERS];
+    uint32_t server_count;
+
+    /* Primary server fields (legacy compatibility mirrors servers[0]) */
     proxy_proto_t proto;          /* PROXY_PROTO_VLESS, etc. */
     char proto_str[16];           /* "vless", "vmess", "trojan", "shadowsocks" */
     char server[128];             /* Remote server IP or domain */

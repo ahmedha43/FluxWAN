@@ -3,11 +3,13 @@
 
 #include "fluxwan.h"
 
-/* DNS64 Proxy Telemetry & Statistics */
+/* DNS64 & Fast-RAM-DNS Telemetry & Statistics */
 typedef struct {
     uint64_t total_queries;
     uint64_t synthesized_a_records;
     uint64_t passthrough_queries;
+    uint64_t cache_hits;
+    uint32_t cached_entries;
     uint64_t active_synthetic_mappings;
     uint32_t current_pool_ip;
 } dns64_stats_t;
@@ -24,6 +26,11 @@ typedef struct dns64_ctx dns64_ctx_t;
  * @return Pointer to dns64_ctx_t on success, NULL on failure
  */
 dns64_ctx_t *dns64_init(fluxwan_config_t *config, int v4_map_fd, int v6_map_fd, int cfg_map_fd);
+
+/**
+ * Compute FNV-1a case-insensitive hash over the DNS question section
+ */
+uint32_t dns_compute_question_hash(const unsigned char *buf, size_t len);
 
 /**
  * Stop and free the DNS64 Proxy Daemon.

@@ -152,14 +152,16 @@ static void json_get_string(const char *json, const char *key, char *out, size_t
     }
 }
 
-int proxy_manager_parse_uri(const char *uri, wan_proxy_config_t *out_proxy) {
-    if (!uri || !out_proxy) return -1;
-    memset(out_proxy, 0, sizeof(wan_proxy_config_t));
-    safe_str_copy(out_proxy->raw_uri, uri, sizeof(out_proxy->raw_uri));
-    out_proxy->enabled = true;
-    safe_str_copy(out_proxy->transport, "ws", sizeof(out_proxy->transport));
-    safe_str_copy(out_proxy->security, "tls", sizeof(out_proxy->security));
-    safe_str_copy(out_proxy->encryption, "none", sizeof(out_proxy->encryption));
+int proxy_manager_parse_endpoint(const char *uri, proxy_endpoint_t *out_ep) {
+    if (!uri || !out_ep) return -1;
+    char uri_buf[2048];
+    safe_str_copy(uri_buf, uri, sizeof(uri_buf));
+    memset(out_ep, 0, sizeof(proxy_endpoint_t));
+    safe_str_copy(out_ep->raw_uri, uri_buf, sizeof(out_ep->raw_uri));
+    safe_str_copy(out_ep->transport, "ws", sizeof(out_ep->transport));
+    safe_str_copy(out_ep->security, "tls", sizeof(out_ep->security));
+    safe_str_copy(out_ep->encryption, "none", sizeof(out_ep->encryption));
+    uri = uri_buf;
 
     /* 0. V2Box Locked Link: v2box://locked=<base64> or v2box://<base64> */
     if (strncmp(uri, "v2box://locked=", 15) == 0 || strncmp(uri, "v2box://", 8) == 0) {
@@ -167,10 +169,10 @@ int proxy_manager_parse_uri(const char *uri, wan_proxy_config_t *out_proxy) {
         char decoded[2048] = {0};
         int dlen = base64_decode(b64_str, strlen(b64_str), decoded, sizeof(decoded));
         if (dlen > 0) {
-            int res = proxy_manager_parse_uri(decoded, out_proxy);
+            int res = proxy_manager_parse_endpoint(decoded, out_ep);
             if (res == 0) {
                 /* Retain original user v2box URI for 1-click persistence */
-                safe_str_copy(out_proxy->raw_uri, uri, sizeof(out_proxy->raw_uri));
+                safe_str_copy(out_ep->raw_uri, uri, sizeof(out_ep->raw_uri));
             }
             return res;
         }
@@ -179,16 +181,16 @@ int proxy_manager_parse_uri(const char *uri, wan_proxy_config_t *out_proxy) {
 
     /* 1. VLESS: vless://uuid@server:port?query#name */
     if (strncmp(uri, "vless://", 8) == 0) {
-        out_proxy->proto = PROXY_PROTO_VLESS;
-        safe_str_copy(out_proxy->proto_str, "vless", sizeof(out_proxy->proto_str));
+        out_ep->proto = PROXY_PROTO_VLESS;
+        safe_str_copy(out_ep->proto_str, "vless", sizeof(out_ep->proto_str));
         const char *p = uri + 8;
         const char *at = strchr(p, '@');
         if (!at) return -1;
 
         size_t ulen = (size_t)(at - p);
-        if (ulen >= sizeof(out_proxy->uuid)) ulen = sizeof(out_proxy->uuid) - 1;
-        memcpy(out_proxy->uuid, p, ulen);
-        out_proxy->uuid[ulen] = '\0';
+        if (ulen >= sizeof(out_ep->uuid)) ulen = sizeof(out_ep->uuid) - 1;
+        memcpy(out_ep->uuid, p, ulen);
+        out_ep->uuid[ulen] = '\0';
 
         p = at + 1;
         const char *colon = strchr(p, ':');
@@ -196,44 +198,44 @@ int proxy_manager_parse_uri(const char *uri, wan_proxy_config_t *out_proxy) {
         if (!colon) return -1;
 
         size_t slen = (size_t)(colon - p);
-        if (slen >= sizeof(out_proxy->server)) slen = sizeof(out_proxy->server) - 1;
-        memcpy(out_proxy->server, p, slen);
-        out_proxy->server[slen] = '\0';
+        if (slen >= sizeof(out_ep->server)) slen = sizeof(out_ep->server) - 1;
+        memcpy(out_ep->server, p, slen);
+        out_ep->server[slen] = '\0';
 
-        out_proxy->port = (uint16_t)atoi(colon + 1);
+        out_ep->port = (uint16_t)atoi(colon + 1);
 
         if (query) {
-            extract_query_param(query, "encryption", out_proxy->encryption, sizeof(out_proxy->encryption));
-            extract_query_param(query, "sni", out_proxy->sni, sizeof(out_proxy->sni));
-            extract_query_param(query, "host", out_proxy->host, sizeof(out_proxy->host));
-            extract_query_param(query, "path", out_proxy->path, sizeof(out_proxy->path));
-            extract_query_param(query, "type", out_proxy->transport, sizeof(out_proxy->transport));
-            extract_query_param(query, "security", out_proxy->security, sizeof(out_proxy->security));
+            extract_query_param(query, "encryption", out_ep->encryption, sizeof(out_ep->encryption));
+            extract_query_param(query, "sni", out_ep->sni, sizeof(out_ep->sni));
+            extract_query_param(query, "host", out_ep->host, sizeof(out_ep->host));
+            extract_query_param(query, "path", out_ep->path, sizeof(out_ep->path));
+            extract_query_param(query, "type", out_ep->transport, sizeof(out_ep->transport));
+            extract_query_param(query, "security", out_ep->security, sizeof(out_ep->security));
         }
-        if (!out_proxy->encryption[0]) {
-            safe_str_copy(out_proxy->encryption, "none", sizeof(out_proxy->encryption));
+        if (!out_ep->encryption[0]) {
+            safe_str_copy(out_ep->encryption, "none", sizeof(out_ep->encryption));
         }
-        if (out_proxy->sni[0] && !out_proxy->host[0]) safe_str_copy(out_proxy->host, out_proxy->sni, sizeof(out_proxy->host));
-        if (out_proxy->host[0] && !out_proxy->sni[0]) safe_str_copy(out_proxy->sni, out_proxy->host, sizeof(out_proxy->sni));
-        if (out_proxy->port == 80 && strcasecmp(out_proxy->security, "tls") != 0) {
-            safe_str_copy(out_proxy->security, "none", sizeof(out_proxy->security));
+        if (out_ep->sni[0] && !out_ep->host[0]) safe_str_copy(out_ep->host, out_ep->sni, sizeof(out_ep->host));
+        if (out_ep->host[0] && !out_ep->sni[0]) safe_str_copy(out_ep->sni, out_ep->host, sizeof(out_ep->sni));
+        if (out_ep->port == 80 && strcasecmp(out_ep->security, "tls") != 0) {
+            safe_str_copy(out_ep->security, "none", sizeof(out_ep->security));
         }
-        safe_str_copy(out_proxy->raw_uri, uri, sizeof(out_proxy->raw_uri));
+        safe_str_copy(out_ep->raw_uri, uri, sizeof(out_ep->raw_uri));
         return 0;
     }
 
     /* 2. TROJAN: trojan://password@server:port?query#name */
     if (strncmp(uri, "trojan://", 9) == 0) {
-        out_proxy->proto = PROXY_PROTO_TROJAN;
-        safe_str_copy(out_proxy->proto_str, "trojan", sizeof(out_proxy->proto_str));
+        out_ep->proto = PROXY_PROTO_TROJAN;
+        safe_str_copy(out_ep->proto_str, "trojan", sizeof(out_ep->proto_str));
         const char *p = uri + 9;
         const char *at = strchr(p, '@');
         if (!at) return -1;
 
         size_t ulen = (size_t)(at - p);
-        if (ulen >= sizeof(out_proxy->uuid)) ulen = sizeof(out_proxy->uuid) - 1;
-        memcpy(out_proxy->uuid, p, ulen);
-        out_proxy->uuid[ulen] = '\0';
+        if (ulen >= sizeof(out_ep->uuid)) ulen = sizeof(out_ep->uuid) - 1;
+        memcpy(out_ep->uuid, p, ulen);
+        out_ep->uuid[ulen] = '\0';
 
         p = at + 1;
         const char *colon = strchr(p, ':');
@@ -241,55 +243,55 @@ int proxy_manager_parse_uri(const char *uri, wan_proxy_config_t *out_proxy) {
         if (!colon) return -1;
 
         size_t slen = (size_t)(colon - p);
-        if (slen >= sizeof(out_proxy->server)) slen = sizeof(out_proxy->server) - 1;
-        memcpy(out_proxy->server, p, slen);
-        out_proxy->server[slen] = '\0';
+        if (slen >= sizeof(out_ep->server)) slen = sizeof(out_ep->server) - 1;
+        memcpy(out_ep->server, p, slen);
+        out_ep->server[slen] = '\0';
 
-        out_proxy->port = (uint16_t)atoi(colon + 1);
+        out_ep->port = (uint16_t)atoi(colon + 1);
 
         if (query) {
-            extract_query_param(query, "sni", out_proxy->sni, sizeof(out_proxy->sni));
-            extract_query_param(query, "host", out_proxy->host, sizeof(out_proxy->host));
-            extract_query_param(query, "path", out_proxy->path, sizeof(out_proxy->path));
-            extract_query_param(query, "type", out_proxy->transport, sizeof(out_proxy->transport));
-            extract_query_param(query, "security", out_proxy->security, sizeof(out_proxy->security));
+            extract_query_param(query, "sni", out_ep->sni, sizeof(out_ep->sni));
+            extract_query_param(query, "host", out_ep->host, sizeof(out_ep->host));
+            extract_query_param(query, "path", out_ep->path, sizeof(out_ep->path));
+            extract_query_param(query, "type", out_ep->transport, sizeof(out_ep->transport));
+            extract_query_param(query, "security", out_ep->security, sizeof(out_ep->security));
         }
-        if (out_proxy->sni[0] && !out_proxy->host[0]) safe_str_copy(out_proxy->host, out_proxy->sni, sizeof(out_proxy->host));
-        if (out_proxy->host[0] && !out_proxy->sni[0]) safe_str_copy(out_proxy->sni, out_proxy->host, sizeof(out_proxy->sni));
-        if (out_proxy->port == 80 && strcasecmp(out_proxy->security, "tls") != 0) {
-            safe_str_copy(out_proxy->security, "none", sizeof(out_proxy->security));
+        if (out_ep->sni[0] && !out_ep->host[0]) safe_str_copy(out_ep->host, out_ep->sni, sizeof(out_ep->host));
+        if (out_ep->host[0] && !out_ep->sni[0]) safe_str_copy(out_ep->sni, out_ep->host, sizeof(out_ep->sni));
+        if (out_ep->port == 80 && strcasecmp(out_ep->security, "tls") != 0) {
+            safe_str_copy(out_ep->security, "none", sizeof(out_ep->security));
         }
-        safe_str_copy(out_proxy->raw_uri, uri, sizeof(out_proxy->raw_uri));
+        safe_str_copy(out_ep->raw_uri, uri, sizeof(out_ep->raw_uri));
         return 0;
     }
 
     /* 3. VMESS: vmess://<base64_json> */
     if (strncmp(uri, "vmess://", 8) == 0) {
-        out_proxy->proto = PROXY_PROTO_VMESS;
-        safe_str_copy(out_proxy->proto_str, "vmess", sizeof(out_proxy->proto_str));
+        out_ep->proto = PROXY_PROTO_VMESS;
+        safe_str_copy(out_ep->proto_str, "vmess", sizeof(out_ep->proto_str));
         const char *p = uri + 8;
         char json[2048] = {0};
         base64_decode(p, strlen(p), json, sizeof(json));
 
-        json_get_string(json, "add", out_proxy->server, sizeof(out_proxy->server));
+        json_get_string(json, "add", out_ep->server, sizeof(out_ep->server));
         char port_str[16] = {0};
         json_get_string(json, "port", port_str, sizeof(port_str));
-        out_proxy->port = (uint16_t)atoi(port_str);
-        json_get_string(json, "id", out_proxy->uuid, sizeof(out_proxy->uuid));
-        json_get_string(json, "sni", out_proxy->sni, sizeof(out_proxy->sni));
-        json_get_string(json, "host", out_proxy->host, sizeof(out_proxy->host));
-        json_get_string(json, "path", out_proxy->path, sizeof(out_proxy->path));
-        json_get_string(json, "net", out_proxy->transport, sizeof(out_proxy->transport));
-        json_get_string(json, "tls", out_proxy->security, sizeof(out_proxy->security));
+        out_ep->port = (uint16_t)atoi(port_str);
+        json_get_string(json, "id", out_ep->uuid, sizeof(out_ep->uuid));
+        json_get_string(json, "sni", out_ep->sni, sizeof(out_ep->sni));
+        json_get_string(json, "host", out_ep->host, sizeof(out_ep->host));
+        json_get_string(json, "path", out_ep->path, sizeof(out_ep->path));
+        json_get_string(json, "net", out_ep->transport, sizeof(out_ep->transport));
+        json_get_string(json, "tls", out_ep->security, sizeof(out_ep->security));
 
-        if (out_proxy->sni[0] && !out_proxy->host[0]) safe_str_copy(out_proxy->host, out_proxy->sni, sizeof(out_proxy->host));
+        if (out_ep->sni[0] && !out_ep->host[0]) safe_str_copy(out_ep->host, out_ep->sni, sizeof(out_ep->host));
         return 0;
     }
 
     /* 4. Shadowsocks: ss://<base64>@server:port */
     if (strncmp(uri, "ss://", 5) == 0) {
-        out_proxy->proto = PROXY_PROTO_SHADOWSOCKS;
-        safe_str_copy(out_proxy->proto_str, "shadowsocks", sizeof(out_proxy->proto_str));
+        out_ep->proto = PROXY_PROTO_SHADOWSOCKS;
+        safe_str_copy(out_ep->proto_str, "shadowsocks", sizeof(out_ep->proto_str));
         const char *p = uri + 5;
         const char *at = strchr(p, '@');
         if (at) {
@@ -298,22 +300,83 @@ int proxy_manager_parse_uri(const char *uri, wan_proxy_config_t *out_proxy) {
             if (ulen >= sizeof(userinfo)) ulen = sizeof(userinfo) - 1;
             memcpy(userinfo, p, ulen);
             userinfo[ulen] = '\0';
-            safe_str_copy(out_proxy->uuid, userinfo, sizeof(out_proxy->uuid));
+            safe_str_copy(out_ep->uuid, userinfo, sizeof(out_ep->uuid));
 
             p = at + 1;
             const char *colon = strchr(p, ':');
             if (colon) {
                 size_t slen = (size_t)(colon - p);
-                if (slen >= sizeof(out_proxy->server)) slen = sizeof(out_proxy->server) - 1;
-                memcpy(out_proxy->server, p, slen);
-                out_proxy->server[slen] = '\0';
-                out_proxy->port = (uint16_t)atoi(colon + 1);
+                if (slen >= sizeof(out_ep->server)) slen = sizeof(out_ep->server) - 1;
+                memcpy(out_ep->server, p, slen);
+                out_ep->server[slen] = '\0';
+                out_ep->port = (uint16_t)atoi(colon + 1);
                 return 0;
             }
         }
     }
 
     return -1;
+}
+
+void proxy_manager_sync_servers(wan_proxy_config_t *p) {
+    if (!p) return;
+    if (p->servers[0].raw_uri[0] == '\0' && p->raw_uri[0] != '\0') {
+        safe_str_copy(p->servers[0].raw_uri, p->raw_uri, sizeof(p->servers[0].raw_uri));
+    }
+    if (p->servers[0].server[0] == '\0' && p->server[0] != '\0') {
+        p->servers[0].proto = p->proto;
+        safe_str_copy(p->servers[0].proto_str, p->proto_str, sizeof(p->servers[0].proto_str));
+        safe_str_copy(p->servers[0].server, p->server, sizeof(p->servers[0].server));
+        p->servers[0].port = p->port;
+        safe_str_copy(p->servers[0].uuid, p->uuid, sizeof(p->servers[0].uuid));
+        safe_str_copy(p->servers[0].sni, p->sni, sizeof(p->servers[0].sni));
+        safe_str_copy(p->servers[0].host, p->host, sizeof(p->servers[0].host));
+        safe_str_copy(p->servers[0].path, p->path, sizeof(p->servers[0].path));
+        safe_str_copy(p->servers[0].transport, p->transport, sizeof(p->servers[0].transport));
+        safe_str_copy(p->servers[0].security, p->security, sizeof(p->servers[0].security));
+        safe_str_copy(p->servers[0].encryption, p->encryption, sizeof(p->servers[0].encryption));
+        safe_str_copy(p->servers[0].raw_uri, p->raw_uri, sizeof(p->servers[0].raw_uri));
+    }
+
+    uint32_t count = 0;
+    for (int i = 0; i < MAX_PROXY_SERVERS; i++) {
+        if (p->servers[i].raw_uri[0] != '\0') {
+            if (p->servers[i].server[0] == '\0') {
+                proxy_manager_parse_endpoint(p->servers[i].raw_uri, &p->servers[i]);
+            }
+        }
+        if (p->servers[i].server[0] != '\0') {
+            count++;
+        }
+    }
+    p->server_count = count > 0 ? count : (p->server[0] ? 1 : 0);
+    if (count > 0 && p->servers[0].server[0] != '\0') {
+        p->proto = p->servers[0].proto;
+        safe_str_copy(p->proto_str, p->servers[0].proto_str, sizeof(p->proto_str));
+        safe_str_copy(p->server, p->servers[0].server, sizeof(p->server));
+        p->port = p->servers[0].port;
+        safe_str_copy(p->uuid, p->servers[0].uuid, sizeof(p->uuid));
+        safe_str_copy(p->sni, p->servers[0].sni, sizeof(p->sni));
+        safe_str_copy(p->host, p->servers[0].host, sizeof(p->host));
+        safe_str_copy(p->path, p->servers[0].path, sizeof(p->path));
+        safe_str_copy(p->transport, p->servers[0].transport, sizeof(p->transport));
+        safe_str_copy(p->security, p->servers[0].security, sizeof(p->security));
+        safe_str_copy(p->encryption, p->servers[0].encryption, sizeof(p->encryption));
+        safe_str_copy(p->raw_uri, p->servers[0].raw_uri, sizeof(p->raw_uri));
+    }
+}
+
+int proxy_manager_parse_uri(const char *uri, wan_proxy_config_t *out_proxy) {
+    if (!uri || !out_proxy) return -1;
+    memset(out_proxy, 0, sizeof(wan_proxy_config_t));
+    safe_str_copy(out_proxy->raw_uri, uri, sizeof(out_proxy->raw_uri));
+    out_proxy->enabled = true;
+    int rc = proxy_manager_parse_endpoint(uri, &out_proxy->servers[0]);
+    if (rc == 0) {
+        out_proxy->server_count = 1;
+        proxy_manager_sync_servers(out_proxy);
+    }
+    return rc;
 }
 
 /* Generates JSON configuration for Sing-box / Xray-core */
@@ -456,9 +519,22 @@ static bool check_binary_available(const char *name) {
 #endif
 }
 
-/* Returns true if the proxy configuration strictly requires Xray-core (e.g. ML-KEM post-quantum) */
+/* Returns true if the proxy configuration strictly requires Xray-core (e.g. ML-KEM post-quantum or Multi-Server balancer) */
 static bool is_xray_required(const wan_proxy_config_t *p) {
     if (!p) return false;
+    if (p->server_count > 1) {
+        return true;
+    }
+    for (int i = 0; i < MAX_PROXY_SERVERS; i++) {
+        if (p->servers[i].encryption[0] && strcmp(p->servers[i].encryption, "none") != 0) {
+            return true;
+        }
+        if (strstr(p->servers[i].raw_uri, "v2box://") != NULL ||
+            strstr(p->servers[i].raw_uri, "mlkem") != NULL ||
+            strstr(p->servers[i].raw_uri, "x25519plus") != NULL) {
+            return true;
+        }
+    }
     if (p->encryption[0] && strcmp(p->encryption, "none") != 0) {
         return true;
     }
@@ -470,7 +546,122 @@ static bool is_xray_required(const wan_proxy_config_t *p) {
     return false;
 }
 
-/* Generates Xray-core JSON configuration with native TUN inbound and VLESS Post-Quantum Encryption */
+/* Helper to format and write a single Xray outbound element */
+static void write_xray_single_outbound(FILE *f, const proxy_endpoint_t *ep, const char *tag, const wan_config_t *wan, uint32_t fwmark) {
+    if (!f || !ep || !tag || !wan) return;
+
+    char resolved_server[128];
+    safe_str_copy(resolved_server, ep->server, sizeof(resolved_server));
+    struct in_addr test_addr;
+    if (inet_pton(AF_INET, ep->server, &test_addr) <= 0) {
+        struct hostent *he = gethostbyname(ep->server);
+        if (he && he->h_addr_list && he->h_addr_list[0]) {
+            inet_ntop(AF_INET, he->h_addr_list[0], resolved_server, sizeof(resolved_server));
+            LOG_INFO("[Proxy] Resolved server domain '%s' -> IP '%s'", ep->server, resolved_server);
+        }
+    }
+
+    const char *proto = ep->proto_str[0] ? ep->proto_str : "vless";
+    const char *enc = ep->encryption[0] ? ep->encryption : "none";
+
+    fprintf(f, "    {\n");
+    fprintf(f, "      \"tag\": \"%s\",\n", tag);
+    fprintf(f, "      \"protocol\": \"%s\",\n", proto);
+    fprintf(f, "      \"settings\": {\n");
+
+    if (strcmp(proto, "vless") == 0) {
+        fprintf(f, "        \"vnext\": [\n");
+        fprintf(f, "          {\n");
+        fprintf(f, "            \"address\": \"%s\",\n", resolved_server);
+        fprintf(f, "            \"port\": %u,\n", ep->port > 0 ? ep->port : 443);
+        fprintf(f, "            \"users\": [\n");
+        fprintf(f, "              {\n");
+        fprintf(f, "                \"id\": \"%s\",\n", ep->uuid);
+        fprintf(f, "                \"encryption\": \"%s\",\n", enc);
+        fprintf(f, "                \"level\": 0\n");
+        fprintf(f, "              }\n");
+        fprintf(f, "            ]\n");
+        fprintf(f, "          }\n");
+        fprintf(f, "        ]\n");
+    } else if (strcmp(proto, "vmess") == 0) {
+        fprintf(f, "        \"vnext\": [\n");
+        fprintf(f, "          {\n");
+        fprintf(f, "            \"address\": \"%s\",\n", resolved_server);
+        fprintf(f, "            \"port\": %u,\n", ep->port > 0 ? ep->port : 443);
+        fprintf(f, "            \"users\": [\n");
+        fprintf(f, "              {\n");
+        fprintf(f, "                \"id\": \"%s\",\n", ep->uuid);
+        fprintf(f, "                \"alterId\": 0,\n");
+        fprintf(f, "                \"security\": \"auto\"\n");
+        fprintf(f, "              }\n");
+        fprintf(f, "            ]\n");
+        fprintf(f, "          }\n");
+        fprintf(f, "        ]\n");
+    } else if (strcmp(proto, "trojan") == 0) {
+        fprintf(f, "        \"servers\": [\n");
+        fprintf(f, "          {\n");
+        fprintf(f, "            \"address\": \"%s\",\n", resolved_server);
+        fprintf(f, "            \"port\": %u,\n", ep->port > 0 ? ep->port : 443);
+        fprintf(f, "            \"password\": \"%s\"\n", ep->uuid);
+        fprintf(f, "          }\n");
+        fprintf(f, "        ]\n");
+    } else if (strcmp(proto, "shadowsocks") == 0) {
+        fprintf(f, "        \"servers\": [\n");
+        fprintf(f, "          {\n");
+        fprintf(f, "            \"address\": \"%s\",\n", resolved_server);
+        fprintf(f, "            \"port\": %u,\n", ep->port > 0 ? ep->port : 8388);
+        fprintf(f, "            \"password\": \"%s\",\n", ep->uuid);
+        fprintf(f, "            \"method\": \"chacha20-ietf-poly1305\"\n");
+        fprintf(f, "          }\n");
+        fprintf(f, "        ]\n");
+    }
+
+    fprintf(f, "      },\n");
+
+    /* Stream settings (TLS, WebSocket, physical binding) */
+    bool has_tls = false;
+    if (strcasecmp(ep->security, "none") != 0 && strcasecmp(ep->security, "plain") != 0) {
+        if (strcasecmp(ep->security, "tls") == 0 || ep->port == 443 || (ep->sni[0] != '\0' && ep->port != 80)) {
+            has_tls = true;
+        }
+    }
+
+    const char *network = (strcasecmp(ep->transport, "ws") == 0 || ep->path[0] != '\0') ? "ws" : "tcp";
+
+    fprintf(f, "      \"streamSettings\": {\n");
+    fprintf(f, "        \"network\": \"%s\",\n", network);
+    fprintf(f, "        \"security\": \"%s\",\n", has_tls ? "tls" : "none");
+
+    if (has_tls) {
+        const char *s_sni = ep->sni[0] ? ep->sni : (ep->host[0] ? ep->host : resolved_server);
+        fprintf(f, "        \"tlsSettings\": {\n");
+        fprintf(f, "          \"serverName\": \"%s\",\n", s_sni);
+        fprintf(f, "          \"allowInsecure\": true\n");
+        fprintf(f, "        },\n");
+    }
+
+    if (strcmp(network, "ws") == 0) {
+        const char *h = ep->host[0] ? ep->host : ep->sni;
+        fprintf(f, "        \"wsSettings\": {\n");
+        fprintf(f, "          \"path\": \"%s\",\n", ep->path[0] ? ep->path : "/");
+        if (h && h[0]) {
+            fprintf(f, "          \"headers\": {\n");
+            fprintf(f, "            \"Host\": \"%s\"\n", h);
+            fprintf(f, "          }\n");
+        }
+        fprintf(f, "        },\n");
+    }
+
+    /* Sockopt: strict physical WAN binding & fwmark */
+    fprintf(f, "        \"sockopt\": {\n");
+    fprintf(f, "          \"mark\": %u,\n", fwmark);
+    fprintf(f, "          \"interface\": \"%s\"\n", wan->name);
+    fprintf(f, "        }\n");
+    fprintf(f, "      }\n");
+    fprintf(f, "    },\n");
+}
+
+/* Generates Xray-core JSON configuration with native TUN inbound, Multi-Server Balancer/Failover, and VLESS Post-Quantum Encryption */
 static int generate_xray_config_file(const wan_config_t *wan, int wan_idx, char *out_path, size_t max_path) {
     if (!wan || !out_path) return -1;
     snprintf(out_path, max_path, "/etc/fluxwan/proxy_wan_%u.json", wan->id > 0 ? wan->id : (uint32_t)(wan_idx + 1));
@@ -493,20 +684,7 @@ static int generate_xray_config_file(const wan_config_t *wan, int wan_idx, char 
         tun_name = tun_buf;
     }
 
-    char resolved_server[128];
-    safe_str_copy(resolved_server, p->server, sizeof(resolved_server));
-    struct in_addr test_addr;
-    if (inet_pton(AF_INET, p->server, &test_addr) <= 0) {
-        struct hostent *he = gethostbyname(p->server);
-        if (he && he->h_addr_list && he->h_addr_list[0]) {
-            inet_ntop(AF_INET, he->h_addr_list[0], resolved_server, sizeof(resolved_server));
-            LOG_INFO("[Proxy] Resolved server domain '%s' -> IP '%s'", p->server, resolved_server);
-        }
-    }
-
     uint32_t fwmark = 0x1000 + wan_idx;
-    const char *proto = p->proto_str[0] ? p->proto_str : "vless";
-    const char *enc = p->encryption[0] ? p->encryption : "none";
 
     fprintf(f, "{\n");
     fprintf(f, "  \"log\": {\n    \"loglevel\": \"warning\"\n  },\n");
@@ -524,100 +702,27 @@ static int generate_xray_config_file(const wan_config_t *wan, int wan_idx, char 
 
     /* Outbounds */
     fprintf(f, "  \"outbounds\": [\n");
-    fprintf(f, "    {\n");
-    fprintf(f, "      \"protocol\": \"%s\",\n", proto);
-    fprintf(f, "      \"settings\": {\n");
 
-    if (strcmp(proto, "vless") == 0) {
-        fprintf(f, "        \"vnext\": [\n");
-        fprintf(f, "          {\n");
-        fprintf(f, "            \"address\": \"%s\",\n", resolved_server);
-        fprintf(f, "            \"port\": %u,\n", p->port > 0 ? p->port : 443);
-        fprintf(f, "            \"users\": [\n");
-        fprintf(f, "              {\n");
-        fprintf(f, "                \"id\": \"%s\",\n", p->uuid);
-        fprintf(f, "                \"encryption\": \"%s\",\n", enc);
-        fprintf(f, "                \"level\": 0\n");
-        fprintf(f, "              }\n");
-        fprintf(f, "            ]\n");
-        fprintf(f, "          }\n");
-        fprintf(f, "        ]\n");
-    } else if (strcmp(proto, "vmess") == 0) {
-        fprintf(f, "        \"vnext\": [\n");
-        fprintf(f, "          {\n");
-        fprintf(f, "            \"address\": \"%s\",\n", resolved_server);
-        fprintf(f, "            \"port\": %u,\n", p->port > 0 ? p->port : 443);
-        fprintf(f, "            \"users\": [\n");
-        fprintf(f, "              {\n");
-        fprintf(f, "                \"id\": \"%s\",\n", p->uuid);
-        fprintf(f, "                \"alterId\": 0,\n");
-        fprintf(f, "                \"security\": \"auto\"\n");
-        fprintf(f, "              }\n");
-        fprintf(f, "            ]\n");
-        fprintf(f, "          }\n");
-        fprintf(f, "        ]\n");
-    } else if (strcmp(proto, "trojan") == 0) {
-        fprintf(f, "        \"servers\": [\n");
-        fprintf(f, "          {\n");
-        fprintf(f, "            \"address\": \"%s\",\n", resolved_server);
-        fprintf(f, "            \"port\": %u,\n", p->port > 0 ? p->port : 443);
-        fprintf(f, "            \"password\": \"%s\"\n", p->uuid);
-        fprintf(f, "          }\n");
-        fprintf(f, "        ]\n");
-    } else if (strcmp(proto, "shadowsocks") == 0) {
-        fprintf(f, "        \"servers\": [\n");
-        fprintf(f, "          {\n");
-        fprintf(f, "            \"address\": \"%s\",\n", resolved_server);
-        fprintf(f, "            \"port\": %u,\n", p->port > 0 ? p->port : 8388);
-        fprintf(f, "            \"password\": \"%s\",\n", p->uuid);
-        fprintf(f, "            \"method\": \"chacha20-ietf-poly1305\"\n");
-        fprintf(f, "          }\n");
-        fprintf(f, "        ]\n");
-    }
-
-    fprintf(f, "      },\n");
-
-    /* Stream settings (TLS, WebSocket, physical binding) */
-    bool has_tls = false;
-    if (strcasecmp(p->security, "none") != 0 && strcasecmp(p->security, "plain") != 0) {
-        if (strcasecmp(p->security, "tls") == 0 || p->port == 443 || (p->sni[0] != '\0' && p->port != 80)) {
-            has_tls = true;
+    uint32_t active_servers = 0;
+    for (int i = 0; i < MAX_PROXY_SERVERS; i++) {
+        if (p->servers[i].server[0] != '\0') {
+            active_servers++;
         }
     }
 
-    const char *network = (strcasecmp(p->transport, "ws") == 0 || p->path[0] != '\0') ? "ws" : "tcp";
-
-    fprintf(f, "      \"streamSettings\": {\n");
-    fprintf(f, "        \"network\": \"%s\",\n", network);
-    fprintf(f, "        \"security\": \"%s\",\n", has_tls ? "tls" : "none");
-
-    if (has_tls) {
-        const char *s_sni = p->sni[0] ? p->sni : (p->host[0] ? p->host : resolved_server);
-        fprintf(f, "        \"tlsSettings\": {\n");
-        fprintf(f, "          \"serverName\": \"%s\",\n", s_sni);
-        fprintf(f, "          \"allowInsecure\": true\n");
-        fprintf(f, "        },\n");
-    }
-
-    if (strcmp(network, "ws") == 0) {
-        const char *h = p->host[0] ? p->host : p->sni;
-        fprintf(f, "        \"wsSettings\": {\n");
-        fprintf(f, "          \"path\": \"%s\",\n", p->path[0] ? p->path : "/");
-        if (h && h[0]) {
-            fprintf(f, "          \"headers\": {\n");
-            fprintf(f, "            \"Host\": \"%s\"\n", h);
-            fprintf(f, "          }\n");
+    if (active_servers > 1) {
+        for (int i = 0; i < MAX_PROXY_SERVERS; i++) {
+            if (p->servers[i].server[0] != '\0') {
+                char tag[32];
+                snprintf(tag, sizeof(tag), "proxy-out-%d", i);
+                write_xray_single_outbound(f, &p->servers[i], tag, wan, fwmark);
+            }
         }
-        fprintf(f, "        },\n");
+    } else {
+        /* Single server outbound */
+        const proxy_endpoint_t *ep = (p->servers[0].server[0] != '\0') ? &p->servers[0] : (const proxy_endpoint_t *)p;
+        write_xray_single_outbound(f, ep, "proxy-out", wan, fwmark);
     }
-
-    /* Sockopt: strict physical WAN binding & fwmark */
-    fprintf(f, "        \"sockopt\": {\n");
-    fprintf(f, "          \"mark\": %u,\n", fwmark);
-    fprintf(f, "          \"interface\": \"%s\"\n", wan->name);
-    fprintf(f, "        }\n");
-    fprintf(f, "      }\n");
-    fprintf(f, "    },\n");
 
     /* Direct freedom outbound with egress interface pinning */
     fprintf(f, "    {\n");
@@ -630,12 +735,65 @@ static int generate_xray_config_file(const wan_config_t *wan, int wan_idx, char 
     fprintf(f, "        }\n");
     fprintf(f, "      }\n");
     fprintf(f, "    }\n");
-    fprintf(f, "  ]\n");
+    fprintf(f, "  ]");
+
+    if (active_servers > 1) {
+        const char *strategy_str = (p->strategy == PROXY_STRATEGY_ROUND_ROBIN) ? "roundRobin" : "leastPing";
+        fprintf(f, ",\n");
+        fprintf(f, "  \"observatory\": {\n");
+        fprintf(f, "    \"subjectSelector\": [\"proxy-out-\"],\n");
+        fprintf(f, "    \"probeURL\": \"http://1.1.1.1\",\n");
+        fprintf(f, "    \"probeInterval\": \"3s\",\n");
+        fprintf(f, "    \"enableConcurrency\": true\n");
+        fprintf(f, "  },\n");
+        fprintf(f, "  \"routing\": {\n");
+        fprintf(f, "    \"domainStrategy\": \"AsIs\",\n");
+        fprintf(f, "    \"balancers\": [\n");
+        fprintf(f, "      {\n");
+        fprintf(f, "        \"tag\": \"wan_balancer\",\n");
+        fprintf(f, "        \"selector\": [\"proxy-out-\"],\n");
+        fprintf(f, "        \"strategy\": {\n");
+        fprintf(f, "          \"type\": \"%s\"\n", strategy_str);
+        fprintf(f, "        }\n");
+        fprintf(f, "      }\n");
+        fprintf(f, "    ],\n");
+        fprintf(f, "    \"rules\": [\n");
+        fprintf(f, "      {\n");
+        fprintf(f, "        \"type\": \"field\",\n");
+        fprintf(f, "        \"inboundTag\": [\"tun-in\"],\n");
+        fprintf(f, "        \"balancerTag\": \"wan_balancer\"\n");
+        fprintf(f, "      },\n");
+        fprintf(f, "      {\n");
+        fprintf(f, "        \"type\": \"field\",\n");
+        fprintf(f, "        \"outboundTag\": \"direct\"\n");
+        fprintf(f, "      }\n");
+        fprintf(f, "    ]\n");
+        fprintf(f, "  }\n");
+    } else {
+        fprintf(f, ",\n");
+        fprintf(f, "  \"routing\": {\n");
+        fprintf(f, "    \"domainStrategy\": \"AsIs\",\n");
+        fprintf(f, "    \"rules\": [\n");
+        fprintf(f, "      {\n");
+        fprintf(f, "        \"type\": \"field\",\n");
+        fprintf(f, "        \"inboundTag\": [\"tun-in\"],\n");
+        fprintf(f, "        \"outboundTag\": \"proxy-out\"\n");
+        fprintf(f, "      },\n");
+        fprintf(f, "      {\n");
+        fprintf(f, "        \"type\": \"field\",\n");
+        fprintf(f, "        \"outboundTag\": \"direct\"\n");
+        fprintf(f, "      }\n");
+        fprintf(f, "    ]\n");
+        fprintf(f, "  }\n");
+    }
+
     fprintf(f, "}\n");
     fclose(f);
 
-    LOG_INFO("[Proxy] Generated Xray-core configuration for WAN '%s' at %s (Device %s, Mark 0x%x, Enc: %s)",
-             wan->label, out_path, wan->name, fwmark, enc);
+    LOG_INFO("[Proxy] Generated Xray-core configuration for WAN '%s' at %s (Servers: %u, Strategy: %s, Device %s, Mark 0x%x)",
+             wan->label, out_path, active_servers,
+             (p->strategy == PROXY_STRATEGY_ROUND_ROBIN) ? "roundRobin" : "leastPing",
+             wan->name, fwmark);
     return 0;
 }
 
@@ -690,31 +848,24 @@ void proxy_manager_close(proxy_manager_ctx_t *ctx) {
     free(ctx);
 }
 
+int proxy_manager_generate_config(const wan_config_t *wan, int wan_idx, char *out_path, size_t max_path) {
+    if (!wan || !out_path) return -1;
+    bool use_xray = check_binary_available("xray");
+    if (!use_xray && is_xray_required(&wan->proxy)) {
+        use_xray = true;
+    }
+    return use_xray ? generate_xray_config_file(wan, wan_idx, out_path, max_path)
+                    : generate_proxy_config_file(wan, wan_idx, out_path, max_path);
+}
+
 int proxy_manager_start_wan(proxy_manager_ctx_t *ctx, uint32_t wan_idx) {
     if (!ctx || !ctx->config || wan_idx >= ctx->config->wan_count) return -1;
     wan_config_t *wan = &ctx->config->wans[wan_idx];
-    /* If raw_uri is present, ensure all fields including post-quantum encryption are fully extracted */
-    if (wan->enabled && wan->proxy.enabled && wan->proxy.raw_uri[0]) {
-        wan_proxy_config_t tmp_proxy;
-        if (proxy_manager_parse_uri(wan->proxy.raw_uri, &tmp_proxy) == 0) {
-            if (tmp_proxy.encryption[0] && strcmp(tmp_proxy.encryption, "none") != 0) {
-                safe_str_copy(wan->proxy.encryption, tmp_proxy.encryption, sizeof(wan->proxy.encryption));
-            }
-            if (!wan->proxy.server[0]) {
-                safe_str_copy(wan->proxy.server, tmp_proxy.server, sizeof(wan->proxy.server));
-                wan->proxy.port = tmp_proxy.port;
-                safe_str_copy(wan->proxy.uuid, tmp_proxy.uuid, sizeof(wan->proxy.uuid));
-                safe_str_copy(wan->proxy.sni, tmp_proxy.sni, sizeof(wan->proxy.sni));
-                safe_str_copy(wan->proxy.host, tmp_proxy.host, sizeof(wan->proxy.host));
-                safe_str_copy(wan->proxy.path, tmp_proxy.path, sizeof(wan->proxy.path));
-                safe_str_copy(wan->proxy.transport, tmp_proxy.transport, sizeof(wan->proxy.transport));
-                safe_str_copy(wan->proxy.security, tmp_proxy.security, sizeof(wan->proxy.security));
-                safe_str_copy(wan->proxy.proto_str, tmp_proxy.proto_str, sizeof(wan->proxy.proto_str));
-                wan->proxy.proto = tmp_proxy.proto;
-            }
-        }
+    /* Synchronize and parse all configured proxy server endpoints */
+    if (wan->enabled && wan->proxy.enabled) {
+        proxy_manager_sync_servers(&wan->proxy);
     }
-    if (!wan->enabled || !wan->proxy.enabled || !wan->proxy.server[0]) {
+    if (!wan->enabled || !wan->proxy.enabled || (!wan->proxy.server[0] && wan->proxy.server_count == 0)) {
         return proxy_manager_stop_wan(ctx, wan_idx);
     }
 
@@ -723,18 +874,13 @@ int proxy_manager_start_wan(proxy_manager_ctx_t *ctx, uint32_t wan_idx) {
         snprintf(wan->proxy.tun_dev, sizeof(wan->proxy.tun_dev), "tun_wan%u", (unsigned int)((wan->id > 0 ? wan->id : (wan_idx + 1)) % 1000));
     }
 
-    /* Select appropriate engine: Prefer Xray-core native TUN (same as V2Box) for max throughput */
-    bool use_xray = check_binary_available("xray");
-    if (!use_xray && is_xray_required(&wan->proxy)) {
-        use_xray = true;
-    }
-
     char conf_path[256];
-    int gen_rc = use_xray ? generate_xray_config_file(wan, (int)wan_idx, conf_path, sizeof(conf_path))
-                          : generate_proxy_config_file(wan, (int)wan_idx, conf_path, sizeof(conf_path));
+    int gen_rc = proxy_manager_generate_config(wan, (int)wan_idx, conf_path, sizeof(conf_path));
     if (gen_rc != 0) {
         return -1;
     }
+
+    bool use_xray = check_binary_available("xray") || is_xray_required(&wan->proxy);
 
 #if defined(__linux__)
     /* Stop any existing instance for this WAN */

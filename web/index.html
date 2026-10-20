@@ -2061,85 +2061,184 @@
                                 </div>
 
                                 <div x-show="wan.proxy_enabled" class="space-y-2.5 pt-1">
-                                    <!-- 1-Click Import URI -->
-                                    <div class="bg-indigo-950/30 p-2 rounded-lg border border-indigo-500/20 space-y-1">
-                                        <label class="text-4xs text-indigo-300 font-semibold block" x-text="currentLang==='ar' ? '⚡ استيراد رابط مباشر (v2box://, vless://, vmess://, trojan://, ss://):' : '⚡ 1-Click Quick Import Link (v2box, vless, vmess, trojan):'"></label>
-                                        <div class="flex items-center space-x-1.5">
-                                            <input type="text" x-model="wan.proxy_raw_uri" @input="if (wan.proxy_raw_uri && (wan.proxy_raw_uri.includes('://'))) { parseProxyUri(wan); }" @paste="$nextTick(() => parseProxyUri(wan))" class="flex-1 bg-slate-950 border border-slate-700 rounded-md px-2 py-1 text-white font-mono text-3xs" placeholder="vless://... or v2box://locked=...">
-                                            <button type="button" @click="parseProxyUri(wan)" class="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-md text-3xs font-bold transition flex items-center space-x-1">
-                                                <span>📥</span>
-                                                <span x-text="currentLang==='ar' ? 'استيراد' : 'Import'"></span>
+                                    <!-- Multi-Server Strategy Engine -->
+                                    <div class="bg-indigo-950/40 p-2.5 rounded-lg border border-indigo-500/30 space-y-2">
+                                        <div class="flex items-center justify-between">
+                                            <label class="text-3xs text-indigo-300 font-bold flex items-center space-x-1.5">
+                                                <span>🛡️</span>
+                                                <span x-text="currentLang==='ar' ? 'استراتيجية السيرفرات المتعددة (Multi-Server Engine):' : 'Multi-Server Strategy:'"></span>
+                                            </label>
+                                            <span class="text-4xs px-2 py-0.5 rounded font-mono font-bold"
+                                                  :class="(wan.proxy_strategy === 1 || wan.proxy_strategy_str === 'roundRobin') ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'"
+                                                  x-text="(wan.proxy_strategy === 1 || wan.proxy_strategy_str === 'roundRobin') ? (currentLang==='ar' ? '⚖️ لود بلنس متزامن' : '⚖️ Active Load Balancer') : (currentLang==='ar' ? '⚡ أقل بنغ + تحويل فوري' : '⚡ Least-Ping Failover')"></span>
+                                        </div>
+                                        <div class="grid grid-cols-2 gap-2">
+                                            <button type="button" @click="wan.proxy_strategy = 0; wan.proxy_strategy_str = 'leastPing'; isEditing = true"
+                                                    class="p-2 rounded-lg border text-3xs font-semibold flex items-center space-x-2 transition text-left"
+                                                    :class="(wan.proxy_strategy === 0 || !wan.proxy_strategy) ? 'bg-indigo-600/30 border-indigo-500 text-white shadow-sm shadow-indigo-500/20' : 'bg-slate-900/50 border-slate-700/60 text-slate-400 hover:text-slate-200'">
+                                                <span class="text-base">⚡</span>
+                                                <div>
+                                                    <span class="block font-bold text-indigo-200" x-text="currentLang==='ar' ? 'تحويل فوري (Failover)' : 'Instant Failover'"></span>
+                                                    <span class="block text-4xs opacity-80" x-text="currentLang==='ar' ? 'فحص مستمر وتوجيه لأقل بنغ وتحويل فوري' : 'Observatory least-ping failover'"></span>
+                                                </div>
+                                            </button>
+                                            <button type="button" @click="wan.proxy_strategy = 1; wan.proxy_strategy_str = 'roundRobin'; isEditing = true"
+                                                    class="p-2 rounded-lg border text-3xs font-semibold flex items-center space-x-2 transition text-left"
+                                                    :class="(wan.proxy_strategy === 1 || wan.proxy_strategy_str === 'roundRobin') ? 'bg-cyan-600/30 border-cyan-500 text-white shadow-sm shadow-cyan-500/20' : 'bg-slate-900/50 border-slate-700/60 text-slate-400 hover:text-slate-200'">
+                                                <span class="text-base">⚖️</span>
+                                                <div>
+                                                    <span class="block font-bold text-cyan-200" x-text="currentLang==='ar' ? 'لود بلنس (Load Balance)' : 'Round-Robin Balancer'"></span>
+                                                    <span class="block text-4xs opacity-80" x-text="currentLang==='ar' ? 'سحب وتوزيع متزامن من كل السيرفرات' : 'Simultaneous active balancer'"></span>
+                                                </div>
                                             </button>
                                         </div>
                                     </div>
 
-                                    <!-- Protocol & Server Grid -->
-                                    <div class="grid grid-cols-3 gap-2">
-                                        <div>
-                                            <label class="text-4xs text-slate-400 block mb-0.5">Protocol</label>
-                                            <select x-model="wan.proxy_proto" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white text-3xs">
-                                                <option value="vless">VLESS</option>
-                                                <option value="vmess">VMess</option>
-                                                <option value="trojan">Trojan</option>
-                                                <option value="shadowsocks">Shadowsocks</option>
-                                            </select>
+                                    <!-- Server 1 (Primary) -->
+                                    <div class="bg-slate-950/70 p-2 rounded-lg border border-emerald-500/30 space-y-1">
+                                        <div class="flex items-center justify-between">
+                                            <label class="text-4xs text-emerald-400 font-bold flex items-center space-x-1">
+                                                <span>🟢</span>
+                                                <span x-text="currentLang==='ar' ? 'السيرفر 1 (الأساسي):' : 'Server 1 (Primary):'"></span>
+                                            </label>
+                                            <template x-if="wan.proxyTestResult1">
+                                                <span class="text-4xs font-mono font-bold px-1.5 py-0.2 rounded" :class="wan.proxyTestResult1.includes('ms') ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'" x-text="wan.proxyTestResult1"></span>
+                                            </template>
                                         </div>
-                                        <div>
-                                            <label class="text-4xs text-slate-400 block mb-0.5">Server / Host</label>
-                                            <input type="text" x-model="wan.proxy_server" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white font-mono text-3xs" placeholder="1.2.3.4">
-                                        </div>
-                                        <div>
-                                            <label class="text-4xs text-slate-400 block mb-0.5">Port</label>
-                                            <input type="number" x-model.number="wan.proxy_port" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white font-mono text-3xs" placeholder="443">
-                                        </div>
-                                    </div>
-
-                                    <!-- UUID / Password -->
-                                    <div>
-                                        <label class="text-4xs text-slate-400 block mb-0.5">UUID / Password</label>
-                                        <input type="text" x-model="wan.proxy_uuid" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white font-mono text-3xs" placeholder="a1b2c3d4-e5f6-...">
-                                    </div>
-
-                                    <!-- SNI (Zero-Rated Bug Host) & Host Header -->
-                                    <div class="grid grid-cols-2 gap-2">
-                                        <div>
-                                            <label class="text-4xs text-emerald-400 font-semibold block mb-0.5" x-text="currentLang==='ar' ? '🎯 الـ SNI (الموقع المجاني للثغرة)' : '🎯 TLS SNI (Zero-Rated Host)'"></label>
-                                            <input type="text" x-model="wan.proxy_sni" class="w-full bg-slate-950 border border-emerald-500/40 rounded px-2 py-1 text-emerald-300 font-mono text-3xs" placeholder="portal.oodi.iq">
-                                        </div>
-                                        <div>
-                                            <label class="text-4xs text-slate-400 block mb-0.5">Host Header</label>
-                                            <input type="text" x-model="wan.proxy_host" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white font-mono text-3xs" placeholder="portal.oodi.iq">
+                                        <div class="flex items-center space-x-1.5">
+                                            <input type="text" x-model="wan.proxy_raw_uri" @input="if (wan.proxy_raw_uri && (wan.proxy_raw_uri.includes('://'))) { parseProxyUri(wan, 0); }" @paste="$nextTick(() => parseProxyUri(wan, 0))" class="flex-1 bg-slate-950 border border-slate-700 rounded-md px-2 py-1 text-white font-mono text-3xs" placeholder="vless://... or v2box://locked=...">
+                                            <button type="button" @click="parseProxyUri(wan, 0)" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md text-3xs font-bold transition flex items-center space-x-1">
+                                                <span>📥</span>
+                                                <span x-text="currentLang==='ar' ? 'استيراد' : 'Import'"></span>
+                                            </button>
+                                            <button type="button" @click="testProxyTunnelSlot(wan, 0)" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 rounded-md text-3xs font-semibold flex items-center transition" title="Test Latency">
+                                                <span>⚡</span>
+                                            </button>
                                         </div>
                                     </div>
 
-                                    <!-- Transport & Path -->
-                                    <div class="grid grid-cols-3 gap-2">
-                                        <div>
-                                            <label class="text-4xs text-slate-400 block mb-0.5">Transport</label>
-                                            <select x-model="wan.proxy_transport" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white text-3xs">
-                                                <option value="ws">WebSocket (WS)</option>
-                                                <option value="tcp">TCP</option>
-                                                <option value="grpc">gRPC</option>
-                                            </select>
+                                    <!-- Server 2 (Backup / Secondary Balancer) -->
+                                    <div class="bg-slate-950/70 p-2 rounded-lg border border-cyan-500/30 space-y-1">
+                                        <div class="flex items-center justify-between">
+                                            <label class="text-4xs text-cyan-400 font-bold flex items-center space-x-1">
+                                                <span>🔵</span>
+                                                <span x-text="currentLang==='ar' ? 'السيرفر 2 (احتياطي / موزع):' : 'Server 2 (Backup / Balancer):'"></span>
+                                            </label>
+                                            <template x-if="wan.proxyTestResult2">
+                                                <span class="text-4xs font-mono font-bold px-1.5 py-0.2 rounded" :class="wan.proxyTestResult2.includes('ms') ? 'bg-cyan-500/20 text-cyan-400' : 'bg-rose-500/20 text-rose-400'" x-text="wan.proxyTestResult2"></span>
+                                            </template>
                                         </div>
-                                        <div>
-                                            <label class="text-4xs text-slate-400 block mb-0.5">Security</label>
-                                            <select x-model="wan.proxy_security" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white text-3xs">
-                                                <option value="tls">TLS</option>
-                                                <option value="none">None (Plain HTTP)</option>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label class="text-4xs text-slate-400 block mb-0.5">WS Path</label>
-                                            <input type="text" x-model="wan.proxy_path" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white font-mono text-3xs" placeholder="/vless-ws">
+                                        <div class="flex items-center space-x-1.5">
+                                            <input type="text" x-model="wan.proxy_raw_uri_2" @input="if (wan.proxy_raw_uri_2 && (wan.proxy_raw_uri_2.includes('://'))) { parseProxyUri(wan, 1); }" @paste="$nextTick(() => parseProxyUri(wan, 1))" class="flex-1 bg-slate-950 border border-slate-700 rounded-md px-2 py-1 text-white font-mono text-3xs" placeholder="vless://... (Optional 2nd Node)">
+                                            <button type="button" @click="parseProxyUri(wan, 1)" class="px-2.5 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded-md text-3xs font-bold transition flex items-center space-x-1">
+                                                <span>📥</span>
+                                                <span x-text="currentLang==='ar' ? 'استيراد' : 'Import'"></span>
+                                            </button>
+                                            <button type="button" @click="testProxyTunnelSlot(wan, 1)" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-400 border border-slate-700 rounded-md text-3xs font-semibold flex items-center transition" title="Test Latency">
+                                                <span>⚡</span>
+                                            </button>
                                         </div>
                                     </div>
 
-                                    <!-- Tunnel Test Button & Status -->
+                                    <!-- Server 3 (Backup / Tertiary Balancer) -->
+                                    <div class="bg-slate-950/70 p-2 rounded-lg border border-purple-500/30 space-y-1">
+                                        <div class="flex items-center justify-between">
+                                            <label class="text-4xs text-purple-400 font-bold flex items-center space-x-1">
+                                                <span>🟣</span>
+                                                <span x-text="currentLang==='ar' ? 'السيرفر 3 (احتياطي / موزع):' : 'Server 3 (Backup / Balancer):'"></span>
+                                            </label>
+                                            <template x-if="wan.proxyTestResult3">
+                                                <span class="text-4xs font-mono font-bold px-1.5 py-0.2 rounded" :class="wan.proxyTestResult3.includes('ms') ? 'bg-purple-500/20 text-purple-400' : 'bg-rose-500/20 text-rose-400'" x-text="wan.proxyTestResult3"></span>
+                                            </template>
+                                        </div>
+                                        <div class="flex items-center space-x-1.5">
+                                            <input type="text" x-model="wan.proxy_raw_uri_3" @input="if (wan.proxy_raw_uri_3 && (wan.proxy_raw_uri_3.includes('://'))) { parseProxyUri(wan, 2); }" @paste="$nextTick(() => parseProxyUri(wan, 2))" class="flex-1 bg-slate-950 border border-slate-700 rounded-md px-2 py-1 text-white font-mono text-3xs" placeholder="vless://... (Optional 3rd Node)">
+                                            <button type="button" @click="parseProxyUri(wan, 2)" class="px-2.5 py-1 bg-purple-600 hover:bg-purple-500 text-white rounded-md text-3xs font-bold transition flex items-center space-x-1">
+                                                <span>📥</span>
+                                                <span x-text="currentLang==='ar' ? 'استيراد' : 'Import'"></span>
+                                            </button>
+                                            <button type="button" @click="testProxyTunnelSlot(wan, 2)" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-purple-400 border border-slate-700 rounded-md text-3xs font-semibold flex items-center transition" title="Test Latency">
+                                                <span>⚡</span>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Collapsible Detailed Parameters (Server 1) -->
+                                    <div x-data="{ showAdvanced: false }" class="border border-slate-800 rounded-lg overflow-hidden">
+                                        <button type="button" @click="showAdvanced = !showAdvanced" class="w-full bg-slate-900/60 px-2 py-1 text-4xs text-slate-400 hover:text-slate-200 flex items-center justify-between font-mono">
+                                            <span x-text="currentLang==='ar' ? '⚙️ تفاصيل السيرفر المتقدمة (بروتوكول، منفذ، تشفير، SNI)' : '⚙️ Advanced Server Parameters (Proto, Port, UUID, SNI)'"></span>
+                                            <span x-text="showAdvanced ? '▲ إخفاء' : '▼ إظهار'"></span>
+                                        </button>
+                                        <div x-show="showAdvanced" class="p-2 space-y-2 bg-slate-950/80">
+                                            <!-- Protocol & Server Grid -->
+                                            <div class="grid grid-cols-3 gap-2">
+                                                <div>
+                                                    <label class="text-4xs text-slate-400 block mb-0.5">Protocol</label>
+                                                    <select x-model="wan.proxy_proto" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white text-3xs">
+                                                        <option value="vless">VLESS</option>
+                                                        <option value="vmess">VMess</option>
+                                                        <option value="trojan">Trojan</option>
+                                                        <option value="shadowsocks">Shadowsocks</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label class="text-4xs text-slate-400 block mb-0.5">Server / Host</label>
+                                                    <input type="text" x-model="wan.proxy_server" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white font-mono text-3xs" placeholder="1.2.3.4">
+                                                </div>
+                                                <div>
+                                                    <label class="text-4xs text-slate-400 block mb-0.5">Port</label>
+                                                    <input type="number" x-model.number="wan.proxy_port" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white font-mono text-3xs" placeholder="443">
+                                                </div>
+                                            </div>
+
+                                            <!-- UUID / Password -->
+                                            <div>
+                                                <label class="text-4xs text-slate-400 block mb-0.5">UUID / Password</label>
+                                                <input type="text" x-model="wan.proxy_uuid" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white font-mono text-3xs" placeholder="a1b2c3d4-e5f6-...">
+                                            </div>
+
+                                            <!-- SNI (Zero-Rated Bug Host) & Host Header -->
+                                            <div class="grid grid-cols-2 gap-2">
+                                                <div>
+                                                    <label class="text-4xs text-emerald-400 font-semibold block mb-0.5" x-text="currentLang==='ar' ? '🎯 الـ SNI (الموقع المجاني للثغرة)' : '🎯 TLS SNI (Zero-Rated Host)'"></label>
+                                                    <input type="text" x-model="wan.proxy_sni" class="w-full bg-slate-950 border border-emerald-500/40 rounded px-2 py-1 text-emerald-300 font-mono text-3xs" placeholder="portal.oodi.iq">
+                                                </div>
+                                                <div>
+                                                    <label class="text-4xs text-slate-400 block mb-0.5">Host Header</label>
+                                                    <input type="text" x-model="wan.proxy_host" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white font-mono text-3xs" placeholder="portal.oodi.iq">
+                                                </div>
+                                            </div>
+
+                                            <!-- Transport & Path -->
+                                            <div class="grid grid-cols-3 gap-2">
+                                                <div>
+                                                    <label class="text-4xs text-slate-400 block mb-0.5">Transport</label>
+                                                    <select x-model="wan.proxy_transport" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white text-3xs">
+                                                        <option value="ws">WebSocket (WS)</option>
+                                                        <option value="tcp">TCP</option>
+                                                        <option value="grpc">gRPC</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label class="text-4xs text-slate-400 block mb-0.5">Security</label>
+                                                    <select x-model="wan.proxy_security" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white text-3xs">
+                                                        <option value="tls">TLS</option>
+                                                        <option value="none">None (Plain HTTP)</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label class="text-4xs text-slate-400 block mb-0.5">WS Path</label>
+                                                    <input type="text" x-model="wan.proxy_path" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white font-mono text-3xs" placeholder="/vless-ws">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Overall Tunnel Test Button & Status -->
                                     <div class="flex items-center justify-between pt-1">
                                         <button type="button" @click="testProxyTunnel(wan)" :disabled="wan.proxyTesting" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-3xs font-semibold flex items-center space-x-1.5 transition">
                                             <span :class="wan.proxyTesting ? 'animate-spin' : ''">⚡</span>
-                                            <span x-text="wan.proxyTesting ? (currentLang==='ar'?'جاري الفحص...':'Testing...') : (currentLang==='ar'?'فحص الاتصال والـ Ping':'Test Latency')"></span>
+                                            <span x-text="wan.proxyTesting ? (currentLang==='ar'?'جاري فحص السيرفرات...':'Testing...') : (currentLang==='ar'?'فحص جميع السيرفرات والـ Ping':'Test All Servers Latency')"></span>
                                         </button>
                                         <template x-if="wan.proxyTestResult">
                                             <span class="text-3xs font-mono font-bold px-2 py-0.5 rounded" :class="wan.proxyTestResult.includes('ms') ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'" x-text="wan.proxyTestResult"></span>
@@ -6950,6 +7049,8 @@
                         scannedNetworks: [],
                         showWifiPassword: false,
                         proxy_enabled: false,
+                        proxy_strategy: 0,
+                        proxy_strategy_str: 'leastPing',
                         proxy_proto: 'vless',
                         proxy_server: '',
                         proxy_port: 443,
@@ -6960,9 +7061,14 @@
                         proxy_transport: 'ws',
                         proxy_security: 'tls',
                         proxy_raw_uri: '',
+                        proxy_raw_uri_2: '',
+                        proxy_raw_uri_3: '',
                         proxy_tun_dev: '',
                         proxyTesting: false,
-                        proxyTestResult: ''
+                        proxyTestResult: '',
+                        proxyTestResult1: '',
+                        proxyTestResult2: '',
+                        proxyTestResult3: ''
                     });
                 },
 
@@ -6972,11 +7078,12 @@
                     this.normalizeWanIds();
                 },
 
-                parseProxyUri(wan) {
-                    if (!wan.proxy_raw_uri || !wan.proxy_raw_uri.trim()) return;
-                    let uri = wan.proxy_raw_uri.trim();
+                parseProxyUri(wan, slot = 0) {
+                    let fieldName = slot === 0 ? 'proxy_raw_uri' : (slot === 1 ? 'proxy_raw_uri_2' : 'proxy_raw_uri_3');
+                    if (!wan[fieldName] || !wan[fieldName].trim()) return;
+                    let uri = wan[fieldName].trim();
 
-                    // If V2Box locked link, decode Base64 for instant client-side preview
+                    // If V2Box locked link, decode Base64 for instant preview
                     let cleanUri = uri;
                     if (cleanUri.startsWith('v2box://locked=')) {
                         try {
@@ -6988,47 +7095,47 @@
                         } catch(e) {}
                     }
 
-                    /* 1. Instant Client-Side Parser for VLESS, Trojan, and Shadowsocks */
-                    try {
-                        if (cleanUri.startsWith('vless://') || cleanUri.startsWith('trojan://')) {
-                            const proto = cleanUri.startsWith('vless://') ? 'vless' : 'trojan';
-                            const clean = cleanUri.replace(/^(vless|trojan):\/\//, '');
-                            const atIdx = clean.indexOf('@');
-                            if (atIdx > 0) {
-                                wan.proxy_uuid = decodeURIComponent(clean.substring(0, atIdx));
-                                const afterAt = clean.substring(atIdx + 1);
-                                const qIdx = afterAt.indexOf('?');
-                                const hashIdx = afterAt.indexOf('#');
-                                const serverPortPart = afterAt.substring(0, qIdx > 0 ? qIdx : (hashIdx > 0 ? hashIdx : afterAt.length));
-                                const colonIdx = serverPortPart.indexOf(':');
-                                if (colonIdx > 0) {
-                                    wan.proxy_server = serverPortPart.substring(0, colonIdx);
-                                    wan.proxy_port = parseInt(serverPortPart.substring(colonIdx + 1), 10) || 443;
-                                } else {
-                                    wan.proxy_server = serverPortPart;
-                                    wan.proxy_port = 443;
-                                }
-                                wan.proxy_proto = proto;
-                                wan.proxy_enabled = true;
+                    if (slot === 0) {
+                        try {
+                            if (cleanUri.startsWith('vless://') || cleanUri.startsWith('trojan://')) {
+                                const proto = cleanUri.startsWith('vless://') ? 'vless' : 'trojan';
+                                const clean = cleanUri.replace(/^(vless|trojan):\/\//, '');
+                                const atIdx = clean.indexOf('@');
+                                if (atIdx > 0) {
+                                    wan.proxy_uuid = decodeURIComponent(clean.substring(0, atIdx));
+                                    const afterAt = clean.substring(atIdx + 1);
+                                    const qIdx = afterAt.indexOf('?');
+                                    const hashIdx = afterAt.indexOf('#');
+                                    const serverPortPart = afterAt.substring(0, qIdx > 0 ? qIdx : (hashIdx > 0 ? hashIdx : afterAt.length));
+                                    const colonIdx = serverPortPart.indexOf(':');
+                                    if (colonIdx > 0) {
+                                        wan.proxy_server = serverPortPart.substring(0, colonIdx);
+                                        wan.proxy_port = parseInt(serverPortPart.substring(colonIdx + 1), 10) || 443;
+                                    } else {
+                                        wan.proxy_server = serverPortPart;
+                                        wan.proxy_port = 443;
+                                    }
+                                    wan.proxy_proto = proto;
+                                    wan.proxy_enabled = true;
 
-                                if (qIdx > 0) {
-                                    const qStr = afterAt.substring(qIdx + 1, hashIdx > 0 ? hashIdx : afterAt.length);
-                                    const params = new URLSearchParams(qStr);
-                                    wan.proxy_host = params.get('host') || '';
-                                    wan.proxy_sni = params.get('sni') || wan.proxy_host || '';
-                                    if (!wan.proxy_host && wan.proxy_sni) wan.proxy_host = wan.proxy_sni;
-                                    wan.proxy_path = params.get('path') || '/';
-                                    wan.proxy_transport = params.get('type') || 'ws';
-                                    wan.proxy_security = params.get('security') || (wan.proxy_port === 80 ? 'none' : 'tls');
-                                    wan.proxy_encryption = params.get('encryption') || 'none';
-                                    if (wan.proxy_port === 80 && !params.get('security')) wan.proxy_security = 'none';
+                                    if (qIdx > 0) {
+                                        const qStr = afterAt.substring(qIdx + 1, hashIdx > 0 ? hashIdx : afterAt.length);
+                                        const params = new URLSearchParams(qStr);
+                                        wan.proxy_host = params.get('host') || '';
+                                        wan.proxy_sni = params.get('sni') || wan.proxy_host || '';
+                                        if (!wan.proxy_host && wan.proxy_sni) wan.proxy_host = wan.proxy_sni;
+                                        wan.proxy_path = params.get('path') || '/';
+                                        wan.proxy_transport = params.get('type') || 'ws';
+                                        wan.proxy_security = params.get('security') || (wan.proxy_port === 80 ? 'none' : 'tls');
+                                        wan.proxy_encryption = params.get('encryption') || 'none';
+                                        if (wan.proxy_port === 80 && !params.get('security')) wan.proxy_security = 'none';
+                                    }
+                                    this.isEditing = true;
                                 }
-                                this.isEditing = true;
                             }
-                        }
-                    } catch(e) {}
+                        } catch(e) {}
+                    }
 
-                    /* 2. Backend Parser Synchronization */
                     fetch('/api/v1/wan/proxy/parse_uri', {
                         method: 'POST',
                         headers: {
@@ -7040,58 +7147,81 @@
                     .then(r => r.json())
                     .then(d => {
                         if (d.status === 'ok' && d.proxy) {
-                            wan.proxy_proto = d.proxy.proto || wan.proxy_proto || 'vless';
-                            wan.proxy_server = d.proxy.server || wan.proxy_server || '';
-                            wan.proxy_port = d.proxy.port || wan.proxy_port || 443;
-                            wan.proxy_uuid = d.proxy.uuid || wan.proxy_uuid || '';
-                            wan.proxy_sni = d.proxy.sni || wan.proxy_sni || '';
-                            wan.proxy_host = d.proxy.host || wan.proxy_host || '';
-                            wan.proxy_path = d.proxy.path || wan.proxy_path || '/';
-                            wan.proxy_transport = d.proxy.transport || wan.proxy_transport || 'ws';
-                            wan.proxy_security = d.proxy.security || wan.proxy_security || 'tls';
-                            wan.proxy_encryption = d.proxy.encryption || wan.proxy_encryption || 'none';
+                            if (slot === 0) {
+                                wan.proxy_proto = d.proxy.proto || wan.proxy_proto || 'vless';
+                                wan.proxy_server = d.proxy.server || wan.proxy_server || '';
+                                wan.proxy_port = d.proxy.port || wan.proxy_port || 443;
+                                wan.proxy_uuid = d.proxy.uuid || wan.proxy_uuid || '';
+                                wan.proxy_sni = d.proxy.sni || wan.proxy_sni || '';
+                                wan.proxy_host = d.proxy.host || wan.proxy_host || '';
+                                wan.proxy_path = d.proxy.path || wan.proxy_path || '/';
+                                wan.proxy_transport = d.proxy.transport || wan.proxy_transport || 'ws';
+                                wan.proxy_security = d.proxy.security || wan.proxy_security || 'tls';
+                                wan.proxy_encryption = d.proxy.encryption || wan.proxy_encryption || 'none';
+                            }
                             wan.proxy_enabled = true;
                             this.isEditing = true;
-                            this.showToast(this.currentLang === 'ar' ? 'تم استيراد إعدادات النفق بنجاح!' : 'Proxy configuration imported successfully!');
+                            this.showToast(this.currentLang === 'ar' ? `تم استيراد إعدادات السيرفر ${slot + 1} بنجاح!` : `Server ${slot + 1} imported successfully!`);
                         }
                     })
                     .catch(() => {});
                 },
 
-                testProxyTunnel(wan) {
-                    if (!wan.proxy_server) {
-                        this.showToast(this.currentLang === 'ar' ? 'يرجى إدخال عنوان السيرفر أولاً' : 'Please enter server address first', 'warn');
+                testProxyTunnelSlot(wan, slot = 0) {
+                    let fieldName = slot === 0 ? 'proxy_raw_uri' : (slot === 1 ? 'proxy_raw_uri_2' : 'proxy_raw_uri_3');
+                    let uri = wan[fieldName] ? wan[fieldName].trim() : '';
+                    let resultProp = 'proxyTestResult' + (slot + 1);
+
+                    if (!uri && slot === 0 && wan.proxy_server) {
+                        uri = '';
+                    } else if (!uri) {
+                        this.showToast(this.currentLang === 'ar' ? `يرجى إدخال رابط السيرفر ${slot + 1}` : `Please enter Server ${slot + 1} link`, 'warn');
                         return;
                     }
-                    wan.proxyTesting = true;
-                    wan.proxyTestResult = '';
+
+                    wan[resultProp] = '...';
+                    let payload = uri ? { uri: uri } : { server: wan.proxy_server, port: wan.proxy_port || 443 };
+
                     fetch('/api/v1/wan/proxy/test', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
                             'X-Auth-Token': this.authToken
                         },
-                        body: JSON.stringify({
-                            server: wan.proxy_server,
-                            port: wan.proxy_port || 443
-                        })
+                        body: JSON.stringify(payload)
                     })
                     .then(r => r.json())
                     .then(d => {
-                        wan.proxyTesting = false;
                         if (d.status === 'ok') {
-                            wan.proxyTestResult = `${d.latency_ms} ms (OK)`;
-                            this.showToast(this.currentLang === 'ar' ? `الاتصال ناجح! البنج: ${d.latency_ms} ms` : `Connected! Latency: ${d.latency_ms} ms`);
+                            wan[resultProp] = `${d.latency_ms} ms`;
+                            this.showToast(this.currentLang === 'ar' ? `السيرفر ${slot + 1}: متصل (${d.latency_ms} ms)` : `Server ${slot + 1}: ${d.latency_ms} ms`);
                         } else {
-                            wan.proxyTestResult = 'Failed';
-                            this.showToast(d.message || 'Connection failed', 'error');
+                            wan[resultProp] = 'Fail';
+                            this.showToast(this.currentLang === 'ar' ? `السيرفر ${slot + 1}: فشل الاتصال` : `Server ${slot + 1}: Failed`, 'error');
                         }
                     })
                     .catch(() => {
-                        wan.proxyTesting = false;
-                        wan.proxyTestResult = 'Error';
-                        this.showToast('Test request failed', 'error');
+                        wan[resultProp] = 'Err';
                     });
+                },
+
+                testProxyTunnel(wan) {
+                    wan.proxyTesting = true;
+                    wan.proxyTestResult = '';
+
+                    // Trigger slot tests
+                    if (wan.proxy_raw_uri || wan.proxy_server) this.testProxyTunnelSlot(wan, 0);
+                    if (wan.proxy_raw_uri_2) this.testProxyTunnelSlot(wan, 1);
+                    if (wan.proxy_raw_uri_3) this.testProxyTunnelSlot(wan, 2);
+
+                    setTimeout(() => {
+                        wan.proxyTesting = false;
+                        let parts = [];
+                        if (wan.proxyTestResult1) parts.push(`S1: ${wan.proxyTestResult1}`);
+                        if (wan.proxyTestResult2) parts.push(`S2: ${wan.proxyTestResult2}`);
+                        if (wan.proxyTestResult3) parts.push(`S3: ${wan.proxyTestResult3}`);
+                        wan.proxyTestResult = parts.join(' | ') || (wan.proxy_connected ? 'ACTIVE' : 'Tested');
+                    }, 1500);
                 },
 
                 addGroup() {
@@ -7668,12 +7798,20 @@
                                         proxy_transport: w.proxy_transport || 'ws',
                                         proxy_security: w.proxy_security || 'tls',
                                         proxy_encryption: w.proxy_encryption || 'none',
+                                        proxy_strategy: w.proxy_strategy !== undefined ? w.proxy_strategy : 0,
+                                        proxy_strategy_str: w.proxy_strategy_str || 'leastPing',
+                                        proxy_server_count: w.proxy_server_count || 1,
                                         proxy_raw_uri: w.proxy_raw_uri || '',
+                                        proxy_raw_uri_2: w.proxy_raw_uri_2 || '',
+                                        proxy_raw_uri_3: w.proxy_raw_uri_3 || '',
                                         proxy_tun_dev: w.proxy_tun_dev || '',
                                         proxy_connected: !!w.proxy_connected,
                                         proxy_latency_ms: w.proxy_latency_ms || 0,
                                         proxyTesting: false,
-                                        proxyTestResult: ''
+                                        proxyTestResult: '',
+                                        proxyTestResult1: '',
+                                        proxyTestResult2: '',
+                                        proxyTestResult3: ''
                                     };
                                 });
                             }
@@ -7717,6 +7855,11 @@
                                             if (liveWan.proxy_security) w.proxy_security = liveWan.proxy_security;
                                             if (liveWan.proxy_encryption) w.proxy_encryption = liveWan.proxy_encryption;
                                             if (liveWan.proxy_raw_uri) w.proxy_raw_uri = liveWan.proxy_raw_uri;
+                                            if (liveWan.proxy_raw_uri_2 !== undefined) w.proxy_raw_uri_2 = liveWan.proxy_raw_uri_2;
+                                            if (liveWan.proxy_raw_uri_3 !== undefined) w.proxy_raw_uri_3 = liveWan.proxy_raw_uri_3;
+                                            if (liveWan.proxy_strategy !== undefined) w.proxy_strategy = liveWan.proxy_strategy;
+                                            if (liveWan.proxy_strategy_str !== undefined) w.proxy_strategy_str = liveWan.proxy_strategy_str;
+                                            if (liveWan.proxy_server_count !== undefined) w.proxy_server_count = liveWan.proxy_server_count;
                                         }
                                     }
                                 });
@@ -7765,10 +7908,12 @@
                             if (w.password && !w.ppp_password) w.ppp_password = w.password;
                             if (w.mac) w.custom_mac = w.mac;
                             if (w.proxy_raw_uri && (!w.proxy_server || w.proxy_server.trim() === '')) {
-                                this.parseProxyUri(w);
+                                this.parseProxyUri(w, 0);
                             }
                             w.proxy_enabled = !!w.proxy_enabled;
                             if (w.proxy_port) w.proxy_port = parseInt(w.proxy_port, 10) || 443;
+                            w.proxy_strategy = (w.proxy_strategy === 1 || w.proxy_strategy_str === 'roundRobin') ? 1 : 0;
+                            w.proxy_strategy_str = w.proxy_strategy === 1 ? 'roundRobin' : 'leastPing';
                         });
                     }
 

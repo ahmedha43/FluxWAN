@@ -36,10 +36,25 @@ int proxy_manager_start_wan(proxy_manager_ctx_t *ctx, uint32_t wan_idx);
 int proxy_manager_stop_wan(proxy_manager_ctx_t *ctx, uint32_t wan_idx);
 
 /**
+ * Parse standard proxy URI link into a single endpoint structure
+ */
+int proxy_manager_parse_endpoint(const char *uri, proxy_endpoint_t *out_ep);
+
+/**
+ * Synchronize all configured multi-server endpoints and mirror to primary fields
+ */
+void proxy_manager_sync_servers(wan_proxy_config_t *p);
+
+/**
  * Parse standard proxy URI link (vless://, vmess://, trojan://, ss://)
  * Extracts server, port, uuid, sni, host, path, transport, security.
  */
 int proxy_manager_parse_uri(const char *uri, wan_proxy_config_t *out_proxy);
+
+/**
+ * Generate Xray-core / Sing-box JSON configuration for a WAN interface
+ */
+int proxy_manager_generate_config(const wan_config_t *wan, int wan_idx, char *out_path, size_t max_path);
 
 /**
  * Probe / Test proxy tunnel latency through the TUN device or directly

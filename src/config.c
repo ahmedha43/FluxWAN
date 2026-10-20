@@ -540,13 +540,33 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
                     if (extract_json_string(obj_str, "proxy_transport", val, sizeof(val))) safe_str_copy(w->proxy.transport, val, sizeof(w->proxy.transport));
                     if (extract_json_string(obj_str, "proxy_security", val, sizeof(val))) safe_str_copy(w->proxy.security, val, sizeof(w->proxy.security));
                     if (extract_json_string(obj_str, "proxy_encryption", val, sizeof(val))) safe_str_copy(w->proxy.encryption, val, sizeof(w->proxy.encryption));
-                    if (extract_json_string(obj_str, "proxy_raw_uri", val_uri, sizeof(val_uri))) safe_str_copy(w->proxy.raw_uri, val_uri, sizeof(w->proxy.raw_uri));
+                    if (extract_json_string(obj_str, "proxy_raw_uri", val_uri, sizeof(val_uri))) {
+                        safe_str_copy(w->proxy.raw_uri, val_uri, sizeof(w->proxy.raw_uri));
+                        safe_str_copy(w->proxy.servers[0].raw_uri, val_uri, sizeof(w->proxy.servers[0].raw_uri));
+                    }
+                    char val_uri2[2048] = {0};
+                    if (extract_json_string(obj_str, "proxy_raw_uri_2", val_uri2, sizeof(val_uri2))) {
+                        safe_str_copy(w->proxy.servers[1].raw_uri, val_uri2, sizeof(w->proxy.servers[1].raw_uri));
+                    }
+                    char val_uri3[2048] = {0};
+                    if (extract_json_string(obj_str, "proxy_raw_uri_3", val_uri3, sizeof(val_uri3))) {
+                        safe_str_copy(w->proxy.servers[2].raw_uri, val_uri3, sizeof(w->proxy.servers[2].raw_uri));
+                    }
+                    w->proxy.strategy = (proxy_balancer_strategy_t)extract_json_int(obj_str, "proxy_strategy", 0);
+                    char strat_val[32] = {0};
+                    if (extract_json_string(obj_str, "proxy_strategy_str", strat_val, sizeof(strat_val))) {
+                        if (strcasecmp(strat_val, "roundRobin") == 0 || strcasecmp(strat_val, "round_robin") == 0) {
+                            w->proxy.strategy = PROXY_STRATEGY_ROUND_ROBIN;
+                        } else {
+                            w->proxy.strategy = PROXY_STRATEGY_FAILOVER;
+                        }
+                    }
                     if (extract_json_string(obj_str, "proxy_tun_dev", val, sizeof(val))) safe_str_copy(w->proxy.tun_dev, val, sizeof(w->proxy.tun_dev));
                     safe_str_copy(w->proxy.bind_interface, w->name, sizeof(w->proxy.bind_interface));
 
-                    /* If proxy is enabled and raw_uri is present but proxy_server is empty, auto-parse! */
-                    if (w->proxy.enabled && w->proxy.raw_uri[0] != '\0' && w->proxy.server[0] == '\0') {
-                        proxy_manager_parse_uri(w->proxy.raw_uri, &w->proxy);
+                    /* Synchronize multi-server endpoints if proxy is configured */
+                    if (w->proxy.enabled || w->proxy.raw_uri[0] != '\0' || w->proxy.servers[1].raw_uri[0] != '\0') {
+                        proxy_manager_sync_servers(&w->proxy);
                     }
 
                     char state_val[32] = {0};
@@ -1563,7 +1583,7 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
             fprintf(f, "      \"enabled\": %s,\n", w->enabled ? "true" : "false");
             fprintf(f, "      \"table_id\": %u,\n", w->table_id);
             fprintf(f, "      \"proxy_enabled\": %s,\n", w->proxy.enabled ? "true" : "false");
-            if (w->proxy.enabled || w->proxy.server[0]) {
+            if (w->proxy.enabled || w->proxy.server[0] || w->proxy.server_count > 0 || w->proxy.raw_uri[0]) {
                 fprintf(f, "      \"proxy_proto\": \"%s\",\n", w->proxy.proto_str[0] ? w->proxy.proto_str : "vless");
                 fprintf(f, "      \"proxy_server\": \"%s\",\n", w->proxy.server);
                 fprintf(f, "      \"proxy_port\": %u,\n", w->proxy.port > 0 ? w->proxy.port : 443);
@@ -1576,7 +1596,11 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
                 if (w->proxy.encryption[0]) {
                     fprintf(f, "      \"proxy_encryption\": \"%s\",\n", w->proxy.encryption);
                 }
-                fprintf(f, "      \"proxy_raw_uri\": \"%s\",\n", w->proxy.raw_uri);
+                fprintf(f, "      \"proxy_strategy\": %d,\n", (int)w->proxy.strategy);
+                fprintf(f, "      \"proxy_strategy_str\": \"%s\",\n", (w->proxy.strategy == PROXY_STRATEGY_ROUND_ROBIN) ? "roundRobin" : "leastPing");
+                fprintf(f, "      \"proxy_raw_uri\": \"%s\",\n", w->proxy.servers[0].raw_uri[0] ? w->proxy.servers[0].raw_uri : w->proxy.raw_uri);
+                fprintf(f, "      \"proxy_raw_uri_2\": \"%s\",\n", w->proxy.servers[1].raw_uri);
+                fprintf(f, "      \"proxy_raw_uri_3\": \"%s\",\n", w->proxy.servers[2].raw_uri);
                 fprintf(f, "      \"proxy_tun_dev\": \"%s\"\n", w->proxy.tun_dev);
             } else {
                 fprintf(f, "      \"proxy_proto\": \"vless\"\n");
