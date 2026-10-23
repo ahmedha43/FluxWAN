@@ -1,9 +1,9 @@
 #include "dns64_daemon.h"
-#include <pthread.h>
 #include <fcntl.h>
 #include <ctype.h>
 
 #if defined(__linux__)
+#include <pthread.h>
 #include <sys/select.h>
 #include <sys/syscall.h>
 #include <linux/bpf.h>
@@ -18,6 +18,15 @@ static inline int sys_bpf_map_update_elem(int fd, const void *key, const void *v
     return syscall(__NR_bpf, BPF_MAP_UPDATE_ELEM, &attr, sizeof(attr));
 }
 #define bpf_map_update_elem sys_bpf_map_update_elem
+#else
+typedef void* pthread_t;
+typedef void* pthread_mutex_t;
+#define pthread_mutex_lock(m) ((void)0)
+#define pthread_mutex_unlock(m) ((void)0)
+#define pthread_mutex_init(m, a) ((void)0)
+#define pthread_mutex_destroy(m) ((void)0)
+#define pthread_create(t, a, f, d) ((void)0)
+#define pthread_join(t, r) ((void)0)
 #endif
 
 #define SYNTH_START_IP_HOST 0xC6120001 /* 198.18.0.1 */
@@ -169,41 +178,59 @@ static void *dns64_worker(void *arg) {
                 uint16_t qid = ntohs(hdr->id);
                 time_t now = time(NULL);
 
+                /* Extract query type (qtype) */
+                uint16_t qtype = 0;
+                unsigned char *qptr = buf + sizeof(struct dns_header);
+                while (qptr < buf + n && *qptr != 0) {
+                    qptr += (*qptr + 1);
+                }
+                if (qptr < buf + n && *qptr == 0) qptr++;
+                if (qptr + 4 <= buf + n) {
+                    qtype = (qptr[0] << 8) | qptr[1];
+                }
+
+                /* SMART IPv6 MULTI-WAN BONDING (RFC 6724 Happy Eyeballs Fallback):
+                 * Suppress AAAA (IPv6) queries with an instant NOERROR empty answer.
+                 * Triggers RFC 6724 Happy Eyeballs in all browsers and OS stacks,
+                 * ensuring YouTube, Google, Netflix, and CDNs immediately fall back to IPv4
+                 * and are 100% bonded/load-balanced across all multi-WAN lines! */
+                if (ctx->config && ctx->config->lan.dns.smart_ipv6_bonding && qtype == 0x001C /* AAAA */) {
+                    hdr->flags = htons(0x8180); /* Standard response, NoError */
+                    hdr->ancount = htons(0);
+                    hdr->nscount = htons(0);
+                    hdr->arcount = htons(0);
+
+                    sendto(ctx->server_fd, (const char *)buf, (int)(qptr + 4 - buf), 0,
+                           (struct sockaddr *)&client_addr, addr_len);
+
+                    ctx->stats.happy_eyeballs_ipv4_fallbacks++;
+                    continue;
+                }
+
                 /* If NAT46 is explicitly enabled and Type A Query (IPv4 Request) */
-                if (ctx->config && ctx->config->nat46.enabled) {
-                    unsigned char *qptr = buf + sizeof(struct dns_header);
-                    while (qptr < buf + n && *qptr != 0) {
-                        qptr += (*qptr + 1);
-                    }
-                    if (qptr < buf + n && *qptr == 0) qptr++;
+                if (ctx->config && ctx->config->nat46.enabled && qtype == 0x0001) {
+                    uint32_t synth_v4 = allocate_synthetic_ip(ctx);
+                    struct in6_addr target_v6;
+                    inet_pton(AF_INET6, "2001:4860:4860::8888", &target_v6);
 
-                    if (qptr + 4 <= buf + n) {
-                        uint16_t qtype = (qptr[0] << 8) | qptr[1];
-                        if (qtype == 0x0001) {
-                            uint32_t synth_v4 = allocate_synthetic_ip(ctx);
-                            struct in6_addr target_v6;
-                            inet_pton(AF_INET6, "2001:4860:4860::8888", &target_v6);
+                    dns64_register_mapping(ctx, synth_v4, target_v6);
 
-                            dns64_register_mapping(ctx, synth_v4, target_v6);
+                    hdr->flags = htons(0x8180);
+                    hdr->ancount = htons(1);
 
-                            hdr->flags = htons(0x8180);
-                            hdr->ancount = htons(1);
+                    unsigned char *ans = buf + n;
+                    ans[0] = 0xc0; ans[1] = 0x0c;
+                    ans[2] = 0x00; ans[3] = 0x01;
+                    ans[4] = 0x00; ans[5] = 0x01;
+                    ans[6] = 0x00; ans[7] = 0x00; ans[8] = 0x00; ans[9] = 0x3c;
+                    ans[10] = 0x00; ans[11] = 0x04;
+                    memcpy(ans + 12, &synth_v4, 4);
 
-                            unsigned char *ans = buf + n;
-                            ans[0] = 0xc0; ans[1] = 0x0c;
-                            ans[2] = 0x00; ans[3] = 0x01;
-                            ans[4] = 0x00; ans[5] = 0x01;
-                            ans[6] = 0x00; ans[7] = 0x00; ans[8] = 0x00; ans[9] = 0x3c;
-                            ans[10] = 0x00; ans[11] = 0x04;
-                            memcpy(ans + 12, &synth_v4, 4);
+                    sendto(ctx->server_fd, (const char *)buf, n + 16, 0,
+                           (struct sockaddr *)&client_addr, addr_len);
 
-                            sendto(ctx->server_fd, (const char *)buf, n + 16, 0,
-                                   (struct sockaddr *)&client_addr, addr_len);
-
-                            ctx->stats.synthesized_a_records++;
-                            continue;
-                        }
-                    }
+                    ctx->stats.synthesized_a_records++;
+                    continue;
                 }
 
                 /* FAST RAM DNS CACHE LOOKUP (<0.05ms Instant Resolution) */

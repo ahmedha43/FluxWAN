@@ -30,9 +30,11 @@ struct proxy_manager_ctx {
     uint32_t fail_counts[MAX_WANS];
     uint64_t last_check_ms;
     uint64_t last_restart_ms[MAX_WANS];
+#if defined(__linux__)
     pthread_t supervisor_thread;
     bool thread_running;
     bool stop_requested;
+#endif
 };
 
 static inline void safe_str_copy(char *dst, const char *src, size_t max_len) {
@@ -346,6 +348,9 @@ void proxy_manager_sync_servers(wan_proxy_config_t *p) {
             }
         }
         if (p->servers[i].server[0] != '\0') {
+            if (p->servers[i].weight == 0) {
+                p->servers[i].weight = 100;
+            }
             count++;
         }
     }
@@ -382,10 +387,11 @@ int proxy_manager_parse_uri(const char *uri, wan_proxy_config_t *out_proxy) {
 /* Generates JSON configuration for Sing-box / Xray-core */
 static int generate_proxy_config_file(const wan_config_t *wan, int wan_idx, char *out_path, size_t max_path) {
     if (!wan || !out_path) return -1;
-    snprintf(out_path, max_path, "/etc/fluxwan/proxy_wan_%u.json", wan->id > 0 ? wan->id : (uint32_t)(wan_idx + 1));
-
 #if defined(__linux__)
+    snprintf(out_path, max_path, "/etc/fluxwan/proxy_wan_%u.json", wan->id > 0 ? wan->id : (uint32_t)(wan_idx + 1));
     mkdir("/etc/fluxwan", 0755);
+#else
+    snprintf(out_path, max_path, "proxy_wan_%u.json", wan->id > 0 ? wan->id : (uint32_t)(wan_idx + 1));
 #endif
 
     FILE *f = fopen(out_path, "w");
@@ -664,10 +670,11 @@ static void write_xray_single_outbound(FILE *f, const proxy_endpoint_t *ep, cons
 /* Generates Xray-core JSON configuration with native TUN inbound, Multi-Server Balancer/Failover, and VLESS Post-Quantum Encryption */
 static int generate_xray_config_file(const wan_config_t *wan, int wan_idx, char *out_path, size_t max_path) {
     if (!wan || !out_path) return -1;
-    snprintf(out_path, max_path, "/etc/fluxwan/proxy_wan_%u.json", wan->id > 0 ? wan->id : (uint32_t)(wan_idx + 1));
-
 #if defined(__linux__)
+    snprintf(out_path, max_path, "/etc/fluxwan/proxy_wan_%u.json", wan->id > 0 ? wan->id : (uint32_t)(wan_idx + 1));
     mkdir("/etc/fluxwan", 0755);
+#else
+    snprintf(out_path, max_path, "proxy_wan_%u.json", wan->id > 0 ? wan->id : (uint32_t)(wan_idx + 1));
 #endif
 
     FILE *f = fopen(out_path, "w");
@@ -738,7 +745,12 @@ static int generate_xray_config_file(const wan_config_t *wan, int wan_idx, char 
     fprintf(f, "  ]");
 
     if (active_servers > 1) {
-        const char *strategy_str = (p->strategy == PROXY_STRATEGY_ROUND_ROBIN) ? "roundRobin" : "leastPing";
+        const char *strategy_str = "leastPing";
+        if (p->strategy == PROXY_STRATEGY_ROUND_ROBIN) {
+            strategy_str = "roundRobin";
+        } else if (p->strategy == PROXY_STRATEGY_LEAST_LOAD) {
+            strategy_str = "leastLoad";
+        }
         fprintf(f, ",\n");
         fprintf(f, "  \"observatory\": {\n");
         fprintf(f, "    \"subjectSelector\": [\"proxy-out-\"],\n");
@@ -790,10 +802,10 @@ static int generate_xray_config_file(const wan_config_t *wan, int wan_idx, char 
     fprintf(f, "}\n");
     fclose(f);
 
+    const char *strat_name = (p->strategy == PROXY_STRATEGY_LEAST_LOAD) ? "leastLoad ((Active+1)/Weight)" :
+                             ((p->strategy == PROXY_STRATEGY_ROUND_ROBIN) ? "roundRobin" : "leastPing");
     LOG_INFO("[Proxy] Generated Xray-core configuration for WAN '%s' at %s (Servers: %u, Strategy: %s, Device %s, Mark 0x%x)",
-             wan->label, out_path, active_servers,
-             (p->strategy == PROXY_STRATEGY_ROUND_ROBIN) ? "roundRobin" : "leastPing",
-             wan->name, fwmark);
+             wan->label, out_path, active_servers, strat_name, wan->name, fwmark);
     return 0;
 }
 

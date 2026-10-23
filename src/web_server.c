@@ -773,7 +773,8 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
             w->proxy.security[0] ? w->proxy.security : "tls",
             w->proxy.encryption[0] ? w->proxy.encryption : "none",
             (int)w->proxy.strategy,
-            (w->proxy.strategy == PROXY_STRATEGY_ROUND_ROBIN) ? "roundRobin" : "leastPing",
+            (w->proxy.strategy == PROXY_STRATEGY_LEAST_LOAD) ? "leastLoad" :
+            ((w->proxy.strategy == PROXY_STRATEGY_ROUND_ROBIN) ? "roundRobin" : "leastPing"),
             w->proxy.server_count,
             w->proxy.servers[0].raw_uri[0] ? w->proxy.servers[0].raw_uri : w->proxy.raw_uri,
             w->proxy.servers[1].raw_uri,
@@ -896,7 +897,7 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
     offset += snprintf(buf + offset, max_len - offset,
         "  ],\n"
         "  \"qos\": { \"enabled\": %s, \"algorithm\": \"%s\", \"bandwidth_down_mbps\": %u, \"bandwidth_up_mbps\": %u, \"diffserv4\": %s },\n"
-        "  \"dns\": { \"adblock_enabled\": %s, \"fast_dns_enabled\": %s, \"primary_dns\": \"%s\", \"secondary_dns\": \"%s\" },\n"
+        "  \"dns\": { \"adblock_enabled\": %s, \"fast_dns_enabled\": %s, \"smart_ipv6_bonding\": %s, \"primary_dns\": \"%s\", \"secondary_dns\": \"%s\" },\n"
         "  \"app_steering\": { \"gaming_steering_enabled\": %s, \"voip_steering_enabled\": %s, \"bulk_balancing_enabled\": %s, \"primary_gaming_wan_id\": %u, \"primary_voip_wan_id\": %u },\n"
         "  \"telegram\": { \"enabled\": %s, \"bot_token\": \"%s\", \"chat_id\": \"%s\", \"notify_on_failover\": %s, \"notify_on_recovery\": %s },\n"
         "  \"dpi\": { \"enabled\": %s, \"p2p_throttle_enabled\": %s, \"p2p_throttle_rate_kbps\": %u, \"voip_priority_enabled\": %s, \"gaming_priority_enabled\": %s, \"streaming_balance_enabled\": %s },\n",
@@ -906,6 +907,7 @@ static void build_json_status(web_server_ctx_t *ctx, char *buf, size_t max_len) 
         config->lan.qos.diffserv4 ? "true" : "false",
         config->lan.dns.adblock_enabled ? "true" : "false",
         config->lan.dns.fast_dns_enabled ? "true" : "false",
+        config->lan.dns.smart_ipv6_bonding ? "true" : "false",
         config->lan.dns.primary_dns[0] ? config->lan.dns.primary_dns : "1.1.1.1",
         config->lan.dns.secondary_dns[0] ? config->lan.dns.secondary_dns : "8.8.8.8",
         config->app_steering.gaming_steering_enabled ? "true" : "false",
@@ -4145,6 +4147,7 @@ static int web_server_process_client_impl(web_server_ctx_t *ctx, socket_t client
             if (dns2[0]) safe_str_copy(ctx->config->lan.dns.secondary_dns, dns2, sizeof(ctx->config->lan.dns.secondary_dns));
             ctx->config->lan.dns.adblock_enabled = extract_json_bool(body, "adblock_enabled", ctx->config->lan.dns.adblock_enabled);
             ctx->config->lan.dns.fast_dns_enabled = extract_json_bool(body, "fast_dns_enabled", ctx->config->lan.dns.fast_dns_enabled);
+            ctx->config->lan.dns.smart_ipv6_bonding = extract_json_bool(body, "smart_ipv6_bonding", ctx->config->lan.dns.smart_ipv6_bonding);
             config_save(get_config_target_path(ctx), ctx->config);
             config_load(get_config_target_path(ctx), ctx->config);
             net_apply_dns_features(ctx->config);

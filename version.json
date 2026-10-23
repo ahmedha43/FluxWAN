@@ -1,9 +1,13 @@
 {
-  "latest_version": "1.5.7",
+  "latest_version": "1.5.9",
   "channel": "stable",
-  "release_date": "2026-10-13",
+  "release_date": "2026-10-23",
   "min_compatible_version": "1.2.0",
   "changelog": [
+    "Smart IPv6 Multi-WAN Bonding (RFC 6724 Happy Eyeballs Fallback Manipulation): Suppresses AAAA queries with instant NOERROR empty answers when multi-WAN bonding is active, forcing client browsers (Chrome, Edge, Firefox), YouTube, Google, and Netflix apps to fall back cleanly to IPv4 within 20ms and distribute all traffic across all available multi-WAN lines evenly without line starvation",
+    "Adaptive Weighted Active-Flows Balancer (Strategy: leastLoad): Implemented smart flow balancing based on the (Active Flows + 1) / Weight scheduling metric across multi-server proxy configurations, preventing bufferbloat and server exhaustion from heavy concurrent downloads",
+    "Multi-Server VLESS Failover & Active Load Balancer per WAN: Added support for up to 3 concurrent server endpoints per WAN line with sub-second failover and observatory least-ping health tracking",
+    "Fast In-Memory RAM DNS Cache & Forwarder: Sub-millisecond recursive DNS caching engine (<0.05ms) integrated into FluxWAN core",
     "High-Speed Xray-Core Native TUN Engine: Prioritized Xray-core native TUN across all VLESS/VMess/Trojan WAN tunnels with automatic CHECKSUM fill and LAN checksum offload tuning, doubling per-tunnel throughput (~97 Mbps per SIM line) and dropping CPU load to <3%",
     "Zero-Interruption Proxy Watchdog: Eliminated false proxy daemon restarts during heavy broadband download saturation by adding physical WAN server fallback probes and preserving active TUN interfaces under load",
     "DHCP Lease & Policy Routing Protection: Replaced destructive ip addr flush on DHCP lease renewal with non-disruptive ip addr replace, preserving physical proxy tables (1101..1103) and tunnel policy routes (101..103) 24/7",

@@ -30,6 +30,7 @@
 #include <io.h>
 #include <process.h>
 #include <windows.h>
+#undef interface
 #pragma comment(lib, "ws2_32.lib")
 #define close closesocket
 #define getpid _getpid
@@ -62,7 +63,7 @@ typedef int socket_t;
 #define INVALID_SOCKET (-1)
 #endif
 
-#define FLUXWAN_VERSION "1.5.8"
+#define FLUXWAN_VERSION "1.5.9"
 #define FLUXWAN_AUTHOR "Ahmed Al-Dulaimi (أحمد الدليمي)"
 #define FLUXWAN_LICENSE "GNU GPLv3"
 #define FLUXWAN_COPYRIGHT "Copyright (C) 2026 Ahmed Al-Dulaimi. All rights reserved."
@@ -174,7 +175,8 @@ typedef enum {
 
 typedef enum {
     PROXY_STRATEGY_FAILOVER = 0,    /* Least-Ping & Instant Failover */
-    PROXY_STRATEGY_ROUND_ROBIN = 1  /* Multi-Server Active Load Balancing */
+    PROXY_STRATEGY_ROUND_ROBIN = 1, /* Multi-Server Active Load Balancing */
+    PROXY_STRATEGY_LEAST_LOAD = 2   /* Smart Weighted Active Flows: (Active Flows + 1) / Weight */
 } proxy_balancer_strategy_t;
 
 /* Single Proxy Endpoint Definition */
@@ -193,6 +195,8 @@ typedef struct {
     char raw_uri[2048];           /* Full URI for quick 1-click import */
     bool is_connected;
     uint32_t latency_ms;
+    uint32_t weight;              /* Server capacity weight (1-100, default 100) */
+    uint32_t active_flows;        /* Active TCP/UDP concurrent flows */
 } proxy_endpoint_t;
 
 /* Outbound Proxy Tunnel Configuration (Zero-Rating / Xray / Sing-box) */
@@ -377,6 +381,7 @@ typedef struct {
     bool fast_dns_enabled;
     char primary_dns[32];
     char secondary_dns[32];
+    bool smart_ipv6_bonding;     /* Smart Happy Eyeballs Fallback for Multi-WAN */
 } dns_features_t;
 
 /* LAN Interface Definition */

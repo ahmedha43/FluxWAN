@@ -402,6 +402,7 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
         if (dns_pos) {
             out_config->lan.dns.adblock_enabled = extract_json_bool(dns_pos, "adblock_enabled", false);
             out_config->lan.dns.fast_dns_enabled = extract_json_bool(dns_pos, "fast_dns_enabled", true);
+            out_config->lan.dns.smart_ipv6_bonding = extract_json_bool(dns_pos, "smart_ipv6_bonding", true);
             char dns1[32] = {0}, dns2[32] = {0};
             extract_json_string(dns_pos, "primary_dns", dns1, sizeof(dns1));
             extract_json_string(dns_pos, "secondary_dns", dns2, sizeof(dns2));
@@ -410,6 +411,7 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
         } else {
             out_config->lan.dns.adblock_enabled = false;
             out_config->lan.dns.fast_dns_enabled = true;
+            out_config->lan.dns.smart_ipv6_bonding = true;
             safe_str_copy(out_config->lan.dns.primary_dns, "1.1.1.1", sizeof(out_config->lan.dns.primary_dns));
             safe_str_copy(out_config->lan.dns.secondary_dns, "8.8.8.8", sizeof(out_config->lan.dns.secondary_dns));
         }
@@ -555,7 +557,9 @@ int config_load(const char *config_path, fluxwan_config_t *out_config) {
                     w->proxy.strategy = (proxy_balancer_strategy_t)extract_json_int(obj_str, "proxy_strategy", 0);
                     char strat_val[32] = {0};
                     if (extract_json_string(obj_str, "proxy_strategy_str", strat_val, sizeof(strat_val))) {
-                        if (strcasecmp(strat_val, "roundRobin") == 0 || strcasecmp(strat_val, "round_robin") == 0) {
+                        if (strcasecmp(strat_val, "leastLoad") == 0 || strcasecmp(strat_val, "least_load") == 0 || strcasecmp(strat_val, "smartFlow") == 0) {
+                            w->proxy.strategy = PROXY_STRATEGY_LEAST_LOAD;
+                        } else if (strcasecmp(strat_val, "roundRobin") == 0 || strcasecmp(strat_val, "round_robin") == 0) {
                             w->proxy.strategy = PROXY_STRATEGY_ROUND_ROBIN;
                         } else {
                             w->proxy.strategy = PROXY_STRATEGY_FAILOVER;
@@ -1514,6 +1518,7 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
     fprintf(f, "    \"dns\": {\n");
     fprintf(f, "      \"adblock_enabled\": %s,\n", config->lan.dns.adblock_enabled ? "true" : "false");
     fprintf(f, "      \"fast_dns_enabled\": %s,\n", config->lan.dns.fast_dns_enabled ? "true" : "false");
+    fprintf(f, "      \"smart_ipv6_bonding\": %s,\n", config->lan.dns.smart_ipv6_bonding ? "true" : "false");
     fprintf(f, "      \"primary_dns\": \"%s\",\n", config->lan.dns.primary_dns[0] ? config->lan.dns.primary_dns : "1.1.1.1");
     fprintf(f, "      \"secondary_dns\": \"%s\"\n", config->lan.dns.secondary_dns[0] ? config->lan.dns.secondary_dns : "8.8.8.8");
     fprintf(f, "    }\n");
@@ -1596,8 +1601,10 @@ int config_save(const char *config_path, const fluxwan_config_t *config) {
                 if (w->proxy.encryption[0]) {
                     fprintf(f, "      \"proxy_encryption\": \"%s\",\n", w->proxy.encryption);
                 }
+                const char *strat_str = (w->proxy.strategy == PROXY_STRATEGY_LEAST_LOAD) ? "leastLoad" :
+                                        ((w->proxy.strategy == PROXY_STRATEGY_ROUND_ROBIN) ? "roundRobin" : "leastPing");
                 fprintf(f, "      \"proxy_strategy\": %d,\n", (int)w->proxy.strategy);
-                fprintf(f, "      \"proxy_strategy_str\": \"%s\",\n", (w->proxy.strategy == PROXY_STRATEGY_ROUND_ROBIN) ? "roundRobin" : "leastPing");
+                fprintf(f, "      \"proxy_strategy_str\": \"%s\",\n", strat_str);
                 fprintf(f, "      \"proxy_raw_uri\": \"%s\",\n", w->proxy.servers[0].raw_uri[0] ? w->proxy.servers[0].raw_uri : w->proxy.raw_uri);
                 fprintf(f, "      \"proxy_raw_uri_2\": \"%s\",\n", w->proxy.servers[1].raw_uri);
                 fprintf(f, "      \"proxy_raw_uri_3\": \"%s\",\n", w->proxy.servers[2].raw_uri);
@@ -2136,6 +2143,7 @@ int config_reset_to_defaults(fluxwan_config_t *out_config) {
     /* DNS Default */
     out_config->lan.dns.adblock_enabled = false;
     out_config->lan.dns.fast_dns_enabled = true;
+    out_config->lan.dns.smart_ipv6_bonding = true;
     safe_str_copy(out_config->lan.dns.primary_dns, "1.1.1.1", sizeof(out_config->lan.dns.primary_dns));
     safe_str_copy(out_config->lan.dns.secondary_dns, "8.8.8.8", sizeof(out_config->lan.dns.secondary_dns));
 

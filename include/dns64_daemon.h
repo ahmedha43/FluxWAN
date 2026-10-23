@@ -11,6 +11,7 @@ typedef struct {
     uint64_t cache_hits;
     uint32_t cached_entries;
     uint64_t active_synthetic_mappings;
+    uint64_t happy_eyeballs_ipv4_fallbacks;
     uint32_t current_pool_ip;
 } dns64_stats_t;
 

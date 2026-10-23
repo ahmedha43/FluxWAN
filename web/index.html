@@ -2069,10 +2069,10 @@
                                                 <span x-text="currentLang==='ar' ? 'استراتيجية السيرفرات المتعددة (Multi-Server Engine):' : 'Multi-Server Strategy:'"></span>
                                             </label>
                                             <span class="text-4xs px-2 py-0.5 rounded font-mono font-bold"
-                                                  :class="(wan.proxy_strategy === 1 || wan.proxy_strategy_str === 'roundRobin') ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'"
-                                                  x-text="(wan.proxy_strategy === 1 || wan.proxy_strategy_str === 'roundRobin') ? (currentLang==='ar' ? '⚖️ لود بلنس متزامن' : '⚖️ Active Load Balancer') : (currentLang==='ar' ? '⚡ أقل بنغ + تحويل فوري' : '⚡ Least-Ping Failover')"></span>
+                                                  :class="(wan.proxy_strategy === 2 || wan.proxy_strategy_str === 'leastLoad') ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' : ((wan.proxy_strategy === 1 || wan.proxy_strategy_str === 'roundRobin') ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30')"
+                                                  x-text="(wan.proxy_strategy === 2 || wan.proxy_strategy_str === 'leastLoad') ? (currentLang==='ar' ? '🧠 لود بلنس تكيفي ذكي' : '🧠 Smart Flow Balancer') : ((wan.proxy_strategy === 1 || wan.proxy_strategy_str === 'roundRobin') ? (currentLang==='ar' ? '⚖️ لود بلنس متزامن' : '⚖️ Active Load Balancer') : (currentLang==='ar' ? '⚡ أقل بنغ + تحويل فوري' : '⚡ Least-Ping Failover'))"></span>
                                         </div>
-                                        <div class="grid grid-cols-2 gap-2">
+                                        <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
                                             <button type="button" @click="wan.proxy_strategy = 0; wan.proxy_strategy_str = 'leastPing'; isEditing = true"
                                                     class="p-2 rounded-lg border text-3xs font-semibold flex items-center space-x-2 transition text-left"
                                                     :class="(wan.proxy_strategy === 0 || !wan.proxy_strategy) ? 'bg-indigo-600/30 border-indigo-500 text-white shadow-sm shadow-indigo-500/20' : 'bg-slate-900/50 border-slate-700/60 text-slate-400 hover:text-slate-200'">
@@ -2087,8 +2087,17 @@
                                                     :class="(wan.proxy_strategy === 1 || wan.proxy_strategy_str === 'roundRobin') ? 'bg-cyan-600/30 border-cyan-500 text-white shadow-sm shadow-cyan-500/20' : 'bg-slate-900/50 border-slate-700/60 text-slate-400 hover:text-slate-200'">
                                                 <span class="text-base">⚖️</span>
                                                 <div>
-                                                    <span class="block font-bold text-cyan-200" x-text="currentLang==='ar' ? 'لود بلنس (Load Balance)' : 'Round-Robin Balancer'"></span>
-                                                    <span class="block text-4xs opacity-80" x-text="currentLang==='ar' ? 'سحب وتوزيع متزامن من كل السيرفرات' : 'Simultaneous active balancer'"></span>
+                                                    <span class="block font-bold text-cyan-200" x-text="currentLang==='ar' ? 'توزيع دائري (Round-Robin)' : 'Round-Robin Balancer'"></span>
+                                                    <span class="block text-4xs opacity-80" x-text="currentLang==='ar' ? 'سحب وتوزيع دوري من السيرفرات' : 'Simultaneous active balancer'"></span>
+                                                </div>
+                                            </button>
+                                            <button type="button" @click="wan.proxy_strategy = 2; wan.proxy_strategy_str = 'leastLoad'; isEditing = true"
+                                                    class="p-2 rounded-lg border text-3xs font-semibold flex items-center space-x-2 transition text-left"
+                                                    :class="(wan.proxy_strategy === 2 || wan.proxy_strategy_str === 'leastLoad') ? 'bg-purple-600/30 border-purple-500 text-white shadow-sm shadow-purple-500/20' : 'bg-slate-900/50 border-slate-700/60 text-slate-400 hover:text-slate-200'">
+                                                <span class="text-base">🧠</span>
+                                                <div>
+                                                    <span class="block font-bold text-purple-200" x-text="currentLang==='ar' ? 'تكيفي ذكي (Smart Flow)' : 'Smart Flow Balancer'"></span>
+                                                    <span class="block text-4xs opacity-80" x-text="currentLang==='ar' ? 'موازنة بالاتصالات النشطة (Active+1)/W' : 'Weighted active flows (Active+1)/W'"></span>
                                                 </div>
                                             </button>
                                         </div>
@@ -3871,6 +3880,18 @@
                                 <div class="text-3xs text-slate-400 mt-0.5">Direct client queries to ultra-low latency upstream recursive resolvers.</div>
                             </div>
                             <input type="checkbox" x-model="config.lan.dns.fast_dns_enabled" class="w-4 h-4 accent-emerald-500">
+                        </div>
+
+                        <div class="p-3.5 rounded-xl bg-indigo-950/30 border border-indigo-500/30 flex items-center justify-between">
+                            <div>
+                                <div class="text-xs font-bold text-white flex items-center space-x-1.5">
+                                    <span>🧠</span>
+                                    <span x-text="currentLang==='ar' ? 'دمج IPv6 الذكي للخطوط المتعددة (Smart Happy Eyeballs Fallback)' : 'Smart Multi-WAN IPv6 Bonding (Happy Eyeballs Fallback)'"></span>
+                                    <span class="text-4xs px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-mono font-bold" x-text="currentLang==='ar' ? 'موصى به' : 'RECOMMENDED'"></span>
+                                </div>
+                                <div class="text-3xs text-slate-400 mt-0.5" x-text="currentLang==='ar' ? 'إسقاط استعلامات IPv6 AAAA فورياً (RFC 6724) لإجبار خدمات جوجل، يوتيوب، ونتفلكس على التدفق عبر IPv4 ليتم دمجها وتوزيعها بالتساوي على كافة خطوط الـ WAN ومنع احتكار خط واحد.' : 'Enforces instant RFC 6724 Happy Eyeballs fallback from IPv6 to IPv4 so multi-WAN load balancing distributes YouTube, Google, and CDN traffic across all active lines evenly.'"></div>
+                            </div>
+                            <input type="checkbox" x-model="config.lan.dns.smart_ipv6_bonding" class="w-4 h-4 accent-indigo-500">
                         </div>
 
                         <div class="grid grid-cols-2 gap-3 pt-1">
@@ -6620,7 +6641,7 @@
                         static_leases: [],
                         rate_limits: [],
                         qos: { enabled: false, algorithm: 'cake', bandwidth_down_mbps: 0, bandwidth_up_mbps: 0, diffserv4: true },
-                        dns: { fast_dns_enabled: true, adblock_enabled: false, primary_dns: '1.1.1.1', secondary_dns: '8.8.8.8' }
+                        dns: { fast_dns_enabled: true, adblock_enabled: false, smart_ipv6_bonding: true, primary_dns: '1.1.1.1', secondary_dns: '8.8.8.8' }
                     },
                     groups: [],
                     address_lists: [],
